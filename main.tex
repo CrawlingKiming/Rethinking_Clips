@@ -3,6 +3,7 @@
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{booktabs}
+\usepackage{graphicx}
 \usepackage{microtype}
 \usepackage{xcolor}
 \usepackage{enumitem}
@@ -47,16 +48,19 @@ We make coverage quantitative with normalized sequence effective sample size
 $N^{-1}(G_{2,\theta}/\rho_\theta-\|g(\theta)\|_2^2)$, where
 $\rho_\theta=1/\E_Q[W_\theta^2]$ measures concentration of the full-sequence
 likelihood ratio and $G_{2,\theta}$ measures the gradient contributions attached
-to concentrated ratios.  Consequently, an unclipped estimator can remain
-reliable after repeated updates when $N\rho_\theta$ remains large and
-$G_{2,\theta}$ remains controlled.
+to concentrated ratios.  Bounded verifier advantages help control this scale,
+but only together with score-norm control.  For an upper-truncated ratio
+$U_c=\min(W,c)$ and bounded sequence contribution $\|H\|\le H_{\max}$, we prove
+$\operatorname{MSE}(\widehat g_c)\le
+H_{\max}^2\{\tau_c^2+c/N\}$, where
+$\tau_c=\E_Q[(W-c)_+]$ is the bias-relevant tail excess.
 
-This identity separates diagnosis from intervention.  ESS diagnoses
-ratio-driven error, but it does not prove that clipping is preferable.  A
-bounded detached coefficient lowers MSE only when its covariance reduction
-exceeds $N$ times its squared gradient bias.  Clipping is therefore a
-second-stage estimator choice, not the definition of stability.  Whether sample
-ESS can gate practical token-level RLVR objectives remains an empirical question.
+Exact enumeration in a bounded linear contextual bandit validates both the ESS
+identity and the bias--variance crossover.  At the lowest tested ESS, caps 3
+and 5 reduce gradient MSE by $31.6\%$ and $10.6\%$, respectively, while the
+squared bias of cap 5 remains $3.5\times10^{-7}$.  The corresponding adaptive
+reward comparison is inconclusive, so transfer to token-level RLVR remains an
+explicit empirical question.
 \end{abstract}
 
 \section{Introduction}
@@ -132,10 +136,10 @@ while the MSE crossover determines which estimator is better.
 
 The distinction also clarifies the paper's scope.  Our theorems concern a fixed
 learner, a full-sequence change of measure, and a detached modified coefficient.
-A token-local surrogate requires a separate derivation, while a sample ESS gate
-is computed from the same finite batch used for optimization.  The theory
-motivates such a gate but does not validate it.  That gap determines the
-experiments required after the theory is established.
+We next identify conditions that control $G_{2,\theta}$ and derive an explicit
+bias--variance bound for upper ratio truncation.  A finite contextual bandit can
+then test these population statements exactly, while an LLM still requires an
+approximate gradient reference and a matched-state intervention.
 
 \paragraph{Contributions.}
 \begin{enumerate}[leftmargin=*,itemsep=2pt]
@@ -143,8 +147,11 @@ experiments required after the theory is established.
 the unclipped full-sequence policy gradient.
 \item We show exactly when clipping improves gradient MSE: covariance reduction
 must exceed the squared-bias cost at batch size $N$.
-\item We separate the proved estimator statement from the empirical claim that
-sample ESS can gate practical token-level RLVR objectives.
+\item We prove that bounded RLVR advantages control $G_{2,\theta}$ only when the
+score contribution is also controlled, and we bound the MSE of upper ratio
+truncation by its tail excess and cap.
+\item We validate the estimator identities in an exactly enumerable contextual
+bandit and separate that evidence from the unresolved token-level LLM claim.
 \end{enumerate}
 
 The argument begins with an exact change of measure.  This starting point is
@@ -360,6 +367,87 @@ small.  Policy drift or update count alone therefore does not imply estimator
 failure.  Falling ESS instead identifies the regime in which a
 variance-reducing estimator may become worth considering.
 
+The remaining qualifier is the weighted gradient scale.  Advantage bounds are
+useful here, but they cannot control $G_{2,\theta}$ without a corresponding
+condition on the score.
+
+\begin{proposition}[A sufficient bound on $G_{2,\theta}$]
+\label{prop:g2-bound}
+If $|A|\le B_A$ and $\|S_\theta\|_2\le B_S$ almost surely under $Q$, then
+\begin{equation}
+  G_{2,\theta}\le B_A^2B_S^2.
+  \label{eq:g2-bound}
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+Since $H_\theta=A S_\theta$, substitute its squared norm into
+\eqref{eq:gradient-scale} and apply one bound per line:
+\begin{align}
+  G_{2,\theta}
+  &=\frac{\E_Q[W_\theta^2 A^2\|S_\theta\|_2^2]}
+          {\E_Q[W_\theta^2]}
+    \label{eq:g2-proof-1}\\
+  &\le B_A^2
+    \frac{\E_Q[W_\theta^2\|S_\theta\|_2^2]}
+         {\E_Q[W_\theta^2]}
+    \label{eq:g2-proof-2}\\
+  &\le B_A^2B_S^2.
+    \label{eq:g2-proof-3}
+\end{align}
+Equation~\eqref{eq:g2-proof-2} uses $A^2\le B_A^2$.  Equation
+\eqref{eq:g2-proof-3} uses $\|S_\theta\|_2^2\le B_S^2$ under the same
+nonnegative weight $W_\theta^2$, then cancels $\E_Q[W_\theta^2]$.
+\end{proof}
+
+The advantage side is favorable in common RLVR constructions.  If the verifier
+reward is binary and a prompt-only baseline satisfies $b(X)\in[0,1]$, then
+$|A|=|R-b(X)|\le1$.  Outcome-level GRPO instead standardizes rewards within a
+group of $K$ responses \citep{shao2024deepseekmath}.  Its standardized
+advantages also have a deterministic finite-group bound whenever their sample
+variance is nonzero.
+
+\begin{proposition}[Magnitude of a standardized group advantage]
+\label{prop:grpo-bound}
+Let $d_i=r_i-\bar r$, let $v=K^{-1}\sum_{j=1}^K d_j^2>0$, and let
+$A_i=d_i/\sqrt v$.  Then $|A_i|\le\sqrt{K-1}$ for every $i$.
+\end{proposition}
+
+\begin{proof}
+The centered deviations satisfy $d_i=-\sum_{j\ne i}d_j$.  Therefore,
+\begin{align}
+  d_i^2
+  &=\left(\sum_{j\ne i}d_j\right)^2
+    \label{eq:grpo-proof-1}\\
+  &\le (K-1)\sum_{j\ne i}d_j^2
+    \label{eq:grpo-proof-2}\\
+  &=(K-1)\left(\sum_{j=1}^K d_j^2-d_i^2\right).
+    \label{eq:grpo-proof-3}
+\end{align}
+Equation~\eqref{eq:grpo-proof-1} uses the zero-sum identity for centered
+deviations.  Equation~\eqref{eq:grpo-proof-2} is Cauchy--Schwarz, and
+\eqref{eq:grpo-proof-3} restores the omitted term.  Rearranging gives
+\begin{align}
+  Kd_i^2
+  &\le (K-1)\sum_{j=1}^K d_j^2
+    \label{eq:grpo-proof-4}\\
+  \frac{d_i^2}{v}
+  &\le K-1,
+    \label{eq:grpo-proof-5}
+\end{align}
+where the second line uses $Kv=\sum_jd_j^2$.  Taking square roots proves the
+claim.  Adding a positive stabilizer to the denominator can only decrease the
+magnitude.
+\end{proof}
+
+These bounds isolate what advantage normalization can and cannot establish.
+They control the advantage factor, while a bound or empirical estimate of the
+score factor remains necessary.  Moreover, group normalization couples the $K$
+responses, so \Cref{thm:raw-mse} does not apply response by response without a
+group-level sampling analysis.  The binary-reward, prompt-baseline case obeys
+the theorem directly; the GRPO bound supplies scale information rather than an
+i.i.d. justification.
+
 \begin{remark}[Pointwise scope]
 The expectation is over a fresh batch at fixed $\theta$.  During same-batch
 optimization, $\theta$ depends on the reused data.  Extending
@@ -468,7 +556,86 @@ The left side is negative exactly when the covariance reduction exceeds
 $N\|b_U\|_2^2$, which is \eqref{eq:crossover}.
 \end{proof}
 
-The two theorems produce a conditional conclusion.  When $G_{2,\theta}$ is
+The exact crossover still contains estimator-specific moments.  One-sided
+upper truncation makes those moments interpretable.  For $c>0$, define
+\begin{equation}
+  U_c:=\min(W_\theta,c),
+  \qquad
+  T_c:=(W_\theta-c)_+,
+  \qquad
+  \tau_c:=\E_Q[T_c].
+  \label{eq:upper-truncation}
+\end{equation}
+The cap changes only ratios above $c$, while $\tau_c$ measures how much target
+mass those changes remove.
+
+\begin{corollary}[Bias and MSE of upper ratio truncation]
+\label{cor:upper-truncation}
+Suppose $\|H_\theta\|_2\le H_{\max}$ almost surely.  The detached estimator
+$\widehat g_c=N^{-1}\sum_i U_{c,i}H_{\theta,i}$ satisfies
+\begin{align}
+  b_c&=-\E_Q[T_cH_\theta],
+  &\|b_c\|_2&\le H_{\max}\tau_c,
+  \label{eq:cap-bias}\\
+  \operatorname{MSE}(\widehat g_c)
+  &\le H_{\max}^2\left(\tau_c^2+\frac{c}{N}\right).
+  \label{eq:cap-mse-bound}
+\end{align}
+\end{corollary}
+
+\begin{proof}
+The coefficient difference is $U_c-W_\theta=-T_c$.  Substitution into
+\eqref{eq:bias-covariance} gives
+\begin{align}
+  b_c
+  &=\E_Q[(U_c-W_\theta)H_\theta]
+    \label{eq:cap-proof-1}\\
+  &=-\E_Q[T_cH_\theta].
+    \label{eq:cap-proof-2}
+\end{align}
+The triangle inequality and the bound on $H_\theta$ then give
+\begin{align}
+  \|b_c\|_2
+  &\le\E_Q[T_c\|H_\theta\|_2]
+    \label{eq:cap-proof-3}\\
+  &\le H_{\max}\E_Q[T_c]
+    \label{eq:cap-proof-4}\\
+  &=H_{\max}\tau_c.
+    \label{eq:cap-proof-5}
+\end{align}
+For the covariance term, use the trace identity and remove its nonnegative
+mean-squared term:
+\begin{align}
+  \operatorname{tr}\{\Cov_Q(U_cH_\theta)\}
+  &=\E_Q[U_c^2\|H_\theta\|_2^2]
+    -\|\E_Q[U_cH_\theta]\|_2^2
+    \label{eq:cap-proof-6}\\
+  &\le H_{\max}^2\E_Q[U_c^2]
+    \label{eq:cap-proof-7}\\
+  &\le cH_{\max}^2\E_Q[W_\theta]
+    \label{eq:cap-proof-8}\\
+  &=cH_{\max}^2.
+    \label{eq:cap-proof-9}
+\end{align}
+Equation~\eqref{eq:cap-proof-7} uses the bound on $H_\theta$.
+Equation~\eqref{eq:cap-proof-8} uses $U_c^2\le cW_\theta$, which holds both
+when $W_\theta\le c$ and when $W_\theta>c$.  The final line uses
+$\E_Q[W_\theta]=1$.  Combining \eqref{eq:two-risks},
+\eqref{eq:cap-proof-5}, and \eqref{eq:cap-proof-9} proves
+\eqref{eq:cap-mse-bound}.
+\end{proof}
+
+The bound explains why a moderately large cap can be useful.  It replaces the
+raw second-moment dependence by $c/N$, while its bias is small when the tail
+excess $\tau_c$ is small.  Caps such as 3 or 5 are therefore candidates to test,
+not universal constants.  Truncated importance ratios also appear in ACER with
+bias correction \citep{wang2017acer} and in the V-trace correction used by
+IMPALA \citep{espeholt2018impala}; recent LLM methods likewise control extreme
+weight moments \citep{zheng2025m2po,fakoor2026p3o}.  These precedents motivate
+the intervention, while \Cref{cor:upper-truncation} states the bias quantity that
+must be measured for this estimator.
+
+The ESS identity and crossover produce a conditional conclusion.  When $G_{2,\theta}$ is
 controlled, high ESS keeps the raw ratio-driven error small and leaves little
 variance for clipping to remove.  Falling ESS enlarges the ratio second moment
 and can make variance reduction worth its bias.  But ESS cannot determine the
@@ -574,77 +741,126 @@ already adapt updates using ESS, weight moments, or sequence reshaping
 empirical question is whether their relevant regime change coincides with the
 gradient-MSE crossover in \eqref{eq:crossover}.
 
-\paragraph{Practical rule to be completed.}
+\paragraph{Candidate rule.}
 \begin{itemize}[leftmargin=*,itemsep=2pt]
-\item Aggressive objective: \textbf{[TO BE FILLED]}.
-\item Conservative objective, detach convention, and coefficient range:
-\textbf{[TO BE FILLED]}.
-\item Threshold-calibration rule: \textbf{[TO BE FILLED]}.
+\item Aggressive estimator: use the detached raw sequence ratio $W_i$ in
+\eqref{eq:raw-estimator}.
+\item Conservative estimator: replace $W_i$ by the detached coefficient
+$\min(W_i,c)$, with $c\in\{3,5\}$ treated as a calibration choice.
+\item Calibration: choose a gate on held-out runs by locating the measured MSE
+crossover, then monitor raw $\widehat\rho$, estimated tail excess, and a
+weighted score-scale proxy.  Freeze both the threshold and cap before transfer.
 \end{itemize}
 
-These unresolved choices determine the three experiments needed to evaluate the
-gate rather than assume it works.
+The rule makes the estimator choice reproducible without claiming a universal
+ESS threshold.  The controlled study below tests the identities that motivate
+it before considering an LLM-scale gate.
 
-\section{Minimal empirical tests}
+\section{Controlled contextual-bandit validation}
 \label{sec:experiments}
 
-\noindent\fbox{\begin{minipage}{0.94\linewidth}
-\textbf{Draft status.} No empirical result is claimed.  The following slots
-state the evidence required to test the theoretical bridge.
-\end{minipage}}
+\paragraph{Testbed and protocol.}
+We use a linear contextual bandit, a canonical controlled testbed for contextual
+learning \citep{chu2011contextual}.  The environment contains 96 fixed contexts,
+8 actions, and 6 features.  Every context has norm at most one, and each
+Bernoulli reward mean is $0.5+0.4x^\top\beta_a\in[0.1,0.9]$.  A softmax behavior
+policy generates batches of $N=32$, while a target-policy path increases
+coverage mismatch.  Because both sets are finite, we enumerate $\rho_\theta$,
+$G_{2,\theta}$, the population gradient, bias, covariance, and MSE exactly.
+We evaluate the raw estimator and upper caps 3 and 5 at 19 target policies.  The
+released script fixes all seeds and regenerates every reported number and plot.
 
-The tests form a sequence.  The first checks the exact estimator identity, the
-second asks whether the identity predicts an actual update, and the third tests
-whether a calibrated gate transfers beyond the runs used to choose it.
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/contextual_bandit_ess.pdf}
+  \caption{Controlled contextual-bandit results.  Panel (a) reports exactly
+  enumerated gradient MSE.  Panel (b) separates squared bias from variance over
+  $N$ for caps 3 and 5.  Panel (c) reports the probability that population
+  reward decreases after eight updates on the same sampled batch; bands are
+  pointwise 95\% intervals over 2,000 paired batches.}
+  \label{fig:bandit}
+\end{figure}
 
-\paragraph{Test 1: direct estimator MSE.}
-At fixed $(Q,\theta)$, resample independent rollout batches and estimate
-$\operatorname{MSE}(\widehat g_W)$,
-$\operatorname{MSE}(\widehat g_U)$, $\|b_U\|^2$, and the two covariance traces.
-Plot their difference against raw sequence ESS and test
-\eqref{eq:crossover}.  \textbf{Results: [TO BE FILLED].}  If the identity holds,
-the next test asks whether lower MSE also predicts a better update.
+\begin{table}[t]
+\centering
+\small
+\caption{Exact estimator risk at representative target policies.  Bias columns
+report squared gradient bias.}
+\label{tab:bandit-risk}
+\begingroup
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{rrrrrrr}
+\toprule
+$\rho$ & $N\rho$ & Raw MSE & Cap 3 MSE & Cap 5 MSE & Bias$^2_3$ & Bias$^2_5$ \\
+\midrule
+1.000 & 32.00 & $6.362\!\times\!10^{-3}$ & $6.362\!\times\!10^{-3}$ & $6.362\!\times\!10^{-3}$ & 0 & 0 \\
+0.487 & 15.60 & $7.459\!\times\!10^{-3}$ & $6.650\!\times\!10^{-3}$ & $7.383\!\times\!10^{-3}$ & $1.606\!\times\!10^{-6}$ & $6.006\!\times\!10^{-8}$ \\
+0.273 & 8.74 & $6.958\!\times\!10^{-3}$ & $4.758\!\times\!10^{-3}$ & $6.224\!\times\!10^{-3}$ & $5.175\!\times\!10^{-6}$ & $3.453\!\times\!10^{-7}$ \\
+\bottomrule
+\end{tabular}
+\endgroup
+\end{table}
 
-\paragraph{Test 2: matched-state intervention.}
-At identical model, rollout batch, and optimizer state, fork the next updates
-between the aggressive and conservative objectives.  Measure fresh-rollout
-reward, held-out accuracy, gradient spikes, policy movement, and collapse.
-This tests whether estimator MSE predicts the practical update ranking.
-\textbf{Results: [TO BE FILLED].}  A matched-state association would then
-motivate testing whether one calibrated threshold transfers.
+\paragraph{Exact estimator results.}
+The raw-MSE expression in \eqref{eq:ess-bridge} matches direct covariance
+enumeration to a maximum absolute error of $1.74\times10^{-18}$.  As coverage
+falls, caps 3 and 5 become preferable at different points because their
+variance reductions and bias costs differ.  At $\rho=0.273$, cap 3 reduces MSE
+by $31.6\%$ and cap 5 reduces it by $10.6\%$.  The squared bias of cap 5 is only
+$3.45\times10^{-7}$, consistent with the tail-excess argument in
+\Cref{cor:upper-truncation}.  Raw MSE is not monotone in ESS along this path
+because $G_{2,\theta}$ also decreases.  This behavior validates the paper's
+central qualification: ESS governs ratio concentration, but $G_{2,\theta}$
+determines how that concentration enters the gradient.
 
-\paragraph{Test 3: calibration and transfer.}
-Select the ESS threshold on calibration runs, then freeze it across held-out
-models, tasks, and batch sizes.  Compare against always-aggressive,
-always-conservative, refresh-on-failure, and the closest adaptive baselines.
-Include split-batch gating to test same-batch selection effects.
-\textbf{Results: [TO BE FILLED].}
+\paragraph{Matched-batch intervention.}
+For each target policy, we also draw 2,000 paired batches, fork identical policy
+states, and reuse each batch for eight raw, cap-3, or cap-5 updates.  At
+$\rho=0.273$, the estimated probabilities of decreasing population reward are
+$0.190$, $0.195$, and $0.192$, respectively, with overlapping intervals in
+\Cref{fig:bandit}.  Mean reward improvements are $0.00800$, $0.00684$, and
+$0.00758$.  Thus the exact MSE crossover is validated, but this multi-step reward
+comparison does not establish that truncation improves the adaptive trajectory.
+That distinction leads directly to the required LLM study.
 
-These tests are the minimum needed to establish the practical claim.  Until they
-are completed, the remaining limitations must stay explicit.
+\paragraph{What remains for LLMs.}
+Exact full-gradient MSE is mathematically well defined for an LLM, but a
+population reference requires an impractically large independent rollout and
+backpropagation budget.  A feasible approximation can compare selected layers
+or random gradient projections against a large fresh-rollout reference.  The
+matched-state intervention is also feasible, but expensive: checkpoint the
+model, optimizer, and batch, fork candidate updates, then evaluate fresh
+rollouts.  These two LLM tests, followed by held-out threshold transfer, remain
+\textbf{[TO BE FILLED]}.  The bandit study validates the estimator mechanism; it
+does not substitute for evidence on token-level RLVR.
 
 \section{Limitations}
 
-The exact results are pointwise in a fixed full-sequence estimator.  They do
-not establish uniform validity along an adaptive same-batch path or exact
-equivalence to token-level RLVR losses.  Moreover, ESS captures weight
+The exact results are pointwise in a fixed full-sequence estimator.  They do not
+establish uniform validity along an adaptive same-batch path or exact
+equivalence to token-level RLVR losses.  The contextual bandit makes population
+moments enumerable, but it does not reproduce autoregressive sequence length,
+token credit assignment, or optimizer state.  Moreover, ESS captures weight
 concentration but not the weighted gradient scale $G_{2,\theta}$, and its sample
-estimate can miss rare target mass.  These limitations are why the MSE and
-matched-state tests above are necessary.  They also delimit the conclusion that
-can be drawn before those results are available.
+estimate can miss rare target mass.  These limitations explain why the
+matched-state LLM experiment must precede any deployment claim.
 
 \section{Conclusion}
 
 An unclipped update is not intrinsically unstable.  Its ratio-driven reliability is
 governed by whether the rollout batch still covers the updated policy.  For the
 exact full-sequence gradient, sequence ESS makes this statement quantitative:
-its leading second-moment term is $G_{2,\theta}/(N\rho_\theta)$.  Clipping becomes useful
-only when the covariance it removes exceeds the squared bias it introduces.
-The resulting theory replaces a binary clipping intuition with a cumulative
-chain: policy drift changes sequence weights, sequence ESS measures their
-concentration, concentration governs raw estimator error, and that error
-determines when a clipping comparison is warranted.  Establishing that this
-chain governs practical token-level RLVR remains the empirical task.
+its leading second-moment term is $G_{2,\theta}/(N\rho_\theta)$.  Bounded RLVR
+advantages help control $G_{2,\theta}$ only together with score control.  Once
+ESS falls, upper truncation trades a tail-excess bias against a capped variance,
+and it is preferable only when the covariance reduction exceeds the squared
+bias it introduces.  The contextual-bandit study verifies this estimator
+crossover and also shows that lower gradient MSE need not order an adaptive
+multi-step reward trajectory.  The resulting chain is therefore precise:
+policy drift changes sequence weights, ESS measures their concentration,
+$G_{2,\theta}$ determines how concentration enters gradient error, and the
+bias--variance crossover determines whether a cap is warranted.  Testing that
+chain in token-level RLVR is the next empirical task.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
