@@ -23,12 +23,17 @@ Prioritize first-impression quality (figures/tables/layout), logical flow, and e
 1. Keep one paragraph for one message only.
 2. State the paragraph message in the first sentence.
 3. Make nouns self-contained; define new terms before reusing them.
-4. Maintain sentence-to-sentence flow (cause, contrast, consequence, or refinement).
-5. Iterate with adversarial self-review: read as a skeptical reviewer.
-6. Treat visual quality as core content, not decoration.
-7. Use a clean teaser and pipeline figure.
-8. Use readable, minimal-ink tables.
-9. Keep formatting consistent and tidy.
+4. Make every sentence create the reason to read the next sentence. Use an explicit relation such as cause, contrast, consequence, refinement, or a question answered next.
+5. Make every paragraph create the reason to read the next paragraph. End with the unresolved issue, implication, or transition that the next paragraph develops.
+6. Make every section create the reason to read the next section. End each section by identifying the exact quantity, limitation, or question introduced next.
+7. Never use an em dash. Rewrite with punctuation or a connective that states the logical relation.
+8. Never use `\boxed` in LaTeX. Establish importance through theorem structure and surrounding prose.
+9. For mathematical proofs, show the derivation line by line. Put one substantive equality or inequality step on each line, state the justification for every step, and cite the assumption or prior result used. Do not replace missing algebra with phrases such as "it follows" or "after manipulation."
+10. Iterate with adversarial self-review: read as a skeptical reviewer.
+11. Treat visual quality as core content, not decoration.
+12. Use a clean teaser and pipeline figure when it materially clarifies the contribution.
+13. Use readable, minimal-ink tables.
+14. Keep formatting consistent and tidy.
 
 ## Paragraph Clarity Check (Important)
 
@@ -45,6 +50,7 @@ Use this quick test whenever the user asks whether a paragraph "flows" or is cle
    - Write down the evidence/explanation points under each paragraph.
    - Check mapping: topic sentence -> thesis, and evidence -> topic sentence.
    - Revise or remove any paragraph that cannot be mapped cleanly.
+   - Check the handoff from each sentence to the next, each paragraph to the next, and the section to the following section.
 3. If flow is still weak, add temporary section headers and explicit transition phrases during revision, then remove unnecessary headers before finalizing.
 
 Source reference for this check:
@@ -88,6 +94,7 @@ Use `references/paper-review.md` for the full checklist and workflow.
 5. If a claim cannot be supported by results, weaken or remove the claim.
 6. Before finalizing, append and answer a five-dimension self-review question list, then revise the paper based on unresolved items.
 7. Do not load all section references (Introduction/Abstract/Related Work/Method/Experiments/Conclusion) at once; load only the specific section guide needed for the current edit target.
+8. Before finalizing mathematical writing, audit every proof line by line for direction of inequalities, conditioning, independence, integrability, and the scope of each expectation.
 
 ## Output Contract
 
