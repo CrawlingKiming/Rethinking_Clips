@@ -1,0 +1,1570 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{array}
+\usepackage{bm}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!55!black,
+  citecolor=blue!55!black,
+  urlcolor=blue!55!black
+}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Pp}{\mathbb{P}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\Cov}{\operatorname{Cov}}
+\newcommand{\1}{\mathbf{1}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\KL}{D_{\mathrm{KL}}}
+\newcommand{\TV}{D_{\mathrm{TV}}}
+\newcommand{\Dtwo}{D_2}
+\newcommand{\dtwo}{d_2}
+\newcommand{\chisq}{\chi^2}
+\newcommand{\ess}{\operatorname{ESS}}
+\newcommand{\given}{\,\middle|\,}
+\newcommand{\clip}{\operatorname{clip}}
+\newcommand{\sg}{\operatorname{sg}}
+\newcommand{\method}{\textsc{EssGate}}
+\newcommand{\DeltaJ}{\Delta}
+\newcommand{\rseq}{\rho_{\mathrm{seq}}}
+\newcommand{\rhat}{\widehat\rho_{\mathrm{seq}}}
+\newcommand{\what}{\widehat W}
+\newcommand{\argmax}{\operatorname*{arg\,max}}
+\newcommand{\argmin}{\operatorname*{arg\,min}}
+
+\title{\bf When to Clip in RLVR:\\
+Sequence ESS and the MSE Crossover of Policy-Gradient Estimators}
+\author{Anonymous authors}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Reinforcement learning with verifiable rewards (RLVR) repeatedly reuses a
+batch sampled from a rollout policy while the learner is updated.  This creates
+a clipping paradox.  No-clip and CISPO-style updates preserve more learning
+signal and perform better early in batch reuse, yet the same updates can become
+unstable after full-sequence likelihood ratios concentrate.  Empirically, the
+ranking reverses when normalized raw sequence effective sample size (ESS)
+falls below approximately $0.1$: switching at that point to a conservative
+clipped update prevents collapse and gives the strongest final performance.
+
+We study this transition as a choice between two finite-sample gradient
+estimators.  Differentiating the exact full-sequence importance-sampling
+estimator of policy improvement yields
+\[
+  \widehat g_W(\theta)
+  =\frac1N\sum_{i=1}^N W_{\theta,i}H_{\theta,i},
+  \qquad
+  H_\theta=(R-b(X))\nabla_\theta\log P_\theta(Y\mid X).
+\]
+For fixed $\theta$, this estimator is unbiased, and its exact mean-squared
+error is
+\[
+  m_W(\theta)
+  =\frac1N\left\{
+    \E_Q[W_\theta^2\|H_\theta\|_2^2]-\|g(\theta)\|_2^2
+  \right\}.
+\]
+Sequence ESS isolates the likelihood-ratio contribution because
+$\rho_\theta^{-1}=\E_Q[W_\theta^2]$.  Replacing $W_\theta$ by a bounded
+coefficient $U_\theta$ reduces covariance but introduces the gradient bias
+$b_U=\E_Q[(U_\theta-W_\theta)H_\theta]$.  We obtain the exact estimator
+crossover
+\[
+  m_U<m_W
+  \quad\Longleftrightarrow\quad
+  \operatorname{tr}(\Sigma_W)-\operatorname{tr}(\Sigma_U)
+  >N\|b_U\|_2^2.
+\]
+
+To make this criterion optimization-relevant, we prove a self-contained
+nonconvex result for the ordinary update
+$\theta_{k+1}=\theta_k+\eta\widehat g_k$.  Under $L$-smoothness and
+$\eta\le 1/L$, average stationarity is bounded by an optimization transient
+plus average gradient MSE.  Thus a biased estimator with lower MSE gives a
+tighter standard stationarity guarantee, matching the central mechanism in
+biased stochastic-gradient theory.  We do not claim that MSE universally
+orders policy-learning trajectories; the bridge is deliberately limited to
+this smooth plain-gradient model and is tested for the implemented PPO/CISPO
+objectives through matched-state interventions.  The resulting method uses the
+low-bias update while raw sequence ESS is healthy and activates clipping only
+when its variance reduction becomes worth the bias it introduces.
+\end{abstract}
+
+\section{Introduction}
+
+RLVR algorithms collect responses from a rollout policy and perform several
+PPO-type gradient updates on the same batch.  Reuse is computationally
+essential, but it makes the data progressively stale: after the first update,
+the batch is still distributed according to the rollout policy $Q$, whereas
+the learner is $P_\theta$.  The complete-response likelihood ratio
+\begin{equation}
+  W_\theta(X,Y)
+  =\frac{P_\theta(Y\mid X)}{Q(Y\mid X)}
+  \label{eq:intro-sequence-weight}
+\end{equation}
+therefore becomes increasingly heterogeneous as inner-loop optimization
+continues.  When a small number of responses carry most of the likelihood-ratio
+mass, a large nominal batch can provide only a small effective number of
+sequence-level observations.
+
+Clipping is intended to control this failure mode, but our experiments show
+that it should not be applied uniformly.  While raw normalized sequence ESS is
+healthy, no-clip or CISPO-style updates learn faster than tightly clipped
+objectives.  Clipping at this stage suppresses gradient contributions that are
+rare but useful for reasoning improvement.  Once sequence ESS falls far
+enough, the ordering reverses: aggressive updates become unstable, while a
+conservative clipped update preserves training.  In our experiments the
+transition is well summarized by
+\begin{equation}
+  \widehat\rho_{\mathrm{seq}}
+  =\frac{(\sum_i W_i)^2}{N\sum_iW_i^2}
+  \approx 0.1.
+  \label{eq:intro-threshold}
+\end{equation}
+Starting each rollout batch without clipping and switching only after this
+boundary gives the strongest learning curve and final result.
+
+Two established theories explain different halves of this observation.
+Importance-sampling policy optimization shows that off-policy reuse becomes
+statistically unreliable as the order-two R\'enyi divergence between target
+and behavior distributions grows.  POIS makes this dependence explicit: its
+policy-performance bound contains
+$d_2(P\|Q)/N$, equivalently inverse population ESS, and it optimizes a
+pessimistic importance-weighted objective rather than trusting the raw
+estimate indefinitely \cite{metelli2018pois,metelli2020is}.  This explains why
+sequence ESS is a principled diagnostic of stale-batch reliability, but it does
+not answer when a clipped \emph{policy-gradient estimator} is preferable to an
+unclipped one.
+
+Biased stochastic-gradient theory supplies the second half.  Once clipping is
+introduced, variance alone is no longer the relevant statistical quantity:
+the estimator is biased, so its error relative to the population gradient is
+\begin{equation}
+  \operatorname{MSE}(\widehat g)
+  =\|\E\widehat g-g\|_2^2
+  +\operatorname{tr}\Cov(\widehat g).
+  \label{eq:intro-mse-decomposition}
+\end{equation}
+Driggs et al.\ develop a general biased-gradient framework and show in their
+nonconvex analysis that convergence can depend on estimator bias only through
+a bounded-MSE condition; their Theorem~20 and Remark~21 explicitly identify
+large-bias, small-MSE estimators as potentially preferable to small-bias,
+large-MSE estimators \cite{driggs2022biased}.  Tang gives an RL-specific
+example in which a deliberately biased score-function estimator has much lower
+variance and a better convergence dependence than the corresponding unbiased
+estimator \cite{tang2022biased}.  These results motivate MSE as an
+optimization-relevant risk, not merely a descriptive statistic.
+
+The qualification is equally important.  Uncontrolled bias can create an
+error floor or divergence in smooth SGD \cite{ajalloeian2020biased}; stochastic
+gradient clipping can fail to converge to the true optimum under standard
+noise assumptions \cite{koloskova2023clipping}; and policy-gradient dynamics
+can differ even for estimators with the same mean and variance
+\cite{chung2021baselines}.  We therefore do not use MSE as a universal ranking
+of RL algorithms.  Our claim is narrower and testable: MSE is the correct
+finite-sample error of a possibly biased gradient estimator, and under a
+standard smooth plain-gradient model it enters the stationarity guarantee
+directly.  The practical PPO/CISPO ranking must still be verified by
+controlled interventions.
+
+Our analysis begins from the exact terminal-reward policy-improvement identity
+\begin{equation}
+  J(P_\theta)-J(Q)
+  =\E_Q[(W_\theta-1)(R-b(X))],
+  \label{eq:intro-improvement-identity}
+\end{equation}
+where $b(X)$ is any prompt-only baseline treated as fixed when differentiating.
+Differentiating its empirical version gives the raw full-sequence gradient
+estimator
+\begin{equation}
+  \widehat g_W(\theta)
+  =\frac1N\sum_{i=1}^N W_{\theta,i}H_{\theta,i},
+  \qquad
+  H_\theta=(R-b(X))\nabla_\theta\log P_\theta(Y\mid X).
+  \label{eq:intro-gradient}
+\end{equation}
+For fixed $\theta$, this estimator is unbiased and has exact MSE
+\begin{equation}
+  m_W(\theta)
+  =\frac1N\left\{
+    \E_Q[W_\theta^2\|H_\theta\|_2^2]-\|g(\theta)\|_2^2
+  \right\}.
+  \label{eq:intro-raw-mse}
+\end{equation}
+The exact error depends on both ratio concentration and the gradient
+contributions associated with large ratios.  Sequence ESS isolates the former:
+\begin{equation}
+  \rho_\theta
+  =\frac1{\E_Q[W_\theta^2]}
+  =e^{-D_2(P_\theta\|Q)}.
+  \label{eq:intro-pop-ess}
+\end{equation}
+If the weighted gradient-contribution scale remains controlled, the raw MSE
+grows as $1/(N\rho_\theta)$.
+
+A conservative intervention replaces $W_\theta$ by a bounded coefficient
+$U_\theta$.  The modified estimator has bias
+\begin{equation}
+  b_U(\theta)=\E_Q[(U_\theta-W_\theta)H_\theta]
+  \label{eq:intro-bias}
+\end{equation}
+and covariance $\Sigma_U/N$.  Its MSE is lower than that of the raw estimator
+if and only if
+\begin{equation}
+  \boxed{
+  \operatorname{tr}(\Sigma_W)-\operatorname{tr}(\Sigma_U)
+  >N\|b_U\|_2^2.}
+  \label{eq:intro-crossover}
+\end{equation}
+This is the exact bias--variance crossover behind the gate.  High ESS limits
+the ratio-driven component of raw MSE, so clipping has less variance to remove
+while still changing the gradient.  Low ESS enlarges the raw second-moment
+term, creating a regime in which a bounded estimator can pay for its bias.
+ESS alone does not determine the sign of \eqref{eq:intro-crossover}; the
+empirical threshold $0.1$ is the measured crossing for the studied model,
+batch size, objective, and clipping rule.
+
+Finally, we prove why this estimator comparison is relevant to an actual
+first-order update.  For ordinary stochastic gradient ascent on an
+$L$-smooth objective, with
+$\theta_{k+1}=\theta_k+\eta\widehat g_k$ and $\eta\le 1/L$,
+\begin{equation}
+  \frac1T\sum_{k=0}^{T-1}\E\|\nabla J(\theta_k)\|_2^2
+  \le
+  \frac{2\{J_{\max}-\E J(\theta_0)\}}{\eta T}
+  +\frac1T\sum_{k=0}^{T-1}
+  \E\|\widehat g_k-\nabla J(\theta_k)\|_2^2.
+  \label{eq:intro-stationarity}
+\end{equation}
+Thus gradient MSE is exactly the additive statistical term in this standard
+nonconvex stationarity bound.  The theorem does not analyze Adam exactly and
+does not establish global trajectory dominance; it provides the precise
+optimization bridge needed to interpret \eqref{eq:intro-crossover}.
+
+\paragraph{Contributions.}
+\begin{enumerate}[leftmargin=*,itemsep=3pt]
+\item \textbf{Exact sequence-gradient reliability.}
+We derive the finite full-sequence policy-gradient estimator from the exact
+RLVR policy-improvement identity and compute its MSE.  Sequence ESS factors out
+the likelihood-ratio second moment, while the remaining term records the size
+of the gradient contributions emphasized by those ratios.
+
+\item \textbf{An exact clipping crossover.}
+For any modified sequence coefficient, the clipped estimator is more accurate
+than the raw estimator exactly when covariance reduction exceeds $N$ times
+squared clipping bias.  For upper truncation, we derive an explicit removed-
+tail bias and bounded-variance envelope, connecting the result to classical
+truncated importance sampling \cite{ionides2008truncated}.
+
+\item \textbf{A concrete optimization justification for gradient MSE.}
+We prove a self-contained smooth nonconvex stationarity bound in which average
+gradient MSE is the additive statistical term.  This connects the RLVR
+estimator crossover to the biased-SGD mechanism of Driggs et al., while
+stating the bias and policy-dynamics limitations identified in subsequent
+optimization and policy-gradient theory.
+
+\item \textbf{An ESS-gated policy-gradient rule.}
+We formalize the observed single crossing: the raw low-bias estimator is
+preferred above the sequence-ESS boundary, whereas the bounded estimator is
+preferred below it.  Matched-state experiments directly measure raw MSE,
+clipped bias, covariance reduction, and subsequent policy improvement around
+the threshold.
+\end{enumerate}
+
+\section{Batch reuse and exact sequence-level policy improvement}
+\label{sec:setup}
+
+\subsection{The RLVR inner loop}
+
+Let $X\sim\nu$ be a prompt.  A rollout policy $Q$ generates a complete response
+$Y=(Y_1,\ldots,Y_T)$ and a terminal verifier reward $R=R(X,Y)$.  During one
+outer iteration, the resulting batch
+\begin{equation}
+  \mathcal D=\{(X_i,Y_i,R_i)\}_{i=1}^{N}
+  \label{eq:batch}
+\end{equation}
+is reused for several policy-gradient updates.  The learner after an inner
+update is denoted by $P_\theta$; the behavior distribution of the stored
+responses remains $Q$.
+
+Assume $P_\theta\ll Q$.  The exact full-response likelihood ratio is
+\begin{equation}
+  W_\theta(X,Y)
+  :=\frac{P_\theta(Y\mid X)}{Q(Y\mid X)}
+  =\prod_{t=1}^{T}
+  \frac{p_\theta(Y_t\mid X,Y_{<t})}
+       {q(Y_t\mid X,Y_{<t})}.
+  \label{eq:full-ratio}
+\end{equation}
+Because the prompt distribution is shared,
+\begin{equation}
+  \E_Q[W_\theta\mid X]=1,
+  \qquad
+  \E_Q[W_\theta]=1.
+  \label{eq:mean-one}
+\end{equation}
+Assume throughout that the terminal reward is bounded,
+\begin{equation}
+  0\le R\le R_{\max}<\infty.
+  \label{eq:bounded-reward}
+\end{equation}
+
+\subsection{Population improvement and its finite estimator}
+
+Define
+\begin{equation}
+  J(\theta):=\E_{P_\theta}[R],
+  \qquad
+  \DeltaJ(\theta;Q):=J(\theta)-J(Q).
+  \label{eq:performance}
+\end{equation}
+Let $b(X)$ be any prompt-only baseline that is treated as constant when
+$\theta$ is differentiated, and write
+\begin{equation}
+  A(X,Y):=R(X,Y)-b(X).
+  \label{eq:advantage}
+\end{equation}
+The baseline is introduced only to reduce variance; because it depends on the
+prompt but not on the sampled response, it does not change the population
+policy improvement.
+
+\begin{lemma}[Exact centered policy-improvement identity]
+\label{lem:paired}
+For every $\theta$ with $P_\theta\ll Q$,
+\begin{equation}
+  \boxed{
+  \DeltaJ(\theta;Q)
+  =\E_Q[(W_\theta-1)A].}
+  \label{eq:paired-identity}
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+Change of measure gives $\E_Q[W_\theta R]=\E_{P_\theta}[R]=J(\theta)$.
+Also,
+\begin{align}
+  \E_Q[(W_\theta-1)b(X)]
+  &=\E\!\left[b(X)
+    \{\E_Q[W_\theta\mid X]-1\}\right]=0
+\end{align}
+by \eqref{eq:mean-one}.  Subtracting $\E_Q[R]=J(Q)$ proves the claim.
+\end{proof}
+
+The corresponding finite-batch estimator is
+\begin{equation}
+  \boxed{
+  \widehat\Delta_N(\theta;Q)
+  :=\frac1N\sum_{i=1}^{N}
+  (W_{\theta,i}-1)A_i.}
+  \label{eq:finite-improvement}
+\end{equation}
+For a fixed $\theta$, it is unbiased for \eqref{eq:paired-identity}.  The
+centering by one is useful: at the rollout policy, $P_\theta=Q$, every summand
+is exactly zero.
+
+\subsection{Sequence ESS as second-moment coverage}
+
+Define the exponentiated order-two R\'enyi divergence and normalized population
+sequence ESS by
+\begin{align}
+  d_2(P_\theta\|Q)
+  &:=\E_Q[W_\theta^2]
+    =\exp\{D_2(P_\theta\|Q)\},
+  \label{eq:d2}\\
+  \rho_\theta
+  &:=\frac{(\E_QW_\theta)^2}{\E_QW_\theta^2}
+    =\frac{1}{\E_Q[W_\theta^2]}.
+  \label{eq:rho}
+\end{align}
+Because $\E_QW_\theta=1$,
+\begin{equation}
+  \E_Q[(W_\theta-1)^2]
+  =d_2(P_\theta\|Q)-1
+  =\rho_\theta^{-1}-1.
+  \label{eq:chi-rho}
+\end{equation}
+Thus $\rho_\theta$ measures second-moment coverage of the learner by the
+rollout policy.  It is directional: it asks whether samples from $Q$ can
+represent expectations under $P_\theta$ without concentrating most likelihood-
+ratio mass on a few responses.  This is the same second-moment quantity used
+by POIS: its high-confidence importance-sampling bound scales with
+$d_2(P_\theta\|Q)/N$, and its practical objective penalizes target policies
+whose behavior-policy coverage is poor \cite{metelli2018pois,metelli2020is}.
+Our next step is different: we differentiate the finite estimator and study
+the error of the gradient supplied to the optimizer.
+
+For completeness, the scalar policy-improvement estimator satisfies
+\begin{equation}
+  \Var(\widehat\Delta_N(\theta;Q))
+  \le
+  \frac{\|A\|_\infty^2}{N}
+  (\rho_\theta^{-1}-1).
+  \label{eq:scalar-ess-bound}
+\end{equation}
+The remainder of the paper develops the corresponding result for the gradient
+that is actually used to update the policy.
+
+\section{From the finite estimator to the policy-gradient estimator}
+\label{sec:gradient-theory}
+
+\subsection{Differentiating the empirical policy-improvement objective}
+
+Define the full-response score
+\begin{equation}
+  S_\theta(X,Y)
+  :=\nabla_\theta\log P_\theta(Y\mid X)
+  =\sum_{t=1}^{T}
+  \nabla_\theta\log p_\theta(Y_t\mid X,Y_{<t}).
+  \label{eq:sequence-score}
+\end{equation}
+Since
+\begin{equation}
+  \nabla_\theta W_\theta
+  =W_\theta S_\theta,
+  \label{eq:weight-derivative}
+\end{equation}
+differentiating the population identity gives
+\begin{equation}
+  \boxed{
+  g(\theta)
+  :=\nabla_\theta J(\theta)
+  =\E_Q[W_\theta A S_\theta].}
+  \label{eq:true-gradient}
+\end{equation}
+The rollout return $J(Q)$ is constant in $\theta$, so differentiating policy
+improvement and differentiating $J(\theta)$ give the same gradient.
+
+Differentiating the finite estimator \eqref{eq:finite-improvement} gives
+\begin{equation}
+  \boxed{
+  \widehat g_N(\theta)
+  :=\nabla_\theta\widehat\Delta_N(\theta;Q)
+  =\frac1N\sum_{i=1}^{N}
+  W_{\theta,i}A_iS_{\theta,i}.}
+  \label{eq:raw-gradient}
+\end{equation}
+This is the exact full-sequence importance-weighted policy-gradient estimator.
+No additional optimization abstraction has been introduced: it is simply the
+gradient of the finite policy-improvement estimator.
+
+For concise notation, define the unweighted sequence-gradient contribution
+\begin{equation}
+  H_\theta(X,Y):=A(X,Y)S_\theta(X,Y).
+  \label{eq:H-definition}
+\end{equation}
+Then
+\begin{equation}
+  g(\theta)=\E_Q[W_\theta H_\theta],
+  \qquad
+  \widehat g_N(\theta)=\frac1N\sum_iW_{\theta,i}H_{\theta,i}.
+  \label{eq:g-H}
+\end{equation}
+
+\subsection{Exact finite-sample gradient reliability}
+
+The next result treats $\theta$ as fixed while the $N$ responses are sampled
+independently from $Q$.  This is the standard pointwise statement underlying
+importance-sampling analysis.  Its relation to repeated same-batch adaptation
+is discussed after the theorem.
+
+\begin{theorem}[Exact error of the raw sequence-gradient estimator]
+\label{thm:raw-gradient-error}
+For fixed $\theta$ and independent responses from $Q$,
+\begin{equation}
+  \E[\widehat g_N(\theta)]=g(\theta),
+  \label{eq:gradient-unbiased}
+\end{equation}
+and
+\begin{equation}
+  \boxed{
+  \E\|\widehat g_N(\theta)-g(\theta)\|_2^2
+  =\frac1N\left\{
+  \E_Q[W_\theta^2\|H_\theta\|_2^2]
+  -\|g(\theta)\|_2^2
+  \right\}.}
+  \label{eq:exact-gradient-mse}
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+Unbiasedness follows directly from \eqref{eq:g-H}.  Let
+$Z=W_\theta H_\theta$ and $\mu=\E_QZ=g(\theta)$.  Independence gives
+\begin{align}
+  \E\left\|\frac1N\sum_{i=1}^{N}(Z_i-\mu)\right\|_2^2
+  &=\frac1N\E\|Z-\mu\|_2^2\\
+  &=\frac1N\{\E\|Z\|_2^2-\|\mu\|_2^2\},
+\end{align}
+which is \eqref{eq:exact-gradient-mse}.
+\end{proof}
+
+Equation \eqref{eq:exact-gradient-mse} identifies the exact statistical object:
+\begin{equation}
+  \E_Q[W_\theta^2\|H_\theta\|_2^2].
+  \label{eq:joint-second-moment}
+\end{equation}
+ESS measures the concentration of $W_\theta$, but the gradient error also
+depends on whether large weights coincide with large gradient contributions.
+To make this distinction explicit, define
+\begin{equation}
+  G_{2,\theta}
+  :=\frac{
+    \E_Q[W_\theta^2\|H_\theta\|_2^2]
+  }{
+    \E_Q[W_\theta^2]
+  }.
+  \label{eq:weighted-gradient-scale}
+\end{equation}
+The role of $G_{2,\theta}$ is simple: it is the average squared size of the
+sequence-gradient contribution under the distribution that emphasizes
+responses in proportion to $W_\theta^2$.  It separates gradient magnitude from
+ratio concentration.  Since $\E_QW_\theta^2=\rho_\theta^{-1}$,
+\begin{equation}
+  \boxed{
+  \E\|\widehat g_N-g\|_2^2
+  =\frac1N\left(
+    \frac{G_{2,\theta}}{\rho_\theta}
+    -\|g(\theta)\|_2^2
+  \right)
+  \le\frac{G_{2,\theta}}{N\rho_\theta}.}
+  \label{eq:ess-gradient-exact}
+\end{equation}
+This is the precise sense in which sequence ESS governs raw gradient
+reliability: for a controlled weighted gradient scale, decreasing ESS enlarges
+the squared estimation error as $1/(N\rho_\theta)$.
+
+A simpler worst-case version follows from bounded gradient contributions.
+
+\begin{corollary}[ESS reliability under bounded sequence contributions]
+\label{cor:bounded-gradient}
+If
+\begin{equation}
+  \|H_\theta(X,Y)\|_2\le G_\theta
+  \quad Q\text{-almost surely},
+  \label{eq:H-bound}
+\end{equation}
+then
+\begin{equation}
+  \boxed{
+  \E\|\widehat g_N(\theta)-g(\theta)\|_2^2
+  \le\frac{G_\theta^2}{N\rho_\theta}.}
+  \label{eq:gradient-ess-bound}
+\end{equation}
+Consequently, a sufficient condition for root-mean-squared gradient error at
+most $\varepsilon$ is
+\begin{equation}
+  N\rho_\theta\ge\frac{G_\theta^2}{\varepsilon^2}.
+  \label{eq:reliability-condition}
+\end{equation}
+\end{corollary}
+
+This result gives a direct interpretation to the effective sequence count
+$N\rho_\theta$.  When that count is large relative to the scale of individual
+sequence-gradient contributions, the raw estimator is reliable and there is
+little statistical reason to introduce clipping bias.
+
+\subsection{The additional uncertainty caused by stale-batch reweighting}
+
+Even at $P_\theta=Q$, a policy-gradient estimate has ordinary Monte Carlo
+noise.  To isolate the additional uncertainty introduced by moving away from
+the rollout policy, write
+\begin{equation}
+  W_\theta H_\theta
+  =H_\theta+(W_\theta-1)H_\theta.
+  \label{eq:gradient-decomposition}
+\end{equation}
+The first term is the on-policy contribution.  The second is the correction
+required because the learner no longer equals the rollout policy.
+
+Define
+\begin{equation}
+  \widehat c_N(\theta)
+  :=\frac1N\sum_{i=1}^{N}(W_{\theta,i}-1)H_{\theta,i},
+  \qquad
+  c(\theta):=\E_Q[(W_\theta-1)H_\theta].
+  \label{eq:off-policy-correction}
+\end{equation}
+
+\begin{corollary}[ESS controls additional stale-batch uncertainty]
+\label{cor:off-policy-correction}
+Under \eqref{eq:H-bound},
+\begin{equation}
+  \boxed{
+  \E\|\widehat c_N(\theta)-c(\theta)\|_2^2
+  \le
+  \frac{G_\theta^2}{N}
+  (\rho_\theta^{-1}-1).}
+  \label{eq:off-policy-error}
+\end{equation}
+\end{corollary}
+
+\begin{proof}
+Apply the calculation in \Cref{thm:raw-gradient-error} to the random vector
+$(W_\theta-1)H_\theta$ and use
+\begin{align}
+  \E_Q[(W_\theta-1)^2\|H_\theta\|_2^2]
+  &\le G_\theta^2\E_Q[(W_\theta-1)^2]\\
+  &=G_\theta^2(\rho_\theta^{-1}-1).
+\end{align}
+\end{proof}
+
+Unlike the total gradient error, the bound in \eqref{eq:off-policy-error}
+vanishes exactly at $P_\theta=Q$.  It therefore isolates the worst-case
+additional uncertainty created by repeated reuse of stale rollouts.
+
+\begin{remark}[Pointwise theory and repeated use of the same batch]
+The unbiasedness and expectation statements above hold for a fixed $\theta$
+with respect to a fresh random batch from $Q$.  In the actual inner loop,
+$\theta_k$ is produced using the same batch, so it is statistically dependent
+on that batch.  A fully uniform theorem over the complete neural optimization
+path would require additional complexity or algorithmic-stability control.
+The pointwise theory identifies the exact second-moment mechanism.  The
+forked intervention experiments then test whether the raw ESS measured along
+the adaptive training path predicts the practical optimizer transition.
+\end{remark}
+
+\section{Clipping as a bias--variance intervention}
+\label{sec:clipping}
+
+\subsection{A modified sequence coefficient}
+
+Let $U_\theta=U(W_\theta)\ge0$ be the sequence coefficient used after a
+conservative intervention.  Weight truncation is a classical way to exchange
+importance-sampling bias for lower variance \cite{ionides2008truncated}; POIS
+records the same tradeoff at the policy-performance-estimator level
+\cite{metelli2020is}.  Here we analyze the corresponding vector gradient
+estimator.  An upper cap is the important example,
+\begin{equation}
+  U_\theta=\min\{W_\theta,c\},
+  \qquad c>0.
+  \label{eq:upper-cap}
+\end{equation}
+The modified gradient estimator is
+\begin{equation}
+  \widehat g_{U,N}(\theta)
+  :=\frac1N\sum_{i=1}^{N}U_{\theta,i}H_{\theta,i}.
+  \label{eq:modified-gradient}
+\end{equation}
+Unlike the raw estimator, it is not generally unbiased for $g(\theta)$.  Its
+bias is
+\begin{equation}
+  \boxed{
+  b_U(\theta)
+  :=\E_Q[\widehat g_{U,N}(\theta)]-g(\theta)
+  =\E_Q[(U_\theta-W_\theta)H_\theta].}
+  \label{eq:clipping-bias}
+\end{equation}
+This vector is the gradient signal changed by clipping.  Let
+\begin{equation}
+  \Sigma_W(\theta):=\Cov_Q(W_\theta H_\theta),
+  \qquad
+  \Sigma_U(\theta):=\Cov_Q(U_\theta H_\theta).
+  \label{eq:covariances}
+\end{equation}
+Their traces are the sums of coordinate-wise variances of one sequence
+contribution.
+
+\subsection{The exact crossover}
+
+\begin{theorem}[Exact finite-sample clipping criterion]
+\label{thm:clipping-crossover}
+For fixed $\theta$,
+\begin{align}
+  \E\|\widehat g_N-g\|_2^2
+  &=\frac{1}{N}\operatorname{tr}(\Sigma_W),
+  \label{eq:raw-gradient-risk}\\
+  \E\|\widehat g_{U,N}-g\|_2^2
+  &=\|b_U\|_2^2
+    +\frac{1}{N}\operatorname{tr}(\Sigma_U).
+  \label{eq:modified-gradient-risk}
+\end{align}
+Consequently,
+\begin{equation}
+  \boxed{
+  \E\|\widehat g_{U,N}-g\|_2^2
+  <\E\|\widehat g_N-g\|_2^2
+  \iff
+  \operatorname{tr}(\Sigma_W)-\operatorname{tr}(\Sigma_U)
+  >N\|b_U\|_2^2.}
+  \label{eq:exact-crossover}
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+The raw identity follows from unbiasedness.  For the modified estimator, add
+and subtract its expectation:
+\begin{equation}
+  \widehat g_{U,N}-g
+  =\{\widehat g_{U,N}-\E\widehat g_{U,N}\}+b_U.
+\end{equation}
+The cross term vanishes after expectation, giving
+\eqref{eq:modified-gradient-risk}.  Rearranging the two risks gives
+\eqref{eq:exact-crossover}.
+\end{proof}
+
+This theorem formalizes the proposed story exactly.  Clipping is not justified
+merely because ESS is low or because post-clipping ESS increases.  It is
+justified when the amount of gradient variance removed is larger than the
+squared gradient bias paid at sample size $N$.
+
+\paragraph{High-ESS regime.}
+When $\rho_\theta$ is high, the ratio-concentration component of raw MSE is
+controlled.  If $G_{2,\theta}$ is also stable, the exact raw error in
+\eqref{eq:ess-gradient-exact} is small and clipping has limited covariance to
+remove while still paying $\|b_U\|_2^2$.  This makes the low-bias estimator the
+natural default, but the conclusion depends on the joint gradient moment, not
+on ESS alone.
+
+\paragraph{Low-ESS regime.}
+When $\rho_\theta$ is low, the raw error envelope grows because
+$\E_QW_\theta^2=\rho_\theta^{-1}$.  A bounded coefficient can prevent this
+ratio-driven growth, making the left side of \eqref{eq:exact-crossover} large
+enough to pay the bias.  Low ESS therefore identifies the regime in which
+clipping can become preferable; the exact sign remains an empirical property
+of the chosen estimator and training state.
+
+A necessary condition makes the role of ESS explicit.  Under
+\eqref{eq:H-bound}, if clipping improves squared estimation error, then
+\begin{equation}
+  N\|b_U\|_2^2
+  <\operatorname{tr}(\Sigma_W)
+  \le\E_Q[W_\theta^2\|H_\theta\|_2^2]
+  \le\frac{G_\theta^2}{\rho_\theta}.
+  \label{eq:necessary-low-ess}
+\end{equation}
+Hence a necessary condition is
+\begin{equation}
+  \rho_\theta
+  <\frac{G_\theta^2}{N\|b_U\|_2^2}
+  \quad\text{when }b_U\ne0.
+  \label{eq:necessary-rho}
+\end{equation}
+The boundary depends on batch size and on how much useful gradient signal the
+chosen clipping rule removes; it cannot be universal.
+
+\subsection{A transparent upper-cap envelope}
+
+For $U_\theta=\min\{W_\theta,c\}$, define the removed ratio mass
+\begin{equation}
+  m_c(\theta):=\E_Q[(W_\theta-c)_+].
+  \label{eq:removed-mass}
+\end{equation}
+Under \eqref{eq:H-bound},
+\begin{equation}
+  \|b_c(\theta)\|_2
+  =\left\|\E_Q[(W_\theta-c)_+H_\theta]\right\|_2
+  \le G_\theta m_c(\theta).
+  \label{eq:cap-bias-bound}
+\end{equation}
+The cap also gives a variance bound that no longer depends on the raw ESS.
+Since $0\le U_\theta\le c$, $U_\theta^2\le cU_\theta$, and
+$\E_Q U_\theta\le\E_QW_\theta=1$,
+\begin{equation}
+  \operatorname{tr}(\Sigma_U)
+  \le\E_Q[U_\theta^2\|H_\theta\|_2^2]
+  \le cG_\theta^2.
+  \label{eq:cap-variance-bound}
+\end{equation}
+Therefore,
+\begin{equation}
+  \boxed{
+  \E\|\widehat g_{c,N}-g\|_2^2
+  \le
+  G_\theta^2\left\{
+    m_c(\theta)^2+\frac{c}{N}
+  \right\}.}
+  \label{eq:cap-risk-envelope}
+\end{equation}
+The first term is the bias price for removed tail mass; the second is the
+bounded residual variance.  In contrast, the raw envelope is
+$G_\theta^2/(N\rho_\theta)$.  These two envelopes display the intended regime
+transition, although the exact decision remains \eqref{eq:exact-crossover}
+ because an upper bound need not equal the realized risk.
+
+\subsection{Why gradient MSE is optimization-relevant}
+\label{sec:mse-optimization}
+
+The crossover in \Cref{thm:clipping-crossover} is initially an estimator
+statement.  It says which random vector is closer, in expected squared
+Euclidean distance, to the population gradient.  This is the correct
+statistical comparison once clipping introduces bias: variance alone can be
+made arbitrarily small by shrinking the estimator toward zero, while MSE
+charges both that systematic distortion and the remaining sampling noise.
+
+There is also a concrete optimization reason to study this quantity.  In
+Section~3 of Driggs et al.\ \cite{driggs2022biased}, the error of a biased
+stochastic gradient is explicitly decomposed into squared bias and variance.
+Their nonconvex Theorem~20 controls convergence for estimators satisfying a
+bounded mean-squared error (BMSE) property, and Remark~21 states that bias
+affects that guarantee only through MSE.  This is why their recursively biased
+estimators can outperform estimators with smaller bias but larger total error.
+Tang \cite{tang2022biased} gives a policy-gradient example of the same
+principle: a biased score-function estimator trades vanishing bias for a
+substantial variance reduction and obtains better sample-size dependence in
+meta-RL.
+
+These results do not justify an unconditional statement that lower MSE always
+produces the better RL trajectory.  Ajalloeian and Stich
+\cite{ajalloeian2020biased} show that biased-gradient convergence depends on
+how bias scales with the true gradient and that additive bias creates an
+accuracy floor.  Chung et al.\ \cite{chung2021baselines} construct policy-
+gradient examples in which estimators with the same mean and variance induce
+different learning dynamics because the sampling distribution changes with
+the policy.  Accordingly, our use of MSE is deliberately precise: we show that
+it is the additive estimator-error term in a standard smooth nonconvex
+stationarity bound for the ordinary first-order update used as our theoretical
+model.
+
+Let $\mathcal F_k$ denote the optimization history before iteration $k$, so
+$\theta_k$ is $\mathcal F_k$-measurable.  Consider
+\begin{equation}
+  \theta_{k+1}=\theta_k+\eta\widehat g_k,
+  \label{eq:plain-sgd-update}
+\end{equation}
+where $\widehat g_k$ may be biased.  Define its conditional gradient MSE by
+\begin{equation}
+  m_k
+  :=\E\!\left[
+    \|\widehat g_k-\nabla J(\theta_k)\|_2^2
+    \mid\mathcal F_k
+  \right].
+  \label{eq:iteration-mse}
+\end{equation}
+This is the expected squared error of the vector actually supplied to the
+plain gradient update, conditional on the current training state.
+
+\begin{theorem}[MSE-controlled stationarity for plain stochastic gradient ascent]
+\label{thm:mse-stationarity}
+Assume that $J$ is $L$-smooth and bounded above by $J_{\max}$.  Run
+\eqref{eq:plain-sgd-update} for $T$ iterations with a constant step size
+$0<\eta\le 1/L$.  Then, for any possibly biased stochastic gradient estimators
+$\widehat g_0,\ldots,\widehat g_{T-1}$,
+\begin{equation}
+  \boxed{
+  \frac1T\sum_{k=0}^{T-1}
+  \E\|\nabla J(\theta_k)\|_2^2
+  \le
+  \frac{2\{J_{\max}-\E J(\theta_0)\}}{\eta T}
+  +\frac1T\sum_{k=0}^{T-1}\E[m_k].}
+  \label{eq:mse-stationarity-bound}
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+Write $g_k=\nabla J(\theta_k)$.  $L$-smoothness gives the lower bound
+\begin{equation}
+  J(\theta_{k+1})-J(\theta_k)
+  \ge
+  \eta g_k^\top\widehat g_k
+  -\frac{L\eta^2}{2}\|\widehat g_k\|_2^2.
+  \label{eq:smooth-ascent-step}
+\end{equation}
+Use the identity
+\begin{equation}
+  2g_k^\top\widehat g_k
+  =\|g_k\|_2^2+\|\widehat g_k\|_2^2
+  -\|\widehat g_k-g_k\|_2^2.
+\end{equation}
+Substitution into \eqref{eq:smooth-ascent-step} yields
+\begin{align}
+  J(\theta_{k+1})-J(\theta_k)
+  \ge{}&
+  \frac{\eta}{2}\|g_k\|_2^2
+  +\frac{\eta}{2}(1-L\eta)\|\widehat g_k\|_2^2
+  -\frac{\eta}{2}\|\widehat g_k-g_k\|_2^2\\
+  \ge{}&
+  \frac{\eta}{2}\|g_k\|_2^2
+  -\frac{\eta}{2}\|\widehat g_k-g_k\|_2^2,
+  \label{eq:mse-progress}
+\end{align}
+where the last line uses $\eta\le1/L$.  Take expectations, sum over
+$k=0,\ldots,T-1$, telescope the objective values, and use
+$\E J(\theta_T)\le J_{\max}$.  Rearranging gives
+\eqref{eq:mse-stationarity-bound}.
+\end{proof}
+
+The theorem is the minimal bridge needed by this paper.  For a common step
+size and the same smooth objective, a smaller conditional gradient MSE gives a
+smaller additive statistical term in the stationarity guarantee.  The result
+requires neither unbiasedness nor a separate assumption on the direction of
+the bias because both bias and variance are already charged through $m_k$.
+It is a simpler plain-gradient counterpart of the nonconvex BMSE mechanism in
+Driggs et al.\ \cite{driggs2022biased}, not a replacement for their broader
+finite-sum analysis.
+
+The conclusion is intentionally limited.  It does not prove that two
+estimators with different MSEs generate globally ordered RL trajectories, it
+does not analyze Adam's moment state, and it does not make exploration or
+policy-dependent sampling disappear.  Those limitations are exactly why the
+paper pairs the theorem with direct matched-state measurements of estimator
+MSE and subsequent policy improvement.
+
+\begin{corollary}[The clipping crossover enters the stationarity bound]
+\label{cor:mse-crossover-optimization}
+Suppose that at iteration $k$ the raw and modified estimators satisfy the
+pointwise model of \Cref{thm:clipping-crossover}.  Define
+\begin{align}
+  m_{W,k}
+  &:=\frac1N\operatorname{tr}(\Sigma_{W,k}),
+  \\
+  m_{U,k}
+  &:=\|b_{U,k}\|_2^2
+  +\frac1N\operatorname{tr}(\Sigma_{U,k}).
+  \label{eq:raw-clipped-step-mse}
+\end{align}
+Using the modified estimator at step $k$ gives a smaller additive term in
+\eqref{eq:mse-stationarity-bound} exactly when
+\begin{equation}
+  \operatorname{tr}(\Sigma_{W,k})
+  -\operatorname{tr}(\Sigma_{U,k})
+  >N\|b_{U,k}\|_2^2.
+  \label{eq:optimization-crossover}
+\end{equation}
+\end{corollary}
+
+Thus the estimator criterion is not disconnected from optimization: it is
+exactly the condition under which clipping improves the MSE term in the
+plain-gradient stationarity guarantee.
+
+\subsection{The ESS gate as an empirical single-crossing rule}
+\label{sec:single-crossing}
+
+ESS does not determine $m_{W,k}-m_{U,k}$ by itself.  The exact difference also
+depends on the sequence-gradient contributions and on what the clipping rule
+removes.  Our empirical observation can be stated as a testable
+single-crossing property.
+
+\begin{assumption}[ESS-conditioned MSE crossover]
+\label{ass:single-crossing}
+For the fixed training recipe and the two estimators being compared, there is
+a threshold $\tau\in(0,1)$ such that along the relevant training states,
+\begin{align}
+  \rho_k\ge\tau
+  &\quad\Longrightarrow\quad m_{W,k}\le m_{U,k},
+  \label{eq:single-high}\\
+  \rho_k<\tau
+  &\quad\Longrightarrow\quad m_{U,k}<m_{W,k}.
+  \label{eq:single-low}
+\end{align}
+\end{assumption}
+
+This assumption is not derived from ESS alone.  It is the formal version of the
+observed ranking reversal and must be checked by the estimator diagnostics in
+\Cref{sec:experiments}.  The theory explains why such a crossing is plausible:
+$m_{W,k}$ contains the ratio second moment $\rho_k^{-1}$, whereas a bounded
+coefficient controls the variance of $m_{U,k}$ but pays clipping bias.
+
+Define the gated estimator
+\begin{equation}
+  \widehat g_k^{\mathrm{gate}}
+  =
+  \begin{cases}
+    \widehat g_{W,k}, & \rho_k\ge\tau,\\
+    \widehat g_{U,k}, & \rho_k<\tau.
+  \end{cases}
+  \label{eq:theoretical-gate}
+\end{equation}
+
+\begin{corollary}[Pointwise best two-estimator MSE term under single crossing]
+\label{cor:gated-bound}
+Under \Cref{ass:single-crossing}, the per-step MSE of
+\eqref{eq:theoretical-gate} is
+\begin{equation}
+  m_{\mathrm{gate},k}=\min\{m_{W,k},m_{U,k}\}.
+\end{equation}
+Consequently, \Cref{thm:mse-stationarity} gives
+\begin{equation}
+  \boxed{
+  \frac1T\sum_{k=0}^{T-1}\E\|\nabla J(\theta_k)\|_2^2
+  \le
+  \frac{2\{J_{\max}-\E J(\theta_0)\}}{\eta T}
+  +\frac1T\sum_{k=0}^{T-1}
+  \min\{m_{W,k},m_{U,k}\}.}
+  \label{eq:gated-stationarity}
+\end{equation}
+At every state visited by the gated algorithm, the MSE term is no larger than
+the term obtained by using either counterfactual estimator at that same state.
+This is a pointwise estimator comparison; because different update rules visit
+different future states, it is not by itself a global trajectory-dominance
+theorem.
+\end{corollary}
+
+This corollary gives the clean theoretical interpretation of the empirical
+threshold $0.1$: it estimates the crossing point at which the lower-MSE input
+to the optimizer changes from the raw estimator to the clipped estimator.  The
+threshold is recipe-dependent because both MSE curves depend on batch size,
+model, reward, learning rate, and clipping rule.
+
+\section{From population ESS to the online gate}
+\label{sec:online}
+
+The population quantity $\rho_\theta=1/\E_QW_\theta^2$ is not known during
+training.  POIS likewise replaces population R\'enyi quantities by empirical
+ESS in practical optimization and notes that this substitution is approximate,
+particularly when rare high-weight events are not observed
+\cite{metelli2020is}.  The practical gate uses the raw plug-in statistic
+\begin{equation}
+  \widehat\rho_\theta
+  :=\frac{(\sum_{i=1}^{N}W_{\theta,i})^2}
+  {N\sum_{i=1}^{N}W_{\theta,i}^2}.
+  \label{eq:sample-ess}
+\end{equation}
+The effective sequence count is $N\widehat\rho_\theta$.  The gate must use raw,
+pre-intervention ratios: clipping mechanically homogenizes coefficients and
+can raise post-clipping ESS without restoring the coverage lost by the rollout
+batch.
+
+\subsection{The two-mode controller}
+
+Let $Q_j$ generate rollout batch $j$, and let $P_{j,k}$ be the learner after
+$k$ updates on that batch.  The method begins each fresh batch in an aggressive
+mode and switches once when raw sequence ESS falls below $\tau_\rho$.
+
+\begin{center}
+\fbox{\begin{minipage}{0.92\linewidth}
+\textbf{Algorithm: Sequence-ESS-Gated RLVR} (\method).
+
+\begin{enumerate}[leftmargin=*,itemsep=2pt]
+\item Collect $\mathcal D_j=\{(X_i,Y_i,R_i)\}_{i=1}^{N}$ from $Q_j$.
+Initialize $P_{j,0}=Q_j$ and mode $m_{j,0}=\textsc{Aggressive}$.
+\item For $k=0,1,\ldots,K_j-1$:
+  \begin{enumerate}[leftmargin=*,itemsep=1pt]
+  \item Compute the raw full-sequence ratios
+  $W_{i,j,k}=P_{j,k}(Y_i\mid X_i)/Q_j(Y_i\mid X_i)$ and
+  $\widehat\rho_{j,k}$ from \eqref{eq:sample-ess}.
+  \item If $m_{j,k}=\textsc{Aggressive}$ and
+  $\widehat\rho_{j,k}<\tau_\rho$, set the mode to
+  $\textsc{Conservative}$ for the remainder of the batch.
+  \item In aggressive mode, apply the implemented no-clip or CISPO-style
+  policy-gradient update.  In conservative mode, apply the implemented clipped
+  update [EXACT CONSERVATIVE OBJECTIVE].
+  \end{enumerate}
+\item Collecting fresh rollouts resets the mode to
+$\textsc{Aggressive}$.
+\end{enumerate}
+\end{minipage}}
+\end{center}
+
+The mode is latched because a post-clipping ESS increase is mechanical and does
+not make the old batch on-policy again.  A stricter alternative is to stop
+batch reuse and refresh rollouts after severe ESS failure.
+
+\subsection{Numerically stable computation and auxiliary diagnostics}
+
+Let $\ell_i=\log W_i$ and $a=\max_i\ell_i$.  The normalized ESS is computed
+without forming extreme weights:
+\begin{equation}
+  \widehat\rho
+  =\frac{(\sum_i e^{\ell_i-a})^2}
+  {N\sum_i e^{2(\ell_i-a)}}.
+  \label{eq:stable-ess}
+\end{equation}
+The sample mean ratio
+\begin{equation}
+  \overline W=\frac1N\sum_iW_i,
+  \qquad
+  \log\overline W
+  =\operatorname{logsumexp}(\ell_1,\ldots,\ell_N)-\log N
+  \label{eq:mean-weight}
+\end{equation}
+is useful as an auxiliary diagnostic because population ratios satisfy
+$\E_QW=1$.  Normalized sample ESS alone is scale invariant: if every observed
+weight equals the same small constant, it reports one even though the batch
+has likely missed rare target mass.  We therefore report $\overline W$ and
+$N\widehat\rho$ alongside the primary threshold, without changing the
+headline gate unless an ablation supports doing so.
+
+\section{Relation to practical PPO, GRPO, and CISPO updates}
+\label{sec:practical}
+
+The exact estimator in \eqref{eq:raw-gradient} uses the complete-response ratio
+$W_T$.  Practical LLM policy-gradient methods usually use token-local
+coefficients.  The distinction must remain explicit:
+\begin{equation}
+  r_t=\frac{p_\theta(Y_t\mid X,Y_{<t})}{q(Y_t\mid X,Y_{<t})},
+  \qquad
+  W_t=\prod_{s\le t}r_s,
+  \qquad
+  W_T=\frac{P_\theta(Y\mid X)}{Q(Y\mid X)}.
+  \label{eq:three-ratios}
+\end{equation}
+$W_T$ is the Radon--Nikodym derivative for the terminal response reward.
+A local token ratio is not a full-response change of measure.
+
+CISPO clips detached token coefficients while retaining token gradients
+\cite{minimax2025cispo}; PPO/GRPO clipping changes or zeroes token-level
+contributions; GSPO uses a length-normalized sequence score
+\cite{zheng2025gspo}.  None is algebraically identical to
+\eqref{eq:raw-gradient}.  Therefore the paper makes two distinct claims:
+\begin{enumerate}[leftmargin=*,itemsep=2pt]
+\item \textbf{Exact statistical claim.}  Raw full-sequence ESS controls the
+second-moment reliability of the exact finite-batch sequence-gradient
+estimator, and full-sequence clipping obeys the bias--variance theorem in
+\Cref{thm:clipping-crossover}.
+\item \textbf{Empirical optimizer claim.}  The same raw sequence ESS predicts
+when the implemented no-clip/CISPO update should be replaced by the implemented
+conservative PPO-type update.
+\end{enumerate}
+The second claim requires controlled interventions; it is not presented as an
+algebraic consequence of the first.
+
+This positioning separates our claim from both classical trust-region methods
+and recent adaptive LLM objectives.  TRPO constrains a policy surrogate using a
+KL region, while PPO approximates this idea through token-level ratio clipping
+\cite{schulman2015trpo,schulman2017ppo}; ratio clipping is not itself a literal
+global trust-region guarantee \cite{wang2020truly}.  DPPO instead controls a
+direct policy-distribution divergence \cite{qi2026dppo}.  Among recent LLM
+methods, VESPO continuously reshapes sequence weights
+\cite{shen2026vespo}, P3O adapts token-level control using an ESS statistic
+\cite{fakoor2026p3o}, M2PO controls a second-moment proxy under stale rollouts
+\cite{zheng2025m2po}, and VCPO uses sequence ESS to continuously scale the
+update \cite{huang2026vcpo}.  Our distinction is the estimator crossover: the
+low-bias objective is retained while its sequence-gradient MSE is smaller, and
+the conservative objective is activated only after the measured ordering
+reverses.
+
+For the practical gradients themselves, let $G_i^{\mathrm{free}}$ and
+$G_i^{\mathrm{clip}}$ denote the complete per-response gradient aggregates
+produced by the two implemented losses.  Relative to the mean free-surrogate
+gradient, the generic identity
+\begin{align}
+  &\E\left\|
+  \frac1N\sum_iG_i^{\mathrm{clip}}
+  -\E G_i^{\mathrm{free}}
+  \right\|_2^2
+  \nonumber\\
+  &\qquad=
+  \left\|\E(G_i^{\mathrm{clip}}-G_i^{\mathrm{free}})\right\|_2^2
+  +\frac1N\operatorname{tr}\Cov(G_i^{\mathrm{clip}})
+  \label{eq:practical-bias-variance}
+\end{align}
+still separates clipping bias from sampling variance.  What remains empirical
+is whether raw sequence ESS accurately tracks the covariance increase of the
+practical free surrogate.  The experiments below are designed to test exactly
+that bridge.
+
+\section{Experimental protocol and falsifiable predictions}
+\label{sec:experiments}
+
+The empirical section must establish both the performance result and the
+mechanism.  All methods should use matched rollouts, optimizer steps, batch
+sizes, and compute.
+
+\subsection{Main training comparison}
+
+Compare:
+\begin{enumerate}[leftmargin=*,itemsep=2pt]
+\item always no-clip [EXACT OBJECTIVE];
+\item always CISPO [EXACT COEFFICIENT/RANGE];
+\item always conservative [EXACT CLIPPED OBJECTIVE];
+\item \method with $\tau_\rho=0.1$;
+\item stopping batch reuse and refreshing rollouts after ESS failure;
+\item closest adaptive baselines, including VCPO, M2PO, VESPO, P3O, and DPPO
+where implementations are available.
+\end{enumerate}
+Report reward, held-out reasoning accuracy, raw sequence ESS, effective
+sequence count, mean ratio, clipping rate, gradient norm, KL/TV movement,
+response length, and wall-clock cost.
+
+\subsection{Forked intervention at matched states}
+
+This is the key causal experiment.  At the same model parameters, rollout
+batch, and optimizer state, fork the next updates at states satisfying
+\begin{equation}
+  \widehat\rho\in\{0.5,0.2,0.1,0.05,0.01\}.
+  \label{eq:fork-levels}
+\end{equation}
+Apply the aggressive and conservative objectives for a fixed number of steps.
+Measure fresh-rollout reward improvement, held-out accuracy, gradient and
+optimizer-moment spikes, KL/TV movement, and collapse frequency.  The predicted
+ranking is
+\begin{equation}
+  \text{aggressive better above the boundary, conservative better below it}.
+  \label{eq:ranking-prediction}
+\end{equation}
+
+\subsection{Direct estimator diagnostics}
+
+The theory predicts a crossing of gradient MSE, not merely a change in
+coefficient ESS.  At selected training states, hold $\theta$ and $Q$ fixed,
+resample independent rollout batches, and construct a high-accuracy reference
+gradient from a much larger sample.  Estimate
+\begin{align}
+  m_W,
+  \qquad
+  m_U,
+  \qquad
+  \operatorname{tr}(\Sigma_W)-\operatorname{tr}(\Sigma_U),
+  \qquad
+  \|b_U\|_2^2.
+  \label{eq:direct-estimator-quantities}
+\end{align}
+Plot the signed difference
+\begin{equation}
+  \Delta m(\rho):=m_U-m_W
+  \label{eq:mse-difference}
+\end{equation}
+against raw sequence ESS.  The central prediction is a sign change near the
+gating threshold: $\Delta m>0$ above the boundary and $\Delta m<0$ below it.
+Equivalently, test whether
+\begin{equation}
+  \operatorname{tr}(\Sigma_W)-\operatorname{tr}(\Sigma_U)
+  \approx N\|b_U\|_2^2
+  \label{eq:empirical-crossover}
+\end{equation}
+near $\rho\simeq0.1$.  Then test whether the estimator with smaller MSE also
+produces the better matched-state fork under the same optimizer state.  If the
+full parameter gradient is too large to store, use random projections or
+predeclared layerwise blocks; the projection must be fixed before resampling.
+
+\subsection{Threshold, batch-size, and diagnostic ablations}
+
+Sweep
+\begin{equation}
+  \tau_\rho\in\{0,0.03,0.05,0.1,0.2,0.3,1\},
+  \label{eq:threshold-sweep}
+\end{equation}
+where zero means never switch and one means switch immediately.  Repeat at
+multiple sequence batch sizes.  Since the theoretical reliability scale is
+$N\rho$, a normalized threshold need not transfer unchanged when $N$ varies.
+Compare raw sequence ESS with token ESS, outbound-token fraction, mean ratio,
+KL, entropy, maximum ratio, and gradient norm as predictors of collapse.
+
+\subsection{Reporting the threshold}
+
+State where $0.1$ was selected, whether it was frozen before evaluation on
+other models and tasks, the exact number of independent sequences entering
+ESS, and whether group sampling or shared prompts induce dependence.  Also
+state whether $Q$ in the denominator exactly matches the sampler, including
+temperature, top-$p$/top-$k$, EOS handling, rejection filters, numerical
+precision, and MoE routing.
+
+\section{Limitations and scope}
+\label{sec:limitations}
+
+\paragraph{Fixed-$\theta$ theory versus adaptive batch reuse.}
+The exact expectation and covariance results condition on a fixed learner and
+random data from $Q$.  In the inner loop, the learner depends on the reused
+batch.  Extending the pointwise result uniformly over a neural optimization
+path requires further complexity or stability assumptions.  The present paper
+uses the exact pointwise theory to identify the mechanism and validates the
+adaptive use of ESS experimentally.
+
+\paragraph{ESS is not the complete gradient variance.}
+The exact quantity is
+$\E_Q[W_\theta^2\|H_\theta\|_2^2]$.  ESS isolates
+$\E_QW_\theta^2$ but does not know whether extreme weights coincide with large
+gradient contributions.  This is why direct variance and bias measurements are
+part of the experimental protocol.
+
+\paragraph{Full-sequence theory versus token-local practice.}
+The exact derivation concerns the full-sequence importance-weighted gradient
+and full-sequence capping.  PPO, GRPO, CISPO, and DPPO optimize different
+surrogates.  Their regime reversal is an empirical result rather than a hidden
+algebraic assumption.
+
+\paragraph{Sample ESS and unseen tail mass.}
+The plug-in statistic can miss rare high-weight events.  Mean-ratio and
+effective-count diagnostics help reveal this failure but do not eliminate it.
+
+\paragraph{Sampler correctness and support.}
+$Q$ must be the actual response distribution used to generate the batch.
+Temperature, top-$p$/top-$k$, rejection filters, EOS handling, numerical
+train--inference mismatch, and MoE routing can invalidate the likelihood ratio.
+If $P_\theta$ assigns mass outside the support of $Q$, exact importance
+sampling is unavailable.
+
+\paragraph{Threshold universality.}
+The value $0.1$ is an empirical crossover under a fixed batch size, model,
+learning rate, reward distribution, and conservative objective.  Theory
+predicts dependence on $N$, gradient-contribution scale, clipping bias, and
+variance reduction.  Transfer of the same threshold is an empirical finding,
+not a universal theorem.
+
+\paragraph{Plain-gradient optimization theorem.}
+\Cref{thm:mse-stationarity} analyzes ordinary stochastic gradient ascent with
+a common step size.  It is not an exact analysis of Adam's moment estimates,
+nor does it imply that lower MSE determines exploration or pathwise policy
+dynamics.  Its role is precise: it shows that MSE is an additive term in a
+standard smooth nonconvex stationarity guarantee.
+
+\section{Conclusion}
+
+Repeated rollout-batch reuse in RLVR creates a changing statistical problem.
+The raw full-sequence estimator is initially low bias and effective, but its
+second moment can grow as the learner moves away from the rollout policy.
+Sequence ESS identifies the likelihood-ratio component of this deterioration;
+it does not by itself determine the complete gradient variance, which also
+depends on the gradient contributions attached to large ratios.
+
+Clipping should therefore be evaluated as a change of gradient estimator, not
+as a cost-free safeguard.  Replacing $W_\theta$ by $U_\theta$ introduces the
+bias $b_U=\E_Q[(U_\theta-W_\theta)H_\theta]$ while changing covariance.  The
+exact finite-sample decision is
+\[
+  \operatorname{tr}(\Sigma_W)-\operatorname{tr}(\Sigma_U)
+  >N\|b_U\|_2^2.
+\]
+This criterion is stricter than low raw ESS, high post-clipping ESS, or a large
+outbound-ratio fraction: variance reduction must actually pay for the gradient
+signal removed by clipping.
+
+Gradient MSE is optimization-relevant here for a concrete reason.  Under the
+standard smooth plain-gradient model, average MSE is the additive statistical
+term in the nonconvex stationarity bound.  This is the same mechanism
+identified more generally by biased stochastic-gradient theory, while the
+bias and policy-dynamics literature explains why it is not a universal global
+ordering of RL algorithms.  The theoretical claim is therefore paired with
+direct measurements of raw MSE, clipped bias, covariance reduction, and
+matched-state policy improvement.
+
+The resulting interpretation is an ESS-conditioned estimator crossover.  In
+the healthy regime, the raw estimator's ratio-driven error is controlled and
+clipping needlessly distorts the update.  In the low-ESS regime, a bounded
+estimator can reduce enough covariance to justify its bias.  The observed
+threshold $0.1$ is the empirical crossing for the studied training recipe, not
+a universal constant.  An ESS gate operationalizes this result by retaining
+the low-bias objective until the measured crossover regime is reached and
+activating the conservative objective thereafter.
+
+\appendix
+
+\section{General MDPs and per-decision importance sampling}
+\label{app:mdp}
+
+For a discounted MDP, the performance-difference lemma is
+\begin{equation}
+  J(\pi')-J(\pi)
+  =\frac{1}{1-\gamma}
+  \E_{s\sim d_{\pi'}}
+  \E_{a\sim\pi'(\cdot\mid s)}[A_\pi(s,a)].
+  \label{eq:mdp-pdl}
+\end{equation}
+TRPO replaces $d_{\pi'}$ by $d_\pi$ in a tractable surrogate and controls the
+resulting occupancy residual.  This occupancy argument underlies TRPO
+\cite{schulman2015trpo}.  It is distinct from the finite-sample reliability of
+importance weighting.
+
+If one changes measure on the complete trajectory distribution, the identity
+is exact but the trajectory ratio inherits the horizon problem.  Per-decision
+importance sampling can reduce variance for rewards observed before the end of
+a trajectory \cite{precup2000eligibility,metelli2020is}.  In terminal-reward
+RLVR, direct correction of the terminal reward uses the full-response ratio.
+
+\section{Prompt groups and group-relative advantages}
+\label{app:groups}
+
+If several responses are sampled for one prompt and their advantages share a
+group mean or standard deviation, the responses are statistically coupled.
+The exact main-text derivation applies directly to raw verifier rewards or to a
+prompt-only baseline fixed independently of the response.  For a grouped
+training surrogate, the independent unit is the prompt cluster, not each token
+and not necessarily each response.
+
+Let $G_{jg}$ denote the full per-response gradient aggregate for response $g$
+of prompt $j$, and define the cluster contribution
+\begin{equation}
+  C_j:=\frac1G\sum_{g=1}^{G}G_{jg}.
+  \label{eq:cluster-gradient}
+\end{equation}
+Covariance and concentration should be computed across independent prompt
+clusters $C_1,\ldots,C_M$.  Increasing group size can reduce conditional
+variance within a prompt but does not create $MG$ independent prompts.
+
+\section{Optional finite-variance robustification}
+\label{app:robust}
+
+The main gradient results are second-moment identities rather than high-
+confidence bounds.  If one needs a robust estimate of a scalar projection
+$v^\top g(\theta)$ under only finite variance, median-of-means can be applied
+to the projected sequence contributions
+$v^\top W_\theta H_\theta$.  For a fixed unit vector $v$, this gives error of
+order
+\begin{equation}
+  \sqrt{
+  \frac{
+    \Var_Q(v^\top W_\theta H_\theta)
+    \log(1/\delta)
+  }{N}}
+  \label{eq:robust-projection}
+\end{equation}
+without requiring bounded weights.  A simultaneous vector guarantee requires
+additional dimension or complexity control and is not needed for the central
+bias--variance result.
+
+\section{Notation summary}
+\label{app:notation}
+
+\begin{center}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.24\linewidth}
+                >{\raggedright\arraybackslash}p{0.66\linewidth}}
+\toprule
+Symbol & Meaning \\
+\midrule
+$Q$ & rollout/behavior response distribution \\
+$P_\theta$ & current learner response distribution \\
+$W_\theta=P_\theta(Y\mid X)/Q(Y\mid X)$ & raw full-sequence likelihood ratio \\
+$A=R-b(X)$ & terminal reward minus a prompt-only detached baseline \\
+$S_\theta=\nabla_\theta\log P_\theta(Y\mid X)$ & full-response score \\
+$H_\theta=A S_\theta$ & unweighted per-sequence gradient contribution \\
+$g(\theta)=\E_Q[W_\theta H_\theta]$ & true full-sequence policy gradient \\
+$\widehat g_N$ & raw finite-batch sequence-gradient estimator \\
+$\rho_\theta=1/\E_QW_\theta^2$ & normalized population sequence ESS \\
+$N\rho_\theta$ & population effective sequence count \\
+$G_{2,\theta}$ & squared gradient-contribution scale under $W_\theta^2$ weighting \\
+$U_\theta$ & modified or clipped sequence coefficient \\
+$b_U=\E_Q[(U_\theta-W_\theta)H_\theta]$ & clipping bias in gradient space \\
+$\Sigma_W,\Sigma_U$ & covariance of one raw or modified sequence contribution \\
+$\widehat\rho_\theta$ & raw normalized sample ESS used by the online gate \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{thebibliography}{99}
+
+\bibitem[Ajalloeian and Stich(2020)]{ajalloeian2020biased}
+Ahmad Ajalloeian and Sebastian U. Stich.
+\newblock On the convergence of SGD with biased gradients.
+\newblock arXiv:2008.00051, 2020.
+
+\bibitem[Chung et al.(2021)]{chung2021baselines}
+Wesley Chung, Valentin Thomas, Marlos C. Machado, and Nicolas Le Roux.
+\newblock Beyond variance reduction: Understanding the true impact of baselines
+on policy optimization.
+\newblock In \emph{Proceedings of the 38th International Conference on Machine
+Learning}, volume 139 of PMLR, pages 1999--2009, 2021.
+
+\bibitem[Driggs et al.(2022)]{driggs2022biased}
+Derek Driggs, Jingwei Liang, and Carola-Bibiane Sch\"onlieb.
+\newblock On biased stochastic gradient estimation.
+\newblock \emph{Journal of Machine Learning Research}, 23(24):1--43, 2022.
+
+\bibitem[Koloskova et al.(2023)]{koloskova2023clipping}
+Anastasia Koloskova, Hadrien Hendrikx, and Sebastian U. Stich.
+\newblock Revisiting gradient clipping: Stochastic bias and tight convergence
+guarantees.
+\newblock In \emph{Proceedings of the 40th International Conference on Machine
+Learning}, volume 202 of PMLR, pages 17343--17363, 2023.
+
+\bibitem[Tang(2022)]{tang2022biased}
+Yunhao Tang.
+\newblock Biased gradient estimate with drastic variance reduction for meta
+reinforcement learning.
+\newblock In \emph{Proceedings of the 39th International Conference on Machine
+Learning}, volume 162 of PMLR, pages 21050--21075, 2022.
+
+\bibitem[Agapiou et al.(2017)]{agapiou2017intrinsic}
+Sergios Agapiou, Omiros Papaspiliopoulos, Daniel Sanz-Alonso, and Andrew Stuart.
+\newblock Importance sampling: Intrinsic dimension and computational cost.
+\newblock \emph{Statistical Science}, 32(3):405--431, 2017.
+
+\bibitem[Chatterjee and Diaconis(2018)]{chatterjee2018sample}
+Sourav Chatterjee and Persi Diaconis.
+\newblock The sample size required in importance sampling.
+\newblock \emph{The Annals of Applied Probability}, 28(2):1099--1135, 2018.
+
+\bibitem[Fakoor et al.(2026)]{fakoor2026p3o}
+Rasool Fakoor, Murdock Aubry, Nicholas Stranges, and Alexander J. Smola.
+\newblock Trust the batch, on- or off-policy: Adaptive policy optimization for RL post-training.
+\newblock arXiv:2605.12380, 2026.
+
+\bibitem[Huang et al.(2026)]{huang2026vcpo}
+Luke J. Huang, Zhuoyang Zhang, Qinghao Hu, Shang Yang, and Song Han.
+\newblock Stable asynchrony: Variance-controlled off-policy RL for LLMs.
+\newblock arXiv:2602.17616, 2026.
+
+\bibitem[Ionides(2008)]{ionides2008truncated}
+Edward Ionides.
+\newblock Truncated importance sampling.
+\newblock \emph{Journal of Computational and Graphical Statistics},
+17(2):295--311, 2008.
+
+\bibitem[Metelli et al.(2018)]{metelli2018pois}
+Alberto Maria Metelli, Matteo Papini, Francesco Faccio, and Marcello Restelli.
+\newblock Policy optimization via importance sampling.
+\newblock In \emph{Advances in Neural Information Processing Systems 31}, 2018.
+
+\bibitem[Metelli et al.(2020)]{metelli2020is}
+Alberto Maria Metelli, Matteo Papini, Nico Montali, and Marcello Restelli.
+\newblock Importance sampling techniques for policy optimization.
+\newblock \emph{Journal of Machine Learning Research}, 21(141):1--75, 2020.
+
+\bibitem[MiniMax et al.(2025)]{minimax2025cispo}
+MiniMax et al.
+\newblock MiniMax-M1: Scaling test-time compute efficiently with lightning attention.
+\newblock arXiv:2506.13585, 2025.
+
+\bibitem[Precup et al.(2000)]{precup2000eligibility}
+Doina Precup, Richard Sutton, and Satinder Singh.
+\newblock Eligibility traces for off-policy policy evaluation.
+\newblock In \emph{Proceedings of the 17th International Conference on Machine Learning}, 2000.
+
+\bibitem[Qi et al.(2026)]{qi2026dppo}
+Penghui Qi et al.
+\newblock Rethinking the trust region in LLM reinforcement learning.
+\newblock arXiv:2602.04879, 2026.
+
+\bibitem[Schulman et al.(2015)]{schulman2015trpo}
+John Schulman, Sergey Levine, Pieter Abbeel, Michael Jordan, and Philipp Moritz.
+\newblock Trust region policy optimization.
+\newblock In \emph{Proceedings of the 32nd International Conference on Machine Learning}, 2015.
+
+\bibitem[Schulman et al.(2017)]{schulman2017ppo}
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov.
+\newblock Proximal policy optimization algorithms.
+\newblock arXiv:1707.06347, 2017.
+
+\bibitem[Shen et al.(2026)]{shen2026vespo}
+Guobin Shen, Chenxiao Zhao, Xiang Cheng, Lei Huang, and Xing Yu.
+\newblock VESPO: Variational sequence-level soft policy optimization for stable off-policy LLM training.
+\newblock arXiv:2602.10693, 2026.
+
+\bibitem[Thomas et al.(2015a)]{thomas2015hcope}
+Philip Thomas, Georgios Theocharous, and Mohammad Ghavamzadeh.
+\newblock High-confidence off-policy evaluation.
+\newblock In \emph{Proceedings of the 29th AAAI Conference on Artificial Intelligence}, 2015.
+
+\bibitem[Thomas et al.(2015b)]{thomas2015hcpi}
+Philip Thomas, Georgios Theocharous, and Mohammad Ghavamzadeh.
+\newblock High confidence policy improvement.
+\newblock In \emph{Proceedings of the 32nd International Conference on Machine Learning}, 2015.
+
+\bibitem[Wang et al.(2020)]{wang2020truly}
+Yuhui Wang, Hao He, and Xiaoyang Tan.
+\newblock Truly proximal policy optimization.
+\newblock In \emph{Proceedings of the 35th Conference on Uncertainty in Artificial Intelligence}, 2020.
+
+\bibitem[Zheng et al.(2025a)]{zheng2025gspo}
+Chujie Zheng et al.
+\newblock Group sequence policy optimization.
+\newblock arXiv:2507.18071, 2025.
+
+\bibitem[Zheng et al.(2025b)]{zheng2025m2po}
+Haizhong Zheng, Jiawei Zhao, and Beidi Chen.
+\newblock Prosperity before collapse: How far can off-policy RL reach with stale data on LLMs?
+\newblock arXiv:2510.01161, 2025.
+
+\end{thebibliography}
+
+\end{document}
