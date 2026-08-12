@@ -6,19 +6,20 @@
 - **Diagnostic:** normalized sequence ESS isolates the likelihood-ratio second moment, but not the full gradient error.
 - **Estimator insight:** clipping is beneficial only when covariance reduction exceeds the squared bias penalty.
 - **Optimization bridge:** gradient MSE enters a standard smooth nonconvex stationarity bound.
-- **Operational hypothesis:** use a low-bias update in the healthy-ESS regime and a bounded update after a validated crossover.
+- **Operational hypothesis:** a population-oracle crossover may be approximated by a sample-ESS gate, with explicit selection error.
 - **Validation:** test the MSE crossover and policy-improvement reversal with direct resampling and matched-state forks.
 
 ## Claim--evidence map
 
 | Claim | Evidence in the paper | Status |
 |---|---|---|
-| The raw full-sequence estimator is unbiased at fixed parameter and has the stated exact MSE. | Derivation and finite-sample reliability results in Sections 2--3. | Supported theoretically |
+| The raw full-sequence estimator is unbiased at fixed parameter and has the stated exact MSE. | Pointwise regularity assumption and reliability theorem in the exact-gradient section. | Supported theoretically |
 | Sequence ESS isolates likelihood-ratio concentration but not the entire gradient variance. | Factorization through the order-two likelihood-ratio moment and weighted gradient scale. | Supported theoretically |
-| A bounded estimator has lower MSE exactly at the stated covariance--bias crossover. | Exact MSE decomposition in Section 4. | Supported theoretically |
-| Gradient MSE is optimization-relevant under the stated smooth plain-gradient model. | Nonconvex stationarity theorem in Section 4. | Supported under stated assumptions |
-| An ESS gate improves practical PPO/CISPO training. | Proposed matched-state and training comparisons in Section 7. | Needs experiments |
-| An ESS threshold near 0.1 marks the practical crossover. | Candidate threshold and planned diagnostic sweep in Section 7. | Needs experiments; not universal |
+| A detached bounded estimator has lower MSE exactly at the stated covariance--bias crossover. | Exact bias--variance decomposition and detached-coefficient remark. | Supported theoretically |
+| Gradient MSE is optimization-relevant under the stated smooth plain-gradient model. | Nonconvex stationarity theorem. | Supported under stated assumptions |
+| An independently estimated gate pays an excess risk equal to misclassification probability times the MSE gap. | Independent-pilot gate proposition. | Supported theoretically; does not cover an unsplit gate |
+| An ESS gate improves practical PPO/CISPO training. | Required matched-state and training comparisons. | Needs experiments |
+| An ESS threshold near 0.1 marks the practical crossover. | Candidate point in the planned diagnostic sweep. | Needs experiments; not universal |
 
 ## Five-dimension self-review
 
@@ -30,7 +31,7 @@
 
 ## Remaining rejection risks
 
-- Replace every `[EXACT ...]` placeholder before submission.
+- Replace every `[TO BE FILLED ...]` objective, setup, calibration, and result slot before submission.
 - Add completed experiments with uncertainty estimates and fair compute-matched baselines.
 - Report how the threshold was selected and whether it transfers across models, tasks, and batch sizes.
 - Verify all theorem assumptions against the implemented optimizer and clearly separate plain-SGD theory from Adam-based training.
