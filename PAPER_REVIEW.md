@@ -1,37 +1,43 @@
-# Reviewer-facing revision record
+# Theory-first revision record
 
-## Compact story outline
+## Core story
 
-- **Challenge:** rollout-batch reuse makes RLVR data stale and concentrates full-sequence importance weights.
-- **Diagnostic:** normalized sequence ESS isolates the likelihood-ratio second moment, but not the full gradient error.
-- **Estimator insight:** clipping is beneficial only when covariance reduction exceeds the squared bias penalty.
-- **Optimization bridge:** gradient MSE enters a standard smooth nonconvex stationarity bound.
-- **Operational hypothesis:** a population-oracle crossover may be approximated by a sample-ESS gate, with explicit selection error.
-- **Validation:** test the MSE crossover and policy-improvement reversal with direct resampling and matched-state forks.
+1. Reusing a rollout batch does not make an unclipped update intrinsically unstable.
+2. Policy drift changes full-sequence likelihood ratios; sequence ESS measures their concentration.
+3. For the exact full-sequence gradient, the ratio-driven MSE scales through `1/(N rho)`.
+4. Clipping is useful only when covariance reduction pays for squared gradient bias.
+5. A sample-ESS gate for token-level RLVR is an empirical hypothesis, not a theorem.
+
+## Reverse outline
+
+| Section | Paragraph role | Message |
+|---|---|---|
+| Abstract | challenge | Staleness alone does not imply instability. |
+| Abstract | theory | Sequence ESS links policy coverage to raw gradient MSE. |
+| Abstract | decision | Clipping requires an MSE crossover, not merely low ESS. |
+| Introduction | opening | Replace the stale/not-stale binary with a coverage question. |
+| Introduction | bridge | ESS turns policy drift into effective sequence count. |
+| Introduction | evidence | The exact raw MSE factors through sequence ESS and weighted gradient scale. |
+| Introduction | intervention | Clipping is a bias--variance decision after reliability is diagnosed. |
+| Sections 2--4 | derivation | Build change of measure, raw estimator MSE, ESS factorization, and clipping crossover in order. |
+| Section 5 | scope | Separate the exact full-sequence result from a practical sample-ESS gate. |
+| Section 6 | evidence needed | State only the three experiments required to validate the practical bridge. |
 
 ## Claim--evidence map
 
-| Claim | Evidence in the paper | Status |
+| Claim | Evidence | Status |
 |---|---|---|
-| The raw full-sequence estimator is unbiased at fixed parameter and has the stated exact MSE. | Pointwise regularity assumption and reliability theorem in the exact-gradient section. | Supported theoretically |
-| Sequence ESS isolates likelihood-ratio concentration but not the entire gradient variance. | Factorization through the order-two likelihood-ratio moment and weighted gradient scale. | Supported theoretically |
-| A detached bounded estimator has lower MSE exactly at the stated covariance--bias crossover. | Exact bias--variance decomposition and detached-coefficient remark. | Supported theoretically |
-| Gradient MSE is optimization-relevant under the stated smooth plain-gradient model. | Nonconvex stationarity theorem. | Supported under stated assumptions |
-| An independently estimated gate pays an excess risk equal to misclassification probability times the MSE gap. | Independent-pilot gate proposition. | Supported theoretically; does not cover an unsplit gate |
-| An ESS gate improves practical PPO/CISPO training. | Required matched-state and training comparisons. | Needs experiments |
-| An ESS threshold near 0.1 marks the practical crossover. | Candidate point in the planned diagnostic sweep. | Needs experiments; not universal |
+| Batch reuse does not itself bias the fixed-learner full-sequence estimator. | Exact change-of-measure identity and raw-estimator unbiasedness. | Supported theoretically |
+| Sequence ESS governs the likelihood-ratio contribution to raw gradient error. | Exact MSE factorization in Equation (11). | Supported theoretically, conditional on weighted gradient scale |
+| High ESS can preserve an unclipped estimator after multiple updates. | `MSE <= G_2/(N rho)` at fixed learner. | Supported pointwise; not a uniform adaptive-path theorem |
+| Clipping is preferred exactly at the covariance--bias crossover. | Theorem 2. | Supported theoretically for detached coefficients |
+| Gradient MSE is relevant to optimization. | Smooth-ascent stationarity proposition. | Supported for plain stochastic gradient ascent |
+| Sample ESS gates practical PPO/GRPO/CISPO updates. | Direct MSE, matched-state, and transfer tests. | Needs experiments |
 
-## Five-dimension self-review
+## Self-review
 
-1. **Contribution:** The exact estimator crossover and its optimization bridge are clear; empirical novelty remains contingent on completing the protocol.
-2. **Writing clarity:** The Abstract, Introduction, and Conclusion now distinguish proved results, proposed mechanisms, and empirical hypotheses.
-3. **Experimental strength:** No completed results are currently included; claims of superior learning curves or final performance must wait for measured evidence.
-4. **Evaluation completeness:** The protocol includes main comparisons, matched-state forks, direct MSE diagnostics, and threshold/batch-size ablations; implementation placeholders must be resolved.
-5. **Method soundness:** ESS is correctly treated as a partial diagnostic rather than a sufficient decision statistic; transfer of any fixed threshold remains a stated limitation.
-
-## Remaining rejection risks
-
-- Replace every `[TO BE FILLED ...]` objective, setup, calibration, and result slot before submission.
-- Add completed experiments with uncertainty estimates and fair compute-matched baselines.
-- Report how the threshold was selected and whether it transfers across models, tasks, and batch sizes.
-- Verify all theorem assumptions against the implemented optimizer and clearly separate plain-SGD theory from Adam-based training.
+- **Clarity:** one causal chain is repeated consistently; secondary bounds and appendices were removed.
+- **Flow:** every theory section supplies the next quantity needed by the following section.
+- **Terminology:** `sequence ESS`, `raw estimator`, `modified estimator`, and `MSE crossover` are used consistently.
+- **Unsupported claims:** no empirical crossover, performance gain, or universal threshold is asserted.
+- **Missing evidence:** the practical losses, threshold rule, and three experiment result slots remain intentionally blank.
