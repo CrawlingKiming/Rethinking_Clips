@@ -15,14 +15,15 @@
 | Section | Paragraph role | Message |
 |---|---|---|
 | Abstract | challenge | Staleness alone does not imply instability. |
-| Abstract | theory | Sequence ESS links policy coverage to raw gradient MSE. |
-| Abstract | decision | Upper truncation is governed by its cap and tail excess. |
-| Abstract | evidence | Exact bandit enumeration validates the MSE identity and crossover. |
+| Abstract | insight | Sequence ESS links policy coverage to update reliability. |
+| Abstract | decision | Clipping trades stability against systematic distortion. |
+| Abstract | evidence | A controlled simulation supports the mechanism but not an LLM deployment claim. |
 | Introduction | opening | Reuse creates mismatch, which raises the reliability question. |
-| Introduction | gap | Existing clipping and adaptive methods do not by themselves quantify raw gradient MSE. |
-| Introduction | bridge | ESS turns policy drift into effective sequence count. |
-| Introduction | evidence | The exact raw MSE factors through sequence ESS and weighted gradient scale. |
-| Introduction | intervention | Clipping is a bias--variance decision after reliability is diagnosed. |
+| Introduction | gap | Existing clipping and adaptive methods do not first establish whether the raw update is unreliable. |
+| Introduction | bridge | ESS distinguishes coverage failure from batch age. |
+| Introduction | qualification | Coverage and the influence of individual responses jointly govern reliability. |
+| Introduction | intervention | Clipping is a conditional estimator choice after reliability is diagnosed. |
+| Introduction | evidence | The controlled test validates estimation error but not multi-step reward improvement. |
 | Section 3 | scale | Separate bounded advantages from the additional score-control requirement. |
 | Section 4 | intervention | Derive the clipping crossover and upper-truncation risk bound. |
 | Section 5 | scope | Separate the exact full-sequence result from a practical sample-ESS gate. |
@@ -47,6 +48,7 @@
 ## Self-review
 
 - **Clarity:** the abstract and introduction follow problem, failed proxy, governing quantity, exact bridge, decision rule, and scope.
+- **Notation exposure:** the abstract contains no displayed notation, and the introduction defers every equation and symbol to the theory sections.
 - **Flow:** each sentence advances a stated relation, each paragraph hands off an unresolved quantity, and every theory section supplies the next section's input.
 - **Terminology:** `sequence ESS`, `raw estimator`, `modified estimator`, and `MSE crossover` are used consistently.
 - **Proofs:** every proof now exposes each algebraic step and states the assumption or identity used for that step.

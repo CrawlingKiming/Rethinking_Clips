@@ -36,127 +36,78 @@ Sequence ESS Governs the Reliability of Unclipped Updates}
 \maketitle
 
 \begin{abstract}
-Reinforcement learning with verifiable rewards (RLVR) reuses generated responses
-for several learner updates.  Ratio clipping is commonly treated as necessary
-because an unclipped update is assumed to become unstable once its batch is
-reused.  We show that this inference is not generally valid.  Reuse creates
-distribution mismatch, but finite-sample reliability depends on policy
-coverage, not batch age.
-
-We make coverage quantitative with normalized sequence effective sample size
-(ESS).  For the exact terminal-reward policy gradient, the MSE of the unclipped estimator is
-$N^{-1}(G_{2,\theta}/\rho_\theta-\|g(\theta)\|_2^2)$, where
-$\rho_\theta=1/\E_Q[W_\theta^2]$ measures concentration of the full-sequence
-likelihood ratio and $G_{2,\theta}$ measures the gradient contributions attached
-to concentrated ratios.  Bounded verifier advantages help control this scale,
-but only together with score-norm control.  For an upper-truncated ratio
-$U_c=\min(W,c)$ and bounded sequence contribution $\|H\|\le H_{\max}$, we prove
-$\operatorname{MSE}(\widehat g_c)\le
-H_{\max}^2\{\tau_c^2+c/N\}$, where
-$\tau_c=\E_Q[(W-c)_+]$ is the bias-relevant tail excess.
-
-Exact enumeration in a bounded linear contextual bandit validates both the ESS
-identity and the bias--variance crossover.  At the lowest tested ESS, caps 3
-and 5 reduce gradient MSE by $31.6\%$ and $10.6\%$, respectively, while the
-squared bias of cap 5 remains $3.5\times10^{-7}$.  The corresponding adaptive
-reward comparison is inconclusive, so transfer to token-level RLVR remains an
-explicit empirical question.
+Reinforcement learning with verifiable rewards often reuses generated responses
+for several updates.  Clipping is commonly treated as necessary because reuse
+is assumed to make an unclipped update unstable.  We show that reuse alone does
+not determine reliability.  What matters is whether the reused batch still
+covers the current policy, and sequence effective sample size provides the
+missing bridge from policy drift to update error.  This view also separates
+diagnosis from intervention: clipping is useful only when the stability it gains
+is worth the distortion it introduces.  Exact results in a controlled simulation
+support this account.  Moderate upper caps reduce update error as coverage
+deteriorates, although they do not reliably improve learning over several reused
+updates.  These findings motivate an adaptive clipping rule while leaving its
+validation in language-model training as open work.
 \end{abstract}
 
 \section{Introduction}
 
 RLVR improves data efficiency by taking several policy updates on each batch of
-generated responses.  The responses remain distributed according to a rollout
-policy $Q$, while the learner changes to $P_\theta$.  Reuse therefore creates a
-growing distribution mismatch, and that mismatch raises a precise practical
-question: when does the batch cease to support a reliable update?
+generated responses.  As the policy changes, however, the stored responses
+become less representative of its current behavior.  The central practical
+question is therefore not whether the batch has been reused, but whether it
+still supports a reliable update.
 
 Ratio clipping is the standard answer in PPO-style training
 \citep{schulman2017ppo}.  Its usual justification treats an unclipped update as
 increasingly unstable as the data become stale.  Recent work has questioned the
-ratio itself as a proxy for a trust region \citep{qi2026dppo}, while adaptive
-off-policy methods use ESS or weight moments to regulate stale-data updates
+ratio itself as a measure of harmful policy change \citep{qi2026dppo}, while
+adaptive methods track how concentrated reused data have become
 \citep{zheng2025m2po,huang2026vcpo,fakoor2026p3o}.  These methods expose a
 logically prior question.  Before choosing how to regulate an update, one must
-determine whether the unclipped estimator has actually become unreliable.
+determine whether the unclipped update has actually become unreliable.
 
 Batch age cannot answer that question.  Two batches reused for the same number
-of updates can support very different estimators.  If the learner remains close
-to the rollout policy, then the full-response ratio
-$W_\theta=P_\theta(Y\mid X)/Q(Y\mid X)$ remains nearly uniform and no response
-dominates the update.  If the learner instead concentrates probability on a few
-stored responses, the same nominal batch can contain little effective
-information.  The distribution of $W_\theta$, rather than the update count,
-therefore determines the relevant notion of staleness.
+of updates can differ sharply in how well they represent the current policy.
+One may remain broadly informative, while the other may be dominated by only a
+few responses.  Sequence effective sample size (ESS) captures this difference
+and provides a more meaningful notion of staleness than update count alone.
 
-Sequence effective sample size (ESS) summarizes this distribution.  Its
-normalized population form is
-\begin{equation}
-  \rho_\theta:=\frac{1}{\E_Q[W_\theta^2]}.
-  \label{eq:intro-ess}
-\end{equation}
-Uniform ratios give $\rho_\theta=1$, whereas concentrated ratios drive
-$\rho_\theta$ toward zero.  Thus $N\rho_\theta$ is the effective number of
-sequences through which $Q$ covers $P_\theta$.  To turn this diagnostic into a
-theory of instability, the next step is to connect it to gradient error.
+We show that ESS is the missing theoretical bridge.  For the exact
+update studied here, it connects policy coverage directly to estimation error.
+The result also identifies a necessary qualification: coverage alone is not
+enough because a few responses may still exert unusually large influence.  An
+old batch can therefore remain reliable, while a much newer batch can already
+be poor, depending on these two factors.
 
-We make that connection for the exact terminal-reward policy gradient.  For a
-fixed learner and $N$ independent responses from $Q$, the unclipped estimator
-has MSE
-\begin{equation}
-  \E\|\widehat g_W-g\|_2^2
-  =\frac{1}{N}\left(
-    \frac{G_{2,\theta}}{\rho_\theta}-\|g(\theta)\|_2^2
-  \right),
-  \label{eq:intro-mse}
-\end{equation}
-where $G_{2,\theta}$ measures the squared gradient contributions emphasized by
-$W_\theta^2$.  Equation~\eqref{eq:intro-mse} is the theoretical bridge.  Policy
-drift affects the raw estimator through the ratio concentration isolated by
-$\rho_\theta$, while $G_{2,\theta}$ records which gradient contributions receive
-that weight.  An old batch can therefore remain useful when these quantities
-remain controlled.  Once the raw estimator is quantified, clipping becomes a
-separate estimator-selection problem.
+This diagnosis changes the role of clipping.  Clipping is not what defines a
+stable update.  It limits the influence of extreme responses, but also changes
+the update in a systematic way.  We make this tradeoff explicit and show why a
+moderately high upper cap can remove harmful extremes while otherwise leaving
+the update largely unchanged.  Verifier rewards make this regime especially
+relevant because their signal is naturally bounded.
 
-To analyze that decision, replace $W_\theta$ by a bounded detached coefficient
-$U_\theta$.  The modification can reduce covariance, but it introduces gradient
-bias $b_U$.  The modified estimator has lower MSE exactly when
-\begin{equation}
-  \operatorname{MSE}(\widehat g_U)
-  <\operatorname{MSE}(\widehat g_W)
-  \iff
-  \operatorname{tr}(\Sigma_W)-\operatorname{tr}(\Sigma_U)
-  >N\|b_U\|_2^2.
-  \label{eq:intro-crossover}
-\end{equation}
-Low ESS enlarges the raw second moment and creates room for clipping to help.
-The sign of \eqref{eq:intro-crossover}, however, also depends on what the chosen
-rule removes.  ESS therefore governs when the comparison becomes important,
-while the MSE crossover determines which estimator is better.
-
-The distinction also clarifies the paper's scope.  Our theorems concern a fixed
-learner, a full-sequence change of measure, and a detached modified coefficient.
-We next identify conditions that control $G_{2,\theta}$ and derive an explicit
-bias--variance bound for upper ratio truncation.  A finite contextual bandit can
-then test these population statements exactly, while an LLM still requires an
-approximate gradient reference and a matched-state intervention.
+We test the resulting account in a controlled contextual-bandit simulation where
+all relevant quantities can be computed exactly.  The experiment confirms the
+predicted link between ESS and update error and shows that upper caps of 3 and 5
+become beneficial as coverage deteriorates.  It also reveals the boundary of
+this evidence: lower estimation error does not reliably translate into better
+reward after several updates on the same batch.  The controlled study therefore
+validates the mechanism without claiming that it settles language-model
+training.
 
 \paragraph{Contributions.}
 \begin{enumerate}[leftmargin=*,itemsep=2pt]
-\item We formalize an exact bridge from sequence ESS to the finite-sample MSE of
-the unclipped full-sequence policy gradient.
-\item We show exactly when clipping improves gradient MSE: covariance reduction
-must exceed the squared-bias cost at batch size $N$.
-\item We prove that bounded RLVR advantages control $G_{2,\theta}$ only when the
-score contribution is also controlled, and we bound the MSE of upper ratio
-truncation by its tail excess and cap.
-\item We validate the estimator identities in an exactly enumerable contextual
-bandit and separate that evidence from the unresolved token-level LLM claim.
+\item We identify sequence ESS as the bridge between policy coverage and the
+reliability of an unclipped update.
+\item We characterize when clipping is worth the distortion it introduces and
+explain why moderate upper caps can reduce estimation error.
+\item We validate the mechanism in a controlled contextual bandit and
+state precisely what remains to be tested in language models.
 \end{enumerate}
 
-The argument begins with an exact change of measure.  This starting point is
-necessary because it separates population correctness from the finite-sample
-reliability studied in the following section.
+The next section develops the first link in this argument by separating the
+correctness of batch reuse from the reliability of its finite-sample estimate.
 
 \section{From batch reuse to sequence ESS}
 \label{sec:ess}
