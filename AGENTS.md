@@ -10,3 +10,6 @@
 8. Require citations for related-work claims.
 9. Use concise, reviewer-facing academic prose with one main message per paragraph.
 10. Never change experimental values or reported results without explicit instruction and source evidence.
+11. Use the installed `proofread` skill for report-only language, notation, citation, and consistency audits; do not auto-apply its findings.
+12. Use the installed `latex` skill for local compilation and citation audits once a functioning TeX distribution is available.
+13. Store review artifacts under `reviews/rethinking-clips/<check>/` and append each run to `reviews/INDEX.md`.
