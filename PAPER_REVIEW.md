@@ -28,7 +28,7 @@
 | Section 4 | intervention | Derive the clipping crossover and upper-truncation risk bound. |
 | Section 5 | scope | Separate the exact full-sequence result from a practical sample-ESS gate. |
 | Section 6 | controlled evidence | Validate exact estimator claims and test a matched-batch intervention in a linear contextual bandit. |
-| Sections 7--8 | boundary | State why controlled evidence does not establish the token-level LLM claim. |
+| Sections 7--8 | placeholders | Limitations and conclusion remain intentionally unwritten. |
 
 ## Claim--evidence map
 
@@ -55,4 +55,4 @@
 - **References:** all citations resolve through `references.bib`; no bibliography is embedded in `main.tex`.
 - **Unsupported claims:** no universal cap, universal ESS threshold, or LLM performance gain is asserted.
 - **Controlled evidence:** the simulation code, raw results, and publication-ready figure are tracked in the repository.
-- **Missing evidence:** projected LLM-gradient MSE, matched-state LLM results, and held-out threshold transfer remain intentionally blank.
+- **Missing evidence:** projected LLM-gradient MSE, matched-state LLM results, held-out threshold transfer, limitations, and conclusion remain intentionally blank.

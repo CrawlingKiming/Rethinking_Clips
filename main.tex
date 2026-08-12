@@ -787,31 +787,11 @@ does not substitute for evidence on token-level RLVR.
 
 \section{Limitations}
 
-The exact results are pointwise in a fixed full-sequence estimator.  They do not
-establish uniform validity along an adaptive same-batch path or exact
-equivalence to token-level RLVR losses.  The contextual bandit makes population
-moments enumerable, but it does not reproduce autoregressive sequence length,
-token credit assignment, or optimizer state.  Moreover, ESS captures weight
-concentration but not the weighted gradient scale $G_{2,\theta}$, and its sample
-estimate can miss rare target mass.  These limitations explain why the
-matched-state LLM experiment must precede any deployment claim.
+\noindent\textbf{[TO BE FILLED].}
 
 \section{Conclusion}
 
-An unclipped update is not intrinsically unstable.  Its ratio-driven reliability is
-governed by whether the rollout batch still covers the updated policy.  For the
-exact full-sequence gradient, sequence ESS makes this statement quantitative:
-its leading second-moment term is $G_{2,\theta}/(N\rho_\theta)$.  Bounded RLVR
-advantages help control $G_{2,\theta}$ only together with score control.  Once
-ESS falls, upper truncation trades a tail-excess bias against a capped variance,
-and it is preferable only when the covariance reduction exceeds the squared
-bias it introduces.  The contextual-bandit study verifies this estimator
-crossover and also shows that lower gradient MSE need not order an adaptive
-multi-step reward trajectory.  The resulting chain is therefore precise:
-policy drift changes sequence weights, ESS measures their concentration,
-$G_{2,\theta}$ determines how concentration enters gradient error, and the
-bias--variance crossover determines whether a cap is warranted.  Testing that
-chain in token-level RLVR is the next empirical task.
+\noindent\textbf{[TO BE FILLED].}
 
 \bibliographystyle{plainnat}
 \bibliography{references}
