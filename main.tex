@@ -61,55 +61,35 @@ Sequence ESS and the MSE Crossover of Policy-Gradient Estimators}
 
 \begin{abstract}
 Reinforcement learning with verifiable rewards (RLVR) repeatedly reuses a
-batch sampled from a rollout policy while the learner is updated.  This creates
-a clipping paradox.  No-clip and CISPO-style updates preserve more learning
-signal and perform better early in batch reuse, yet the same updates can become
-unstable after full-sequence likelihood ratios concentrate.  Empirically, the
-ranking reverses when normalized raw sequence effective sample size (ESS)
-falls below approximately $0.1$: switching at that point to a conservative
-clipped update prevents collapse and gives the strongest final performance.
+batch while updating the learner, so the data become progressively stale and
+full-sequence likelihood ratios can concentrate.  Clipping controls this
+concentration, but it also removes gradient signal; consequently, applying it
+throughout batch reuse can be as undesirable as never applying it.  We
+formulate the decision of when to clip as a finite-sample comparison between
+an unbiased importance-weighted policy-gradient estimator and a bounded,
+biased alternative.
 
-We study this transition as a choice between two finite-sample gradient
-estimators.  Differentiating the exact full-sequence importance-sampling
-estimator of policy improvement yields
-\[
-  \widehat g_W(\theta)
-  =\frac1N\sum_{i=1}^N W_{\theta,i}H_{\theta,i},
-  \qquad
-  H_\theta=(R-b(X))\nabla_\theta\log P_\theta(Y\mid X).
-\]
-For fixed $\theta$, this estimator is unbiased, and its exact mean-squared
-error is
-\[
-  m_W(\theta)
-  =\frac1N\left\{
-    \E_Q[W_\theta^2\|H_\theta\|_2^2]-\|g(\theta)\|_2^2
-  \right\}.
-\]
-Sequence ESS isolates the likelihood-ratio contribution because
-$\rho_\theta^{-1}=\E_Q[W_\theta^2]$.  Replacing $W_\theta$ by a bounded
-coefficient $U_\theta$ reduces covariance but introduces the gradient bias
-$b_U=\E_Q[(U_\theta-W_\theta)H_\theta]$.  We obtain the exact estimator
-crossover
-\[
-  m_U<m_W
-  \quad\Longleftrightarrow\quad
-  \operatorname{tr}(\Sigma_W)-\operatorname{tr}(\Sigma_U)
-  >N\|b_U\|_2^2.
-\]
+Starting from the exact terminal-reward policy-improvement identity, we derive
+the raw sequence-gradient estimator and its exact mean-squared error (MSE).
+Normalized sequence effective sample size (ESS) isolates the contribution of
+likelihood-ratio concentration, while a separate weighted gradient scale
+captures how large ratios align with large gradient contributions.  For a
+bounded coefficient $U_\theta$, we show that clipping improves estimator MSE
+if and only if its covariance reduction exceeds $N$ times its squared gradient
+bias.  This exact crossover clarifies both why low ESS can justify clipping
+and why ESS alone cannot determine the preferred estimator.
 
-To make this criterion optimization-relevant, we prove a self-contained
-nonconvex result for the ordinary update
-$\theta_{k+1}=\theta_k+\eta\widehat g_k$.  Under $L$-smoothness and
-$\eta\le 1/L$, average stationarity is bounded by an optimization transient
-plus average gradient MSE.  Thus a biased estimator with lower MSE gives a
-tighter standard stationarity guarantee, matching the central mechanism in
-biased stochastic-gradient theory.  We do not claim that MSE universally
-orders policy-learning trajectories; the bridge is deliberately limited to
-this smooth plain-gradient model and is tested for the implemented PPO/CISPO
-objectives through matched-state interventions.  The resulting method uses the
-low-bias update while raw sequence ESS is healthy and activates clipping only
-when its variance reduction becomes worth the bias it introduces.
+We connect the estimator comparison to optimization through a self-contained
+nonconvex analysis: for ordinary stochastic gradient ascent on an
+$L$-smooth objective, average gradient MSE is the additive statistical term in
+a standard stationarity bound.  This result supports an ESS-gated rule that
+retains the low-bias update while sequence coverage is adequate and activates
+clipping only in the regime where variance reduction can pay for the induced
+bias.  Finally, we give a falsifiable validation protocol based on direct
+estimator resampling and matched-state intervention forks.  The protocol tests
+whether a candidate ESS threshold, such as $0.1$, coincides with both the MSE
+crossover and a reversal in subsequent policy improvement; the threshold is
+not asserted to be universal.
 \end{abstract}
 
 \section{Introduction}
@@ -129,22 +109,21 @@ continues.  When a small number of responses carry most of the likelihood-ratio
 mass, a large nominal batch can provide only a small effective number of
 sequence-level observations.
 
-Clipping is intended to control this failure mode, but our experiments show
-that it should not be applied uniformly.  While raw normalized sequence ESS is
-healthy, no-clip or CISPO-style updates learn faster than tightly clipped
-objectives.  Clipping at this stage suppresses gradient contributions that are
-rare but useful for reasoning improvement.  Once sequence ESS falls far
-enough, the ordering reverses: aggressive updates become unstable, while a
-conservative clipped update preserves training.  In our experiments the
-transition is well summarized by
+The practical question is therefore not whether clipping can control stale
+importance weights, but when its variance reduction is worth the gradient
+signal it removes.  A natural working hypothesis is a single crossing: a
+low-bias no-clip or CISPO-style update should be preferable while normalized
+sequence ESS is healthy, whereas a conservative bounded update may become
+preferable after sequence coverage deteriorates.  We use
 \begin{equation}
   \widehat\rho_{\mathrm{seq}}
   =\frac{(\sum_i W_i)^2}{N\sum_iW_i^2}
-  \approx 0.1.
+  \le 0.1
   \label{eq:intro-threshold}
 \end{equation}
-Starting each rollout batch without clipping and switching only after this
-boundary gives the strongest learning curve and final result.
+as a candidate intervention rule, not as a universal constant.  The central
+empirical question is whether this boundary coincides with a change in both
+gradient-estimator MSE and subsequent policy improvement under matched states.
 
 Two established theories explain different halves of this observation.
 Importance-sampling policy optimization shows that off-policy reuse becomes
@@ -243,7 +222,7 @@ the ratio-driven component of raw MSE, so clipping has less variance to remove
 while still changing the gradient.  Low ESS enlarges the raw second-moment
 term, creating a regime in which a bounded estimator can pay for its bias.
 ESS alone does not determine the sign of \eqref{eq:intro-crossover}; the
-empirical threshold $0.1$ is the measured crossing for the studied model,
+candidate threshold $0.1$ must therefore be validated for each studied model,
 batch size, objective, and clipping rule.
 
 Finally, we prove why this estimator comparison is relevant to an actual
@@ -285,12 +264,12 @@ estimator crossover to the biased-SGD mechanism of Driggs et al., while
 stating the bias and policy-dynamics limitations identified in subsequent
 optimization and policy-gradient theory.
 
-\item \textbf{An ESS-gated policy-gradient rule.}
-We formalize the observed single crossing: the raw low-bias estimator is
-preferred above the sequence-ESS boundary, whereas the bounded estimator is
-preferred below it.  Matched-state experiments directly measure raw MSE,
-clipped bias, covariance reduction, and subsequent policy improvement around
-the threshold.
+\item \textbf{An ESS-gated rule with a falsifiable validation protocol.}
+We turn the estimator crossover into a candidate two-mode controller and
+specify matched-state experiments that directly measure raw MSE, clipping
+bias, covariance reduction, and subsequent policy improvement around the
+threshold.  These measurements distinguish a genuine estimator crossover
+from a merely correlational ESS heuristic.
 \end{enumerate}
 
 \section{Batch reuse and exact sequence-level policy improvement}
@@ -1343,10 +1322,14 @@ The resulting interpretation is an ESS-conditioned estimator crossover.  In
 the healthy regime, the raw estimator's ratio-driven error is controlled and
 clipping needlessly distorts the update.  In the low-ESS regime, a bounded
 estimator can reduce enough covariance to justify its bias.  The observed
-threshold $0.1$ is the empirical crossing for the studied training recipe, not
-a universal constant.  An ESS gate operationalizes this result by retaining
-the low-bias objective until the measured crossover regime is reached and
+threshold must be measured rather than assumed: $0.1$ is a candidate operating
+point for the proposed protocol, not a universal constant or a completed
+empirical finding.  An ESS gate operationalizes the hypothesis by retaining
+the low-bias objective until the validated crossover regime is reached and
 activating the conservative objective thereafter.
+Completing the matched-state resampling study across models, tasks, and batch
+sizes is the necessary next step for turning this estimator-level account into
+a calibrated training rule.
 
 \appendix
 
