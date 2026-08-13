@@ -39,13 +39,15 @@ updates on fixed rollout data.  PPO clipping is commonly treated as necessary
 once the policy moves away from those data, yet elapsed updates do not determine
 whether an unclipped update is reliable.  We show that reliability depends on
 both policy coverage and the influence of the samples that have poor coverage.
-Effective sample size connects these quantities to gradient-estimation error.
-We also show that PPO clipping is advantage-sign gradient masking, not a cap on
-all large importance ratios.  This distinction yields an ESS-guided rule: use
-the unbiased gradient while coverage is sufficient and apply PPO masking after
-coverage deteriorates.  In a controlled contextual bandit, high ESS predicts
-low gradient error, low error predicts better policy updates, and the gated
-method avoids the loss caused by clipping throughout optimization.
+Effective sample size connects these quantities to gradient-estimation error,
+and we prove that lower error gives a stronger guarantee on the next policy
+improvement.  We also show that PPO clipping is advantage-sign gradient
+masking, not a cap on all large importance ratios.  This distinction yields an
+ESS-guided rule: use the unbiased gradient while coverage is sufficient and
+apply PPO masking after coverage deteriorates.  In a controlled contextual
+bandit, high ESS predicts low gradient error, low error predicts better policy
+updates, and the gated method avoids the loss caused by clipping throughout
+optimization.
 Validation in language-model training remains open.
 \end{abstract}
 
@@ -76,8 +78,10 @@ Our main result connects ESS to the mean-squared error of the unclipped
 gradient.  The connection also exposes the required qualification: coverage
 must be considered together with the gradient scale carried by poorly covered
 samples.  Thus stale data can remain reliable, and recent data can already be
-unreliable.  ESS is the bridge from policy coverage to gradient reliability,
-not a complete decision rule by itself.
+unreliable.  We then prove why this estimation result matters for optimization:
+lower gradient error raises a certified lower bound on the expected reward of
+the next policy step.  ESS is therefore the bridge from policy coverage to an
+optimization consequence, not a complete decision rule by itself.
 
 This bridge clarifies what should happen next.  PPO clipping and ratio
 truncation are not the same intervention.  Differentiating the PPO surrogate
@@ -98,8 +102,9 @@ and whether an ESS gate improves fixed-rollout optimization over always clipping
 
 \paragraph{Contributions.}
 \begin{enumerate}
-\item We identify sequence ESS as the bridge between policy coverage and the
-reliability of an unclipped update.
+\item We identify sequence ESS as the bridge from policy coverage to gradient
+error, then prove how that error controls a one-step policy-improvement
+guarantee.
 \item We show that PPO clipping is an advantage-sign gradient mask, distinguish
 it from ratio truncation, and derive the exact risk comparison for each.
 \item We validate the chain from ESS to gradient error, one-step policy
@@ -286,8 +291,143 @@ governs the error contributed by ratio concentration, while $G_{2,\theta}$
 records whether large ratios coincide with large gradient contributions.  When
 $G_{2,\theta}$ is controlled and $N\rho_\theta$ is large, the upper bound remains
 small.  Policy drift or update count alone therefore does not imply estimator
-failure.  Falling ESS instead identifies the regime in which a
-variance-reducing estimator may become worth considering.
+failure.  Gradient error would still be only a statistical diagnostic, however,
+unless it implied a concrete optimization consequence.  The next result makes
+that implication explicit.
+
+\subsection{Why gradient MSE controls policy improvement}
+\label{sec:mse-improvement}
+
+Policy-gradient theory supplies the missing optimization link.  Theorem~7 of
+\citet{papini2022smoothing} states that an $L$-smooth policy objective satisfies
+the following lower bound for any feasible parameter step $d$:
+\begin{equation}
+  J(\theta+d)-J(\theta)
+  \ge g(\theta)^\top d-\frac{L}{2}\|d\|_2^2.
+  \label{eq:smooth-policy-improvement}
+\end{equation}
+That work uses the bound to construct safe policy-gradient schedules.  Broader
+analyses establish convergence from smoothness and gradient second moments
+\citep{yuan2022general}.  Off-policy work also uses gradient MSE to assess
+efficiency \citep{kallus2020efficient}, while biased-gradient theory shows why
+bias and variance must be assessed jointly \citep{driggs2022biased}.  The result below applies
+\eqref{eq:smooth-policy-improvement} directly to the possibly biased update
+directions created by clipping or truncation.
+
+\begin{theorem}[Gradient MSE controls certified policy improvement]
+\label{thm:mse-improvement}
+Fix $\theta$ and let $g=g(\theta)$.  Let $\widehat g$ be any, possibly biased,
+gradient estimator with finite second moment.  Suppose $J$ is $L$-smooth on
+every line segment from $\theta$ to $\theta+\eta\widehat g$, and that these
+updates are feasible.  For $0<\eta\le 1/L$,
+\begin{equation}
+  \E\!\left[J(\theta+\eta\widehat g)-J(\theta)\right]
+  \ge \frac{\eta}{2}
+  \left\{\|g\|_2^2-\E\|\widehat g-g\|_2^2\right\}.
+  \label{eq:mse-improvement}
+\end{equation}
+Consequently, $\E\|\widehat g-g\|_2^2<\|g\|_2^2$ is sufficient for positive
+expected policy improvement.
+\end{theorem}
+
+\begin{proof}
+Apply \eqref{eq:smooth-policy-improvement} with
+$d=\eta\widehat g$ and take expectation:
+\begin{align}
+  &\E\!\left[J(\theta+\eta\widehat g)-J(\theta)\right]
+    \label{eq:mse-improvement-proof-1}\\
+  &\quad\ge
+    \eta\E[g^\top\widehat g]
+    -\frac{L\eta^2}{2}\E\|\widehat g\|_2^2
+    \label{eq:mse-improvement-proof-2}\\
+  &\quad\ge
+    \eta\E[g^\top\widehat g]
+    -\frac{\eta}{2}\E\|\widehat g\|_2^2
+    \label{eq:mse-improvement-proof-3}\\
+  &\quad=
+    \frac{\eta}{2}\E\!\left[
+      2g^\top\widehat g-\|\widehat g\|_2^2
+    \right]
+    \label{eq:mse-improvement-proof-4}\\
+  &\quad=
+    \frac{\eta}{2}\E\!\left[
+      \|g\|_2^2-\|\widehat g-g\|_2^2
+    \right]
+    \label{eq:mse-improvement-proof-5}\\
+  &\quad=
+    \frac{\eta}{2}
+    \left\{\|g\|_2^2-\E\|\widehat g-g\|_2^2\right\}.
+    \label{eq:mse-improvement-proof-6}
+\end{align}
+Equation~\eqref{eq:mse-improvement-proof-2} uses the cited smoothness bound.
+Equation~\eqref{eq:mse-improvement-proof-3} uses $L\eta\le1$ and the
+nonnegativity of $\|\widehat g\|_2^2$.  Equation
+\eqref{eq:mse-improvement-proof-4} collects the two terms under one
+expectation.  Equation~\eqref{eq:mse-improvement-proof-5} uses
+$2g^\top\widehat g-\|\widehat g\|_2^2
+=\|g\|_2^2-\|\widehat g-g\|_2^2$.  The final line moves the deterministic
+quantity $\|g\|_2^2$ outside the expectation.  If the MSE is below
+$\|g\|_2^2$, the right side is positive.
+\end{proof}
+
+This theorem provides a direct, nonasymptotic meaning for low gradient MSE.
+For two estimators used with the same learning rate, reducing MSE by $\delta$
+raises the certified improvement lower bound by $\eta\delta/2$.  This statement
+orders their guarantees, not necessarily their realized improvements, because
+the smoothness lower bound need not be tight.
+
+\begin{corollary}[ESS certificate for an unclipped update]
+\label{cor:ess-improvement}
+Under Theorems~\ref{thm:raw-mse} and \ref{thm:mse-improvement},
+\begin{equation}
+  \E\!\left[J(\theta+\eta\widehat g_W)-J(\theta)\right]
+  \ge \frac{\eta}{2}
+  \left\{
+    \left(1+\frac1N\right)\|g\|_2^2
+    -\frac{G_{2,\theta}}{N\rho_\theta}
+  \right\}.
+  \label{eq:ess-improvement-certificate}
+\end{equation}
+In particular,
+\begin{equation}
+  G_{2,\theta}<(N+1)\rho_\theta\|g\|_2^2
+  \label{eq:positive-ess-update}
+\end{equation}
+is sufficient for positive expected policy improvement.
+\end{corollary}
+
+\begin{proof}
+Substitute the exact MSE from \eqref{eq:ess-factorization} into
+\eqref{eq:mse-improvement}:
+\begin{align}
+  &\E\!\left[J(\theta+\eta\widehat g_W)-J(\theta)\right]
+    \label{eq:ess-improvement-proof-1}\\
+  &\quad\ge\frac{\eta}{2}\left[
+    \|g\|_2^2
+    -\frac1N\left(
+      \frac{G_{2,\theta}}{\rho_\theta}-\|g\|_2^2
+    \right)
+  \right]
+    \label{eq:ess-improvement-proof-2}\\
+  &\quad=\frac{\eta}{2}\left\{
+    \left(1+\frac1N\right)\|g\|_2^2
+    -\frac{G_{2,\theta}}{N\rho_\theta}
+  \right\}.
+    \label{eq:ess-improvement-proof-3}
+\end{align}
+Equation~\eqref{eq:ess-improvement-proof-2} applies
+Theorem~\ref{thm:mse-improvement}; Equation
+\eqref{eq:ess-improvement-proof-3} collects the two gradient-norm terms.  Its
+right side is positive exactly when
+$G_{2,\theta}<(N+1)\rho_\theta\|g\|_2^2$.
+\end{proof}
+
+Corollary~\ref{cor:ess-improvement} closes the theoretical chain.  At fixed
+gradient signal and weighted gradient scale, higher ESS strengthens the
+one-step improvement certificate.  The certificate does not create a universal
+ESS threshold because its boundary also depends on the gradient signal and
+$G_{2,\theta}$.  The remaining task is therefore to show when the latter scale
+is controlled in RLVR.
 
 \subsection{Controlling the weighted gradient scale in RLVR}
 
@@ -521,7 +661,7 @@ Centering the modified estimator at $\mu_C$ now yields
 Equations~\eqref{eq:modified-bias-proof-1}--\eqref{eq:modified-bias-proof-3}
 substitute $g=\E_Q[W_\theta H_\theta]$, use linearity, and invoke the definition
 of $b_C$, respectively.  Equation~\eqref{eq:modified-risk-proof-1} adds and
-subtracts $\mu_U$.  Equation~\eqref{eq:modified-risk-proof-2} expands the
+subtracts $\mu_C$.  Equation~\eqref{eq:modified-risk-proof-2} expands the
 squared norm.  Equation~\eqref{eq:modified-risk-proof-3} uses
 $\E[\widehat g_C-\mu_C]=0$.  Equation~\eqref{eq:modified-risk-proof-4} uses
 independence of the $N$ sampled responses, exactly as in
@@ -557,7 +697,18 @@ Its exact bias is
     \label{eq:ppo-bias-2}
 \end{align}
 Theorem~\ref{thm:crossover} compares the covariance removed by this
-sign-specific mask with its squared bias.
+sign-specific mask with its squared bias.  Combining the theorem with
+Theorem~\ref{thm:mse-improvement}, the difference between the modified and raw
+MSE-based improvement certificates is
+\begin{equation}
+  \frac{\eta}{2}\left\{
+    \operatorname{MSE}(\widehat g_W)
+    -\operatorname{MSE}(\widehat g_C)
+  \right\}.
+  \label{eq:improvement-crossover}
+\end{equation}
+Thus \eqref{eq:crossover} identifies when masking or truncation has the larger
+one-step certificate, not only when it has lower estimator risk.
 
 Ratio truncation is different.  It changes the importance coefficient after
 the gradient form has been specified.  For $c>0$, define
@@ -575,7 +726,7 @@ importance-weight estimator, not the derivative of the PPO surrogate.
 \begin{corollary}[Bias and MSE of upper-ratio truncation]
 \label{cor:upper-truncation}
 Suppose $\|H_\theta\|_2\le H_{\max}$ almost surely.  The detached estimator
-$\widehat g_c=N^{-1}\sum_i U_{c,i}H_{\theta,i}$ satisfies
+$\widehat g_c=N^{-1}\sum_i C_{c,i}^{\mathrm{tr}}H_{\theta,i}$ satisfies
 \begin{align}
   b_c&=-\E_Q[T_cH_\theta],
   &\|b_c\|_2&\le H_{\max}\tau_c,
@@ -641,10 +792,10 @@ equivalent to PPO clipping.
 
 The ESS identity and crossover now give the intended decision logic.  When
 $G_{2,\theta}$ is controlled, high ESS certifies a small raw-gradient MSE and
-there is little statistical reason to mask an otherwise useful update.  As ESS
-falls, raw-gradient MSE grows and intervention becomes more valuable.  The
-threshold must still be calibrated because PPO's benefit depends on its
-sign-specific bias and covariance.
+therefore a stronger policy-improvement lower bound.  As ESS falls, raw-gradient
+MSE grows and an intervention becomes valuable exactly when its variance
+reduction repays its squared bias.  The threshold must still be calibrated
+because PPO's benefit depends on this sign-specific crossover.
 
 \section{From theory to an ESS-guided estimator rule}
 \label{sec:practice}
@@ -678,13 +829,14 @@ optimization trajectory.
 \section{Empirical validation of the theory}
 \label{sec:experiments}
 
-The main theorem is about gradient error, but the paper's practical claim is
-about policy updates.  The experiment must therefore validate the full chain.
-It asks three questions in order.  Does higher ESS imply lower raw-gradient MSE
-when the gradient scale is controlled?  Does lower MSE produce a better update
-when measured by population reward?  Finally, can ESS decide when to use the
-raw gradient and when to apply the actual PPO mask during fixed-rollout
-optimization?
+Theorems~\ref{thm:raw-mse} and \ref{thm:mse-improvement} establish the first two
+links in the population guarantee: ESS controls gradient MSE when the gradient
+scale is controlled, and that MSE controls a one-step improvement certificate.
+The practical claim also relies on sample ESS and realized masked updates, so
+the experiment tests the full chain.  Does higher ESS imply lower raw-gradient
+MSE?  Does the resulting MSE ordering appear in actual population reward after
+one update?  Finally, can ESS decide when to use the raw gradient and when to
+apply the actual PPO mask during fixed-rollout optimization?
 
 We use the classification-to-contextual-bandit protocol of
 \citet{wang2017adaptive}.  Each Optdigits image is a context, the ten labels are
