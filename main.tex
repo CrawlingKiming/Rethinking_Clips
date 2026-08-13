@@ -4,9 +4,8 @@
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{booktabs}
 \usepackage{graphicx}
-\usepackage{microtype}
+\IfFileExists{microtype.sty}{\usepackage{microtype}}{}
 \usepackage{xcolor}
-\usepackage{enumitem}
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage{hyperref}
 \usepackage{cleveref}
@@ -36,49 +35,52 @@ Sequence ESS Governs the Reliability of Unclipped Updates}
 \maketitle
 
 \begin{abstract}
-Reinforcement learning with verifiable rewards often reuses generated responses
-for several updates.  Clipping is commonly treated as necessary because reuse
-is assumed to make an unclipped update unstable.  We show that reuse alone does
-not determine reliability.  What matters is whether the reused batch still
-covers the current policy, and sequence effective sample size provides the
-missing bridge from policy drift to update error.  This view also separates
-diagnosis from intervention: clipping is useful only when the stability it gains
-is worth the distortion it introduces.  Exact results in a controlled simulation
-support this account.  Moderate upper caps reduce update error as coverage
-deteriorates, although they do not reliably improve learning over several reused
-updates.  These findings motivate an adaptive clipping rule while leaving its
-validation in language-model training as open work.
+Reinforcement learning with verifiable rewards often takes several optimization
+steps on fixed rollout data.  Clipping is commonly treated as necessary because
+later steps are assumed to make an unclipped update unstable.  We show that the
+step count alone does not determine reliability.  What matters is whether the
+rollout distribution still covers the current policy, and sequence effective
+sample size provides the missing bridge from policy drift to update error.  This
+view also separates diagnosis from intervention: clipping is useful only when
+the stability it gains is worth the distortion it introduces.  In an exactly
+enumerable contextual bandit, high ESS yields low unclipped error and leaves
+clipping inactive.  As ESS falls, unclipped error grows and moderate upper caps
+eventually improve both gradient estimation and the next policy update.  These
+findings motivate an adaptive clipping rule while leaving its validation in
+language-model training as open work.
 \end{abstract}
 
 \section{Introduction}
 
-RLVR improves data efficiency by taking several policy updates on each batch of
-generated responses.  As the policy changes, however, the stored responses
-become less representative of its current behavior.  The central practical
-question is therefore not whether the batch has been reused, but whether it
-still supports a reliable update.
+RLVR improves data efficiency by taking several policy updates on fixed rollout
+data.  As the policy changes, however, those responses become less
+representative of its current behavior.  The central practical question is
+therefore not how many optimization steps have elapsed, but whether the rollout
+distribution still supports a reliable update.
 
 Ratio clipping is the standard answer in PPO-style training
 \citep{schulman2017ppo}.  Its usual justification treats an unclipped update as
-increasingly unstable as the data become stale.  Recent work has questioned the
-ratio itself as a measure of harmful policy change \citep{qi2026dppo}, while
-adaptive methods track how concentrated reused data have become
+increasingly unstable as the policy moves away from the rollout distribution.
+Recent work has questioned the ratio itself as a measure of harmful policy
+change \citep{qi2026dppo}, while
+adaptive methods track how concentrated off-policy weights have become
 \citep{zheng2025m2po,huang2026vcpo,fakoor2026p3o}.  These methods expose a
 logically prior question.  Before choosing how to regulate an update, one must
 determine whether the unclipped update has actually become unreliable.
 
-Batch age cannot answer that question.  Two batches reused for the same number
-of updates can differ sharply in how well they represent the current policy.
+The optimization step count cannot answer that question.  Two rollout datasets
+observed after the same number of updates can differ sharply in how well they
+represent the current policy.
 One may remain broadly informative, while the other may be dominated by only a
 few responses.  Sequence effective sample size (ESS) captures this difference
-and provides a more meaningful notion of staleness than update count alone.
+and provides a more meaningful notion of coverage than update count alone.
 
 We show that ESS is the missing theoretical bridge.  For the exact
 update studied here, it connects policy coverage directly to estimation error.
 The result also identifies a necessary qualification: coverage alone is not
-enough because a few responses may still exert unusually large influence.  An
-old batch can therefore remain reliable, while a much newer batch can already
-be poor, depending on these two factors.
+enough because a few responses may still exert unusually large influence.  Data
+collected many steps earlier can therefore remain reliable, while data separated
+by fewer steps can already be poor, depending on these two factors.
 
 This diagnosis changes the role of clipping.  Clipping is not what defines a
 stable update.  It limits the influence of extreme responses, but also changes
@@ -87,17 +89,16 @@ moderately high upper cap can remove harmful extremes while otherwise leaving
 the update largely unchanged.  Verifier rewards make this regime especially
 relevant because their signal is naturally bounded.
 
-We test the resulting account in a controlled contextual-bandit simulation where
-all relevant quantities can be computed exactly.  The experiment confirms the
-predicted link between ESS and update error and shows that upper caps of 3 and 5
-become beneficial as coverage deteriorates.  It also reveals the boundary of
-this evidence: lower estimation error does not reliably translate into better
-reward after several updates on the same batch.  The controlled study therefore
-validates the mechanism without claiming that it settles language-model
-training.
+We test the resulting account in a controlled contextual bandit where all
+relevant quantities can be computed exactly.  The experiment holds the target
+policy and gradient scale fixed while varying only rollout coverage.  High ESS
+then produces low unclipped error and no effect from caps 3 and 5.  At low ESS,
+unclipped error rises sharply, and the caps eventually improve both estimation
+and the next policy update.  This controlled result validates the proposed
+mechanism without claiming that it settles language-model training.
 
 \paragraph{Contributions.}
-\begin{enumerate}[leftmargin=*,itemsep=2pt]
+\begin{enumerate}
 \item We identify sequence ESS as the bridge between policy coverage and the
 reliability of an unclipped update.
 \item We characterize when clipping is worth the distortion it introduces and
@@ -106,16 +107,17 @@ explain why moderate upper caps can reduce estimation error.
 state precisely what remains to be tested in language models.
 \end{enumerate}
 
-The next section develops the first link in this argument by separating the
-correctness of batch reuse from the reliability of its finite-sample estimate.
+The next section makes the setting precise and separates population correctness
+from finite-sample reliability.
 
-\section{From batch reuse to sequence ESS}
-\label{sec:ess}
+\section{Problem formulation and sequence coverage}
+\label{sec:setting}
 
-Let $X\sim\nu$ be a prompt, $Y$ a complete response generated by $Q$, and
-$R=R(X,Y)$ a terminal verifier reward.  The learner $P_\theta$ is absolutely
-continuous with respect to $Q$, and both policies share the prompt distribution.
-The sequence likelihood ratio is
+We first separate the target of an update from the accuracy with which it is
+estimated.  Let $X\sim\nu$ be a prompt, let $Y$ be a complete response drawn
+from the rollout policy $Q$, and let $R=R(X,Y)$ be a terminal verifier reward.
+The current policy is $P_\theta$, with $P_\theta\ll Q$.  Their sequence
+likelihood ratio is
 \begin{equation}
   W_\theta(X,Y)
   :=\frac{P_\theta(Y\mid X)}{Q(Y\mid X)},
@@ -124,72 +126,52 @@ The sequence likelihood ratio is
   \label{eq:weight}
 \end{equation}
 
-Let $b(X)$ be a prompt-only baseline, detached from differentiation, and write
-$A=R-b(X)$.  The next proposition shows that batch reuse is population-correct
-before finite-sample error is considered.
-
-\begin{proposition}[Exact centered improvement]
-\label{prop:improvement}
-If $P_\theta\ll Q$ and the displayed expectations are finite, then
+Let $b(X)$ be a detached prompt-only baseline and set $A=R-b(X)$.  Define the
+score and the corresponding sequence contribution by
 \begin{equation}
-  J(\theta)-J(Q)=\E_Q[(W_\theta-1)A],
+  S_\theta:=\nabla_\theta\log P_\theta(Y\mid X),
   \qquad
-  J(\theta):=\E_{P_\theta}[R],
-  \quad
-  J(Q):=\E_Q[R].
-  \label{eq:improvement}
+  H_\theta:=A S_\theta.
+  \label{eq:score}
 \end{equation}
-\end{proposition}
-
-\begin{proof}
-Expand the centered advantage and retain one transformation per line:
+For $J(\theta):=\E_{P_\theta}[R]$, assume that differentiation and expectation
+can be interchanged.  The population gradient follows one identity per line:
 \begin{align}
-  \E_Q[(W_\theta-1)A]
-  &=\E_Q[(W_\theta-1)R]
-    -\E_Q[(W_\theta-1)b(X)]
-    \label{eq:improvement-proof-1}\\
-  &=\E_Q[W_\theta R]-\E_Q[R]
-    -\E_X\!\left[
-      b(X)\{\E_Q[W_\theta\mid X]-1\}
-    \right]
-    \label{eq:improvement-proof-2}\\
-  &=\E_{P_\theta}[R]-\E_Q[R]
-    \label{eq:improvement-proof-3}\\
-  &=J(\theta)-J(Q).
-    \label{eq:improvement-proof-4}
+  g(\theta):=\nabla J(\theta)
+  &=\E_{P_\theta}[R S_\theta]
+    \label{eq:policy-gradient-1}\\
+  &=\E_{P_\theta}[(R-b(X))S_\theta]
+    \label{eq:policy-gradient-2}\\
+  &=\E_{P_\theta}[H_\theta]
+    \label{eq:policy-gradient-3}\\
+  &=\E_Q[W_\theta H_\theta].
+  \label{eq:true-gradient}
 \end{align}
-Equation~\eqref{eq:improvement-proof-1} substitutes $A=R-b(X)$ and distributes
-the product.  Equation~\eqref{eq:improvement-proof-2} expands the first term and
-uses the tower property on the baseline term because $b(X)$ depends only on the
-prompt.  Equation~\eqref{eq:improvement-proof-3} uses
-$\E_Q[W_\theta\mid X]=1$ and the change-of-measure identity
-$\E_Q[W_\theta R]=\E_{P_\theta}[R]$.  The last line substitutes the definitions
-of $J(\theta)$ and $J(Q)$.
-\end{proof}
+The first line is the score-function identity.  The second uses
+$\E_{P_\theta}[b(X)S_\theta\mid X]
+=b(X)\nabla_\theta\sum_yP_\theta(y\mid X)=0$.  The third substitutes
+\eqref{eq:score}, and the fourth changes measure from $P_\theta$ to $Q$.
+Given $N$ independent responses from $Q$, the unclipped estimator is
+\begin{equation}
+  \widehat g_W(\theta)
+  :=\frac1N\sum_{i=1}^N W_{\theta,i}H_{\theta,i}.
+  \label{eq:raw-estimator}
+\end{equation}
+Equation~\eqref{eq:true-gradient} establishes the correct population target.
+It does not establish that a finite rollout sample estimates that target
+reliably, which is the question addressed next.
 
-The proposition shows that reuse itself introduces no population approximation.
-The remaining difficulty must therefore arise from estimating this identity
-with finitely many responses.
+\subsection{Sequence coverage}
 
-That finite-sample difficulty is encoded by the second moment of $W_\theta$.
-Assume $\E_Q[W_\theta^2]<\infty$.  Define the order-two R\'enyi divergence and
-normalized sequence ESS by
-\begin{align}
-  D_2(P_\theta\|Q)
-  &:=\log\E_Q[W_\theta^2],
-  \label{eq:renyi-two}\\
-  \rho_\theta
-  &:=\frac{1}{\E_Q[W_\theta^2]}
-    \label{eq:population-ess-definition}\\
-  &=\exp\{-D_2(P_\theta\|Q)\}.
-    \label{eq:population-ess}
-\end{align}
-The variance of the likelihood ratio then satisfies
-\begin{align}
-  \E_Q[(W_\theta-1)^2]&=\rho_\theta^{-1}-1.
-  \label{eq:weight-variance}
-\end{align}
-Indeed,
+The second moment of the likelihood ratio measures how well $Q$ covers
+$P_\theta$.  Assuming $\E_Q[W_\theta^2]<\infty$, define normalized sequence ESS
+by
+\begin{equation}
+  \rho_\theta:=\frac{1}{\E_Q[W_\theta^2]}
+  =\exp\{-D_2(P_\theta\|Q)\}.
+  \label{eq:population-ess}
+\end{equation}
+Because $\E_Q[W_\theta]=1$, its relation to ratio dispersion is exact:
 \begin{align}
   \E_Q[(W_\theta-1)^2]
   &=\E_Q[W_\theta^2]-2\E_Q[W_\theta]+1
@@ -197,51 +179,49 @@ Indeed,
   &=\E_Q[W_\theta^2]-1
     \label{eq:weight-variance-proof-2}\\
   &=\rho_\theta^{-1}-1.
-    \label{eq:weight-variance-proof-3}
+    \label{eq:weight-variance}
 \end{align}
-The second line uses $\E_QW_\theta=1$, and the third uses the definition of
-$\rho_\theta$.
+The first line expands the square, the second uses $\E_Q[W_\theta]=1$, and the
+third uses \eqref{eq:population-ess}.  Thus $N\rho_\theta$ is the population
+effective sequence count, consistent with the second-moment coverage principle
+used in importance-sampling policy optimization
+\citep{metelli2018pois,metelli2020is}.  Coverage is scalar, whereas the update
+is a vector, so the next section establishes the exact bridge between them.
 
-Hence $N\rho_\theta$ is the population effective sequence count.  This is the
-same second-moment coverage principle used in importance-sampling policy
-optimization \citep{metelli2018pois,metelli2020is}.  The next section converts
-this scalar coverage quantity into the error of the vector supplied to the
-optimizer.
-
-\section{ESS governs the ratio-driven error of the unclipped gradient}
+\section{Main result: ESS governs finite-sample reliability}
 \label{sec:raw}
 
-Define the full-response score and the unweighted sequence contribution
+Population correctness does not prevent a small number of responses from
+dominating a finite-sample update.  To separate ratio concentration from the
+scale of the associated gradient contributions, define
 \begin{equation}
-  S_\theta:=\nabla_\theta\log P_\theta(Y\mid X),
-  \qquad
-  H_\theta:=A S_\theta.
-  \label{eq:score}
+  G_{2,\theta}
+  :=\frac{\E_Q[W_\theta^2\|H_\theta\|_2^2]}
+          {\E_Q[W_\theta^2]}.
+  \label{eq:gradient-scale}
 \end{equation}
-Assume differentiation and expectation can be interchanged and
-$\E_Q[W_\theta^2\|H_\theta\|_2^2]<\infty$.  Differentiating
-\eqref{eq:improvement} yields
-\begin{equation}
-  g(\theta):=\nabla J(\theta)=\E_Q[W_\theta H_\theta].
-  \label{eq:true-gradient}
-\end{equation}
-For $N$ independent responses from $Q$, the raw estimator is
-\begin{equation}
-  \widehat g_W(\theta):=\frac1N\sum_{i=1}^N
-  W_{\theta,i}H_{\theta,i}.
-  \label{eq:raw-estimator}
-\end{equation}
+The quantity $G_{2,\theta}$ is a weighted gradient scale.  It records whether
+large likelihood ratios are attached to large gradient contributions.  With
+this qualifier explicit, the main theorem states the reliability bridge in one
+step.
 
-\begin{theorem}[Exact finite-sample error]
+\begin{theorem}[ESS reliability bridge]
 \label{thm:raw-mse}
-For fixed $\theta$, $\widehat g_W$ is unbiased and
-\begin{equation}
+Assume $\E_Q[W_\theta^2\|H_\theta\|_2^2]<\infty$.  For fixed $\theta$,
+$\widehat g_W$ is unbiased and
+\begin{align}
   \E\|\widehat g_W-g\|_2^2
-  =\frac1N\left\{
+  &=\frac1N\left\{
     \E_Q[W_\theta^2\|H_\theta\|_2^2]-\|g(\theta)\|_2^2
-  \right\}.
-  \label{eq:raw-mse}
-\end{equation}
+  \right\}
+  \label{eq:raw-mse}\\
+  &=\frac1N\left(
+    \frac{G_{2,\theta}}{\rho_\theta}-\|g(\theta)\|_2^2
+  \right)
+  \label{eq:ess-factorization}\\
+  &\le \frac{G_{2,\theta}}{N\rho_\theta}.
+  \label{eq:ess-bridge}
+\end{align}
 \end{theorem}
 
 \begin{proof}
@@ -277,8 +257,14 @@ For the MSE, center each contribution before expanding the squared norm:
     \label{eq:raw-proof-4}\\
   &=\frac1N\left\{
     \E_Q[W_\theta^2\|H_\theta\|_2^2]-\|g\|_2^2
-    \right\}.
-    \label{eq:raw-proof-5}
+    \right\}
+    \label{eq:raw-proof-5}\\
+  &=\frac1N\left(
+    \frac{G_{2,\theta}}{\rho_\theta}-\|g\|_2^2
+    \right)
+    \label{eq:raw-proof-6}\\
+  &\le\frac{G_{2,\theta}}{N\rho_\theta}.
+    \label{eq:raw-proof-7}
 \end{align}
 Equation~\eqref{eq:unbiased-proof-1} substitutes the estimator definition.
 Equation~\eqref{eq:unbiased-proof-2} uses linearity of expectation, and
@@ -289,26 +275,11 @@ the squared norm.  Independence and $\E[Z_i-g]=0$ make every cross term vanish;
 identical sampling then gives \eqref{eq:raw-proof-3}.  Equation
 \eqref{eq:raw-proof-4} expands the remaining squared norm.  Finally,
 \eqref{eq:raw-proof-5} substitutes $\E[Z_1]=g$ and
-$\|Z_1\|_2^2=W_\theta^2\|H_\theta\|_2^2$.
+$\|Z_1\|_2^2=W_\theta^2\|H_\theta\|_2^2$.  Equation
+\eqref{eq:raw-proof-6} uses \eqref{eq:gradient-scale} and
+\eqref{eq:population-ess}.  Equation~\eqref{eq:raw-proof-7} drops the
+nonpositive term $-\|g\|_2^2/N$.
 \end{proof}
-
-To expose the role of ESS, define
-\begin{equation}
-  G_{2,\theta}
-  :=\frac{\E_Q[W_\theta^2\|H_\theta\|_2^2]}
-          {\E_Q[W_\theta^2]}.
-  \label{eq:gradient-scale}
-\end{equation}
-Substituting \eqref{eq:population-ess} into
-\eqref{eq:raw-mse} gives
-\begin{equation}
-  \E\|\widehat g_W-g\|_2^2
-  =\frac1N\left(
-    \frac{G_{2,\theta}}{\rho_\theta}-\|g(\theta)\|_2^2
-  \right)
-  \le \frac{G_{2,\theta}}{N\rho_\theta}.
-  \label{eq:ess-bridge}
-\end{equation}
 
 Equation~\eqref{eq:ess-bridge} is the main theoretical bridge.  Sequence ESS
 governs the error contributed by ratio concentration, while $G_{2,\theta}$
@@ -318,7 +289,10 @@ small.  Policy drift or update count alone therefore does not imply estimator
 failure.  Falling ESS instead identifies the regime in which a
 variance-reducing estimator may become worth considering.
 
-The remaining qualifier is the weighted gradient scale.  Advantage bounds are
+\subsection{Controlling the weighted gradient scale in RLVR}
+
+The main theorem is informative only when its remaining factor is controlled.
+Advantage bounds are
 useful here, but they cannot control $G_{2,\theta}$ without a corresponding
 condition on the score.
 
@@ -358,7 +332,7 @@ group of $K$ responses \citep{shao2024deepseekmath}.  Its standardized
 advantages also have a deterministic finite-group bound whenever their sample
 variance is nonzero.
 
-\begin{proposition}[Magnitude of a standardized group advantage]
+\begin{proposition}[Standardized group-advantage bound]
 \label{prop:grpo-bound}
 Let $d_i=r_i-\bar r$, let $v=K^{-1}\sum_{j=1}^K d_j^2>0$, and let
 $A_i=d_i/\sqrt v$.  Then $|A_i|\le\sqrt{K-1}$ for every $i$.
@@ -401,16 +375,93 @@ i.i.d. justification.
 
 \begin{remark}[Pointwise scope]
 The expectation is over a fresh batch at fixed $\theta$.  During same-batch
-optimization, $\theta$ depends on the reused data.  Extending
+optimization, $\theta$ depends on the fixed rollout data.  Extending
 \eqref{eq:ess-bridge} uniformly over that adaptive path requires additional
 stability or complexity control.
 \end{remark}
 
-The raw risk is now explicit, so the remaining question is comparative.  The
-next section asks whether a bounded coefficient reduces that risk enough to
-justify the bias it introduces.
+The raw risk is now explicit, but an estimator error matters only through its
+effect on policy optimization.  The next section supplies that link before we
+compare unclipped and clipped estimators.
 
-\section{When clipping becomes preferable}
+\section{Why gradient reliability matters for policy optimization}
+\label{sec:optimization}
+
+The main theorem characterizes gradient error.  The next result shows how that
+error enters a standard first-order optimization guarantee.
+
+\begin{proposition}[MSE-controlled stationarity]
+\label{prop:stationarity}
+Suppose $J$ is $L$-smooth and bounded above by $J_{\max}$.  For
+$\theta_{k+1}=\theta_k+\eta\widehat g_k$ with $0<\eta\le 1/L$,
+\begin{equation}
+  \frac1T\sum_{k=0}^{T-1}\E\|\nabla J(\theta_k)\|_2^2
+  \le
+  \frac{2\{J_{\max}-\E J(\theta_0)\}}{\eta T}
+  +\frac1T\sum_{k=0}^{T-1}
+   \E\|\widehat g_k-\nabla J(\theta_k)\|_2^2.
+  \label{eq:stationarity}
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+Let $g_k:=\nabla J(\theta_k)$ and $e_k:=\widehat g_k-g_k$.  The ascent form of
+$L$-smoothness gives
+\begin{align}
+  J(\theta_{k+1})-J(\theta_k)
+  &\ge g_k^\top(\theta_{k+1}-\theta_k)
+    -\frac L2\|\theta_{k+1}-\theta_k\|_2^2
+    \label{eq:stationarity-proof-1}\\
+  &=\eta g_k^\top\widehat g_k
+    -\frac{L\eta^2}{2}\|\widehat g_k\|_2^2
+    \label{eq:stationarity-proof-2}\\
+  &=\frac\eta2\|g_k\|_2^2
+    +\frac\eta2\|\widehat g_k\|_2^2
+    -\frac\eta2\|e_k\|_2^2
+    -\frac{L\eta^2}{2}\|\widehat g_k\|_2^2
+    \label{eq:stationarity-proof-3}\\
+  &=\frac\eta2\|g_k\|_2^2
+    +\frac\eta2(1-L\eta)\|\widehat g_k\|_2^2
+    -\frac\eta2\|e_k\|_2^2
+    \label{eq:stationarity-proof-4}\\
+  &\ge\frac\eta2\|g_k\|_2^2
+    -\frac\eta2\|e_k\|_2^2.
+    \label{eq:stationarity-proof-5}
+\end{align}
+Equation~\eqref{eq:stationarity-proof-2} substitutes the update.  Equation
+\eqref{eq:stationarity-proof-3} uses
+$2g_k^\top\widehat g_k=\|g_k\|_2^2+\|\widehat g_k\|_2^2-
+\|e_k\|_2^2$.  The last line uses $\eta\le1/L$.
+
+Rearranging \eqref{eq:stationarity-proof-5}, taking expectations, and summing
+over $k$ gives
+\begin{align}
+  \frac\eta2\sum_{k=0}^{T-1}\E\|g_k\|_2^2
+  &\le \E[J(\theta_T)-J(\theta_0)]
+    +\frac\eta2\sum_{k=0}^{T-1}\E\|e_k\|_2^2
+    \label{eq:stationarity-proof-6}\\
+  &\le J_{\max}-\E J(\theta_0)
+    +\frac\eta2\sum_{k=0}^{T-1}\E\|e_k\|_2^2.
+    \label{eq:stationarity-proof-7}
+\end{align}
+The second line uses the upper bound on $J$.  Dividing by $\eta T/2$ yields
+\eqref{eq:stationarity}.
+\end{proof}
+
+Lower gradient MSE therefore tightens the statistical term in
+\eqref{eq:stationarity}.  The proposition does not analyze Adam or imply a
+global ordering of training trajectories.  It supplies the limited bridge
+needed here: if clipping reduces MSE, it improves this first-order guarantee;
+if clipping increases MSE, it worsens it.  This use of MSE is consistent with
+analyses of biased stochastic gradients \cite{driggs2022biased,tang2022biased},
+while persistent clipping bias can still create an error floor
+\cite{ajalloeian2020biased,koloskova2023clipping}.
+
+The optimization consequence reduces the intervention question to an estimator
+comparison.  We now ask exactly when the variance removed by clipping is worth
+the bias it introduces.
+
+\section{When clipping improves the estimator}
 \label{sec:clipping}
 
 Let $U_\theta=U(W_\theta)$ be a bounded, detached sequence coefficient.  The
@@ -595,81 +646,7 @@ $G_{2,\theta}$ and on what the clipping rule removes.
 The claim is therefore not ``clip below a universal ESS,'' but ``ESS locates
 the regime in which the clipping MSE comparison becomes consequential.''
 
-\subsection{Why MSE matters for optimization}
-
-The crossover compares errors relative to the population gradient.  The next
-result shows why this quantity matters for a standard first-order update.
-
-\begin{proposition}[MSE-controlled stationarity]
-\label{prop:stationarity}
-Suppose $J$ is $L$-smooth and bounded above by $J_{\max}$.  For
-$\theta_{k+1}=\theta_k+\eta\widehat g_k$ with $0<\eta\le 1/L$,
-\begin{equation}
-  \frac1T\sum_{k=0}^{T-1}\E\|\nabla J(\theta_k)\|_2^2
-  \le
-  \frac{2\{J_{\max}-\E J(\theta_0)\}}{\eta T}
-  +\frac1T\sum_{k=0}^{T-1}
-   \E\|\widehat g_k-\nabla J(\theta_k)\|_2^2.
-  \label{eq:stationarity}
-\end{equation}
-\end{proposition}
-
-\begin{proof}
-Let $g_k:=\nabla J(\theta_k)$ and $e_k:=\widehat g_k-g_k$.  The ascent form of
-$L$-smoothness gives
-\begin{align}
-  J(\theta_{k+1})-J(\theta_k)
-  &\ge g_k^\top(\theta_{k+1}-\theta_k)
-    -\frac L2\|\theta_{k+1}-\theta_k\|_2^2
-    \label{eq:stationarity-proof-1}\\
-  &=\eta g_k^\top\widehat g_k
-    -\frac{L\eta^2}{2}\|\widehat g_k\|_2^2
-    \label{eq:stationarity-proof-2}\\
-  &=\frac\eta2\|g_k\|_2^2
-    +\frac\eta2\|\widehat g_k\|_2^2
-    -\frac\eta2\|e_k\|_2^2
-    -\frac{L\eta^2}{2}\|\widehat g_k\|_2^2
-    \label{eq:stationarity-proof-3}\\
-  &=\frac\eta2\|g_k\|_2^2
-    +\frac\eta2(1-L\eta)\|\widehat g_k\|_2^2
-    -\frac\eta2\|e_k\|_2^2
-    \label{eq:stationarity-proof-4}\\
-  &\ge\frac\eta2\|g_k\|_2^2
-    -\frac\eta2\|e_k\|_2^2.
-    \label{eq:stationarity-proof-5}
-\end{align}
-Equation~\eqref{eq:stationarity-proof-2} substitutes the update.  Equation
-\eqref{eq:stationarity-proof-3} uses
-$2g_k^\top\widehat g_k=\|g_k\|_2^2+\|\widehat g_k\|_2^2-
-\|e_k\|_2^2$.  The last line uses $\eta\le1/L$.
-
-Rearranging \eqref{eq:stationarity-proof-5}, taking expectations, and summing
-over $k$ gives
-\begin{align}
-  \frac\eta2\sum_{k=0}^{T-1}\E\|g_k\|_2^2
-  &\le \E[J(\theta_T)-J(\theta_0)]
-    +\frac\eta2\sum_{k=0}^{T-1}\E\|e_k\|_2^2
-    \label{eq:stationarity-proof-6}\\
-  &\le J_{\max}-\E J(\theta_0)
-    +\frac\eta2\sum_{k=0}^{T-1}\E\|e_k\|_2^2.
-    \label{eq:stationarity-proof-7}
-\end{align}
-The second line uses the upper bound on $J$.  Dividing by $\eta T/2$ yields
-\eqref{eq:stationarity}.
-\end{proof}
-
-Thus clipping improves the statistical term in this stationarity guarantee
-exactly when \eqref{eq:crossover} holds.  The proposition does not analyze Adam
-or imply globally ordered RL trajectories; it supplies the limited optimization
-bridge required by the estimator comparison.  This use of MSE is consistent
-with broader analyses of biased stochastic gradients
-\cite{driggs2022biased,tang2022biased}, while persistent clipping bias can still
-create an error floor \cite{ajalloeian2020biased,koloskova2023clipping}.
-
-The theoretical comparison is pointwise and uses population moments.  The next
-section identifies what must be estimated before it can guide an online choice.
-
-\section{From theory to a practical ESS gate}
+\section{From theory to an ESS-guided estimator rule}
 \label{sec:practice}
 
 Population ESS is unavailable during training.  Its plug-in estimate is
@@ -693,7 +670,7 @@ empirical question is whether their relevant regime change coincides with the
 gradient-MSE crossover in \eqref{eq:crossover}.
 
 \paragraph{Candidate rule.}
-\begin{itemize}[leftmargin=*,itemsep=2pt]
+\begin{itemize}
 \item Aggressive estimator: use the detached raw sequence ratio $W_i$ in
 \eqref{eq:raw-estimator}.
 \item Conservative estimator: replace $W_i$ by the detached coefficient
@@ -707,83 +684,40 @@ The rule makes the estimator choice reproducible without claiming a universal
 ESS threshold.  The controlled study below tests the identities that motivate
 it before considering an LLM-scale gate.
 
-\section{Controlled contextual-bandit validation}
+\section{Empirical validation of the theory}
 \label{sec:experiments}
 
-\paragraph{Testbed and protocol.}
-We use a linear contextual bandit, a canonical controlled testbed for contextual
-learning \citep{chu2011contextual}.  The environment contains 96 fixed contexts,
-8 actions, and 6 features.  Every context has norm at most one, and each
-Bernoulli reward mean is $0.5+0.4x^\top\beta_a\in[0.1,0.9]$.  A softmax behavior
-policy generates batches of $N=32$, while a target-policy path increases
-coverage mismatch.  Because both sets are finite, we enumerate $\rho_\theta$,
-$G_{2,\theta}$, the population gradient, bias, covariance, and MSE exactly.
-We evaluate the raw estimator and upper caps 3 and 5 at 19 target policies.  The
-released script fixes all seeds and regenerates every reported number and plot.
+The controlled experiment tests the theory in the order in which it is
+developed.  We hold the target policy, reward model, true gradient, and
+$G_{2,\theta}$ fixed, then vary only the coverage of the rollout policy.  This
+isolates three predictions: high ESS should give low unclipped MSE, low ESS
+should increase that MSE, and sufficiently low ESS should create a regime in
+which upper truncation improves both gradient estimation and the next policy
+update.  We use an exactly enumerable contextual bandit so that no population
+quantity is approximated.  The complete construction and derivation appear in
+\Cref{app:bandit}.
 
-\begin{figure}[t]
+\begin{figure}[h]
   \centering
-  \includegraphics[width=\linewidth]{figures/contextual_bandit_ess.pdf}
-  \caption{Controlled contextual-bandit results.  Panel (a) reports exactly
-  enumerated gradient MSE.  Panel (b) separates squared bias from variance over
-  $N$ for caps 3 and 5.  Panel (c) reports the probability that population
-  reward decreases after eight updates on the same sampled batch; bands are
-  pointwise 95\% intervals over 2,000 paired batches.}
-  \label{fig:bandit}
+  \includegraphics[width=\linewidth]{figures/ess_theory_validation.pdf}
+  \caption{Direct validation of the ESS theory with $G_{2,\theta}$ held fixed.
+  High ESS yields low unclipped MSE and leaves caps 3 and 5 inactive.  As ESS
+  falls, unclipped MSE grows according to \eqref{eq:ess-factorization}; after the
+  clipping crossover, the capped estimators also achieve higher expected reward
+  after one gradient step.  All curves are exact finite enumerations.}
+  \label{fig:ess-validation}
 \end{figure}
 
-\begin{table}[t]
-\centering
-\small
-\caption{Exact estimator risk at representative target policies.  Bias columns
-report squared gradient bias.}
-\label{tab:bandit-risk}
-\begingroup
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{rrrrrrr}
-\toprule
-$\rho$ & $N\rho$ & Raw MSE & Cap 3 MSE & Cap 5 MSE & Bias$^2_3$ & Bias$^2_5$ \\
-\midrule
-1.000 & 32.00 & $6.362\!\times\!10^{-3}$ & $6.362\!\times\!10^{-3}$ & $6.362\!\times\!10^{-3}$ & 0 & 0 \\
-0.487 & 15.60 & $7.459\!\times\!10^{-3}$ & $6.650\!\times\!10^{-3}$ & $7.383\!\times\!10^{-3}$ & $1.606\!\times\!10^{-6}$ & $6.006\!\times\!10^{-8}$ \\
-0.273 & 8.74 & $6.958\!\times\!10^{-3}$ & $4.758\!\times\!10^{-3}$ & $6.224\!\times\!10^{-3}$ & $5.175\!\times\!10^{-6}$ & $3.453\!\times\!10^{-7}$ \\
-\bottomrule
-\end{tabular}
-\endgroup
-\end{table}
-
-\paragraph{Exact estimator results.}
-The raw-MSE expression in \eqref{eq:ess-bridge} matches direct covariance
-enumeration to a maximum absolute error of $1.74\times10^{-18}$.  As coverage
-falls, caps 3 and 5 become preferable at different points because their
-variance reductions and bias costs differ.  At $\rho=0.273$, cap 3 reduces MSE
-by $31.6\%$ and cap 5 reduces it by $10.6\%$.  The squared bias of cap 5 is only
-$3.45\times10^{-7}$, consistent with the tail-excess argument in
-\Cref{cor:upper-truncation}.  Raw MSE is not monotone in ESS along this path
-because $G_{2,\theta}$ also decreases.  This behavior validates the paper's
-central qualification: ESS governs ratio concentration, but $G_{2,\theta}$
-determines how that concentration enters the gradient.
-
-\paragraph{Matched-batch intervention.}
-For each target policy, we also draw 2,000 paired batches, fork identical policy
-states, and reuse each batch for eight raw, cap-3, or cap-5 updates.  At
-$\rho=0.273$, the estimated probabilities of decreasing population reward are
-$0.190$, $0.195$, and $0.192$, respectively, with overlapping intervals in
-\Cref{fig:bandit}.  Mean reward improvements are $0.00800$, $0.00684$, and
-$0.00758$.  Thus the exact MSE crossover is validated, but this multi-step reward
-comparison does not establish that truncation improves the adaptive trajectory.
-That distinction leads directly to the required LLM study.
-
-\paragraph{What remains for LLMs.}
-Exact full-gradient MSE is mathematically well defined for an LLM, but a
-population reference requires an impractically large independent rollout and
-backpropagation budget.  A feasible approximation can compare selected layers
-or random gradient projections against a large fresh-rollout reference.  The
-matched-state intervention is also feasible, but expensive: checkpoint the
-model, optimizer, and batch, fork candidate updates, then evaluate fresh
-rollouts.  These two LLM tests, followed by held-out threshold transfer, remain
-\textbf{[TO BE FILLED]}.  The bandit study validates the estimator mechanism; it
-does not substitute for evidence on token-level RLVR.
+The results follow the predicted sequence.  With $G_{2,\theta}=1/16$ throughout,
+unclipped MSE rises from $1.46\times10^{-3}$ at $\rho=1$ to
+$2.44\times10^{-2}$ at $\rho=0.0784$.  At high ESS the tested caps do nothing
+because no ratio reaches them.  At $\rho=0.0784$, however, caps 3 and 5 reduce
+MSE to $3.72\times10^{-3}$ and $3.80\times10^{-3}$, respectively.  The same
+crossover appears in policy optimization: expected reward after one step is
+$0.640$ without clipping, $0.645$ with cap 3, and $0.648$ with cap 5.  Thus the
+experiment validates the claimed progression from coverage, to gradient
+reliability, to the usefulness of clipping.  Transfer to token-level RLVR
+remains \textbf{[TO BE FILLED]}.
 
 \section{Limitations}
 
@@ -792,6 +726,164 @@ does not substitute for evidence on token-level RLVR.
 \section{Conclusion}
 
 \noindent\textbf{[TO BE FILLED].}
+
+\appendix
+
+\section{Exact contextual-bandit construction}
+\label{app:bandit}
+
+\subsection{Environment and coverage intervention}
+
+The validation uses a two-context, two-action bandit, a minimal instance of a
+contextual bandit with linear payoffs \citep{chu2011contextual}.  The context is
+uniform on $\{-1,+1\}$, and the identity of the correct action depends on that
+context.  Conditional on $X$, the correct action has Bernoulli reward mean
+$3/4$, while the other action has reward mean $1/4$.
+
+The policy has one scalar parameter and selects the correct action with
+probability $\sigma(\theta)$.  We evaluate the gradient at $\theta_0=0$, so the
+target policy selects either action with probability $1/2$.  The rollout policy
+selects the correct action with probability $q\in(0,1/2]$.  Varying $q$ changes
+coverage while leaving the target policy, reward model, and gradient geometry
+unchanged.  The two likelihood ratios are
+\begin{equation}
+  w_1=\frac{1}{2q},
+  \qquad
+  w_0=\frac{1}{2(1-q)},
+  \label{eq:bandit-ratios}
+\end{equation}
+where subscripts 1 and 0 denote the correct and incorrect actions.
+
+We use baseline $b=1/2$.  At $\theta_0$, the score is $1/2$ for the correct
+action and $-1/2$ for the incorrect action.  Consequently,
+\begin{equation}
+  H=(R-1/2)S_{\theta_0}\in\{-1/4,+1/4\}.
+  \label{eq:bandit-h}
+\end{equation}
+For either action, $H=+1/4$ with probability $3/4$ and $H=-1/4$ with
+probability $1/4$.  Thus $H$ is independent of the action indicator under the
+rollout distribution, and
+\begin{equation}
+  \E[H]=\frac18,
+  \qquad
+  H^2=\frac1{16}.
+  \label{eq:bandit-h-moments}
+\end{equation}
+This symmetry is the key control in the experiment: the weighted gradient scale
+does not change when ESS changes.
+
+\subsection{Exact theoretical predictions}
+
+The sequence ESS follows directly from \eqref{eq:bandit-ratios}:
+\begin{align}
+  \E_Q[W^2]
+  &=q\left(\frac1{2q}\right)^2
+    +(1-q)\left(\frac1{2(1-q)}\right)^2
+    \label{eq:bandit-ew2-1}\\
+  &=\frac1{4q(1-q)},
+    \label{eq:bandit-ew2-2}\\
+  \rho
+  &=4q(1-q).
+    \label{eq:bandit-rho}
+\end{align}
+The first line enumerates the two actions, the second combines the fractions,
+and the third applies \eqref{eq:population-ess}.  Since $H^2=1/16$,
+\begin{align}
+  G_2
+  &=\frac{\E_Q[W^2H^2]}{\E_Q[W^2]}
+    \label{eq:bandit-g2-1}\\
+  &=\frac1{16}
+    \label{eq:bandit-g2-2}
+\end{align}
+for every $q$.  Also, $g=\E_Q[WH]=1/8$.  Substitution into
+\eqref{eq:ess-factorization} yields the exact prediction
+\begin{equation}
+  \operatorname{MSE}(\widehat g_W)
+  =\frac1N\left(\frac1{16\rho}-\frac1{64}\right).
+  \label{eq:bandit-raw-mse}
+\end{equation}
+The construction therefore isolates the claimed ESS effect rather than allowing
+$G_2$ to move with coverage.
+
+For cap $c$, let
+\begin{equation}
+  u_1=\min\left(\frac1{2q},c\right),
+  \qquad
+  u_0=\min\left(\frac1{2(1-q)},c\right).
+  \label{eq:bandit-caps}
+\end{equation}
+Independence of $H$ and the action indicator gives
+\begin{align}
+  m_c
+  &:=\E_Q[U_cH]
+    =\frac18\{qu_1+(1-q)u_0\},
+    \label{eq:bandit-cap-mean}\\
+  \operatorname{MSE}(\widehat g_c)
+  &=\left(m_c-\frac18\right)^2
+    +\frac1N\left[
+      \frac1{16}\{qu_1^2+(1-q)u_0^2\}-m_c^2
+    \right].
+    \label{eq:bandit-cap-mse}
+\end{align}
+The first term in \eqref{eq:bandit-cap-mse} is squared bias and the second is
+variance over $N$, so the experiment evaluates the exact crossover in
+\Cref{thm:crossover}.
+
+\subsection{Policy update and exact enumeration}
+
+The population objective is
+\begin{equation}
+  J(\theta)=\frac14+\frac12\sigma(\theta).
+  \label{eq:bandit-objective}
+\end{equation}
+Its gradient at $\theta_0=0$ is $1/8$, matching
+\eqref{eq:bandit-h-moments}.  We apply one update
+$\theta_1=\theta_0+\eta\widehat g$ with $N=32$ and $\eta=20$.  The objective is
+$L$-smooth with $L=1/(12\sqrt3)$, so $\eta<1/L$ as required by
+\Cref{prop:stationarity}.
+
+Expected post-update reward is computed without Monte Carlo.  Each sample falls
+into one of four categories given by correct or incorrect action and positive
+or negative $H$.  Their probabilities are
+\begin{equation}
+  \left(\frac{3q}{4},\frac{q}{4},
+        \frac{3(1-q)}{4},\frac{1-q}{4}\right).
+  \label{eq:bandit-categories}
+\end{equation}
+We enumerate every four-category count vector summing to $N$, calculate its
+multinomial probability, form the corresponding gradient estimate, and evaluate
+$J(\theta_1)$.  This same enumeration produces every curve in
+\Cref{fig:ess-validation}.  The implementation is provided in
+\path{simulation/contextual_bandit_ess.py}, and the complete numeric output is
+provided in \path{simulation/results/contextual_bandit_results.csv}.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Exact MSE and expected one-step reward at representative ESS values.
+The weighted gradient scale is $G_2=1/16$ in every row.}
+\label{tab:bandit-full-results}
+\begingroup
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{rrrrrrr}
+\toprule
+$\rho$ & Raw MSE & Cap 3 MSE & Cap 5 MSE & Raw reward & Cap 3 reward & Cap 5 reward \\
+\midrule
+1.0000 & 0.001465 & 0.001465 & 0.001465 & 0.7031 & 0.7031 & 0.7031 \\
+0.6400 & 0.002563 & 0.002563 & 0.002563 & 0.6969 & 0.6969 & 0.6969 \\
+0.1900 & 0.009791 & 0.003101 & 0.003657 & 0.6661 & 0.6577 & 0.6640 \\
+0.0784 & 0.024424 & 0.003722 & 0.003799 & 0.6403 & 0.6448 & 0.6479 \\
+0.0199 & 0.097659 & 0.004125 & 0.004126 & 0.6347 & 0.6378 & 0.6386 \\
+\bottomrule
+\end{tabular}
+\endgroup
+\end{table}
+
+The table separates the two crossovers.  Capping first reduces gradient MSE,
+while the unbiased estimator can still give higher one-step reward at moderate
+mismatch.  Once ESS is sufficiently low, the variance cost dominates and the
+capped estimators also improve the policy update.  This distinction is why ESS
+locates the regime of concern but does not define a universal clipping threshold.
 
 \bibliographystyle{plainnat}
 \bibliography{references}

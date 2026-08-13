@@ -1,218 +1,207 @@
-"""Reproduce the contextual-bandit ESS and ratio-truncation study.
+"""Exact contextual-bandit validation of the ESS reliability theory.
 
-The environment is a bounded linear contextual bandit with Bernoulli rewards
-and a softmax policy.  Its finite context and action sets let us enumerate the
-population gradient, ESS, bias, covariance, and MSE exactly.  Monte Carlo is
-used only for the paired one-step intervention.
+The target policy, reward model, and weighted gradient scale are fixed.  Only
+the behavior policy changes, which changes sequence ESS.  Every population MSE
+and every expected one-step policy value is computed by finite enumeration.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 
 @dataclass(frozen=True)
 class Config:
-    seed: int = 17
-    contexts: int = 96
-    actions: int = 8
-    features: int = 6
     batch_size: int = 32
-    repetitions: int = 2000
-    step_size: float = 6.0
-    reuse_steps: int = 8
-    max_drift: float = 18.0
-    drift_points: int = 19
+    step_size: float = 20.0
+    coverage_points: int = 31
+    minimum_behavior_coverage: float = 0.005
+    positive_contribution_probability: float = 0.75
+    target_action_probability: float = 0.5
+    contribution_magnitude: float = 0.25
 
 
-def softmax(logits: np.ndarray, axis: int = -1) -> np.ndarray:
-    shifted = logits - np.max(logits, axis=axis, keepdims=True)
-    exp_logits = np.exp(shifted)
-    return exp_logits / np.sum(exp_logits, axis=axis, keepdims=True)
+METHODS: tuple[tuple[str, float | None], ...] = (
+    ("raw", None),
+    ("cap_3", 3.0),
+    ("cap_5", 5.0),
+)
 
 
-def policy(theta: np.ndarray, contexts: np.ndarray) -> np.ndarray:
-    return softmax(contexts @ theta.T)
+def sigmoid(value: float) -> float:
+    if value >= 0.0:
+        return 1.0 / (1.0 + math.exp(-value))
+    exponential = math.exp(value)
+    return exponential / (1.0 + exponential)
 
 
-def policy_value(theta: np.ndarray, contexts: np.ndarray, reward_mean: np.ndarray) -> float:
-    return float(np.mean(np.sum(policy(theta, contexts) * reward_mean, axis=1)))
+def multinomial_probability(counts: tuple[int, ...], probabilities: tuple[float, ...]) -> float:
+    sample_count = sum(counts)
+    log_probability = math.lgamma(sample_count + 1.0)
+    for count, probability in zip(counts, probabilities):
+        log_probability -= math.lgamma(count + 1.0)
+        if count:
+            log_probability += count * math.log(probability)
+    return math.exp(log_probability)
 
 
-def batched_policy_value(
-    theta: np.ndarray, contexts: np.ndarray, reward_mean: np.ndarray
-) -> np.ndarray:
-    logits = np.einsum("rkd,md->rmk", theta, contexts)
-    probabilities = softmax(logits, axis=2)
-    return np.mean(np.sum(probabilities * reward_mean[None, :, :], axis=2), axis=1)
+def coefficients(
+    behavior_coverage: float,
+    target_probability: float,
+    cap: float | None,
+) -> tuple[float, float]:
+    correct_ratio = target_probability / behavior_coverage
+    incorrect_ratio = (1.0 - target_probability) / (1.0 - behavior_coverage)
+    if cap is None:
+        return correct_ratio, incorrect_ratio
+    return min(correct_ratio, cap), min(incorrect_ratio, cap)
 
 
-def make_problem(config: Config) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    rng = np.random.default_rng(config.seed)
-    contexts = rng.normal(size=(config.contexts, config.features))
-    contexts /= np.maximum(np.linalg.norm(contexts, axis=1, keepdims=True), 1.0)
-
-    behavior_theta = 0.85 * rng.normal(size=(config.actions, config.features))
-    reward_theta = rng.normal(size=(config.actions, config.features))
-    reward_theta /= np.linalg.norm(reward_theta, axis=1, keepdims=True)
-    reward_mean = 0.5 + 0.4 * (contexts @ reward_theta.T)
-
-    if np.max(np.linalg.norm(contexts, axis=1)) > 1.0 + 1e-12:
-        raise AssertionError("Context norm exceeds its declared bound.")
-    if np.min(reward_mean) < 0.0 or np.max(reward_mean) > 1.0:
-        raise AssertionError("Bernoulli reward mean is outside [0, 1].")
-
-    # Most drift is orthogonal to the reward model. This represents policy
-    # movement that changes coverage without making every large ratio useful.
-    # A smaller reward-aligned component keeps the target path non-degenerate.
-    reward_direction = reward_theta / np.linalg.norm(reward_theta)
-    nuisance = rng.normal(size=reward_theta.shape)
-    nuisance -= np.sum(nuisance * reward_direction) * reward_direction
-    nuisance /= np.linalg.norm(nuisance)
-    direction = 0.25 * reward_direction + np.sqrt(1.0 - 0.25**2) * nuisance
-    return contexts, behavior_theta, reward_mean, direction
-
-
-def score_tensor(probabilities: np.ndarray, contexts: np.ndarray) -> np.ndarray:
-    context_count, action_count = probabilities.shape
-    eye = np.eye(action_count)
-    action_residual = eye[None, :, :] - probabilities[:, None, :]
-    return action_residual[:, :, :, None] * contexts[:, None, None, :]
-
-
-def exact_metrics(
-    behavior: np.ndarray,
-    target: np.ndarray,
-    reward_mean: np.ndarray,
-    contexts: np.ndarray,
-    batch_size: int,
-    caps: tuple[float | None, ...],
-) -> dict[str, dict[str, float | np.ndarray]]:
-    context_count, action_count = behavior.shape
-    baseline = np.sum(behavior * reward_mean, axis=1)
-    scores = score_tensor(target, contexts)
-    ratios = target / behavior
-    qa_probability = behavior / context_count
-
-    mean_advantage = reward_mean - baseline[:, None]
-    second_advantage = (
-        reward_mean * (1.0 - baseline[:, None]) ** 2
-        + (1.0 - reward_mean) * baseline[:, None] ** 2
+def estimator_metrics(
+    behavior_coverage: float,
+    config: Config,
+    cap: float | None,
+) -> dict[str, float]:
+    target_probability = config.target_action_probability
+    positive_probability = config.positive_contribution_probability
+    magnitude = config.contribution_magnitude
+    correct_coefficient, incorrect_coefficient = coefficients(
+        behavior_coverage, target_probability, cap
     )
-    mean_h = mean_advantage[:, :, None, None] * scores
-    norm_score_sq = np.sum(scores**2, axis=(2, 3))
-    second_h_norm = second_advantage * norm_score_sq
 
-    raw_mean = np.sum(
-        qa_probability[:, :, None, None] * ratios[:, :, None, None] * mean_h,
-        axis=(0, 1),
+    coefficient_mean = (
+        behavior_coverage * correct_coefficient
+        + (1.0 - behavior_coverage) * incorrect_coefficient
     )
-    ew2 = float(np.sum(qa_probability * ratios**2))
-    raw_second = float(np.sum(qa_probability * ratios**2 * second_h_norm))
-    rho = 1.0 / ew2
-    g2 = raw_second / ew2
+    coefficient_second_moment = (
+        behavior_coverage * correct_coefficient**2
+        + (1.0 - behavior_coverage) * incorrect_coefficient**2
+    )
+    contribution_mean = magnitude * (2.0 * positive_probability - 1.0)
+    true_gradient = contribution_mean
+    estimator_mean = contribution_mean * coefficient_mean
+    second_moment = magnitude**2 * coefficient_second_moment
+    bias_squared = (estimator_mean - true_gradient) ** 2
+    variance_over_n = (
+        second_moment - estimator_mean**2
+    ) / config.batch_size
+    mse = bias_squared + variance_over_n
 
-    output: dict[str, dict[str, float | np.ndarray]] = {}
-    for cap in caps:
-        name = "raw" if cap is None else f"cap_{cap:g}"
-        coefficient = ratios if cap is None else np.minimum(ratios, cap)
-        estimator_mean = np.sum(
-            qa_probability[:, :, None, None] * coefficient[:, :, None, None] * mean_h,
-            axis=(0, 1),
-        )
-        second_moment = float(np.sum(qa_probability * coefficient**2 * second_h_norm))
-        bias_sq = float(np.sum((estimator_mean - raw_mean) ** 2))
-        trace_covariance = second_moment - float(np.sum(estimator_mean**2))
-        mse = bias_sq + trace_covariance / batch_size
-        tail_probability = 0.0
-        tail_excess = 0.0
-        if cap is not None:
-            tail_probability = float(np.sum(qa_probability * (ratios > cap)))
-            tail_excess = float(np.sum(qa_probability * np.maximum(ratios - cap, 0.0)))
-        output[name] = {
-            "mean": estimator_mean,
-            "mse": mse,
-            "bias_sq": bias_sq,
-            "variance_over_n": trace_covariance / batch_size,
-            "tail_probability": tail_probability,
-            "tail_excess": tail_excess,
-        }
-
-    output["population"] = {
-        "gradient": raw_mean,
-        "rho": rho,
-        "effective_count": batch_size * rho,
-        "g2": g2,
-        "raw_mse_identity": (g2 / rho - float(np.sum(raw_mean**2))) / batch_size,
-        "max_ratio": float(np.max(ratios)),
+    return {
+        "estimator_mean": estimator_mean,
+        "bias_squared": bias_squared,
+        "variance_over_n": variance_over_n,
+        "mse": mse,
+        "correct_coefficient": correct_coefficient,
+        "incorrect_coefficient": incorrect_coefficient,
     }
-    return output
 
 
-def paired_intervention(
-    rng: np.random.Generator,
-    behavior: np.ndarray,
-    reward_mean: np.ndarray,
-    contexts: np.ndarray,
-    theta: np.ndarray,
-    batch_size: int,
-    repetitions: int,
-    step_size: float,
-    reuse_steps: int,
-    caps: tuple[float | None, ...],
-) -> dict[str, dict[str, float]]:
-    context_count, action_count = behavior.shape
-    context_index = rng.integers(0, context_count, size=(repetitions, batch_size))
-    sampled_behavior = behavior[context_index]
-    uniforms = rng.random(size=(repetitions, batch_size, 1))
-    action = np.sum(uniforms > np.cumsum(sampled_behavior, axis=2), axis=2)
-    sampled_reward_mean = reward_mean[context_index, action]
-    reward = (rng.random(size=(repetitions, batch_size)) < sampled_reward_mean).astype(float)
+def expected_policy_value(
+    behavior_coverage: float,
+    config: Config,
+    cap: float | None,
+) -> dict[str, float]:
+    positive_probability = config.positive_contribution_probability
+    magnitude = config.contribution_magnitude
+    sample_count = config.batch_size
+    correct_coefficient, incorrect_coefficient = coefficients(
+        behavior_coverage, config.target_action_probability, cap
+    )
 
-    baseline = np.sum(behavior * reward_mean, axis=1)
-    repetition_index = np.arange(repetitions)[:, None]
-    batch_index = np.arange(batch_size)[None, :]
-    sampled_context = contexts[context_index]
-    advantage = reward - baseline[context_index]
+    category_probabilities = (
+        behavior_coverage * positive_probability,
+        behavior_coverage * (1.0 - positive_probability),
+        (1.0 - behavior_coverage) * positive_probability,
+        (1.0 - behavior_coverage) * (1.0 - positive_probability),
+    )
+    expected_value = 0.0
+    non_improvement_probability = 0.0
+    probability_total = 0.0
+    for correct_positive in range(sample_count + 1):
+        remaining_after_correct_positive = sample_count - correct_positive
+        for correct_negative in range(remaining_after_correct_positive + 1):
+            remaining_after_correct = (
+                remaining_after_correct_positive - correct_negative
+            )
+            for incorrect_positive in range(remaining_after_correct + 1):
+                incorrect_negative = remaining_after_correct - incorrect_positive
+                counts = (
+                    correct_positive,
+                    correct_negative,
+                    incorrect_positive,
+                    incorrect_negative,
+                )
+                probability = multinomial_probability(counts, category_probabilities)
+                gradient = magnitude * (
+                    correct_coefficient * (correct_positive - correct_negative)
+                    + incorrect_coefficient * (incorrect_positive - incorrect_negative)
+                ) / sample_count
+                target_correct_probability = sigmoid(config.step_size * gradient)
+                policy_value = 0.25 + 0.5 * target_correct_probability
+                expected_value += probability * policy_value
+                non_improvement_probability += probability * (gradient <= 0.0)
+                probability_total += probability
 
-    start_value = policy_value(theta, contexts, reward_mean)
-    results: dict[str, dict[str, float]] = {}
-    for cap in caps:
-        name = "raw" if cap is None else f"cap_{cap:g}"
-        updated_theta = np.broadcast_to(theta, (repetitions,) + theta.shape).copy()
-        for _ in range(reuse_steps):
-            logits = np.einsum("rkd,rnd->rnk", updated_theta, sampled_context)
-            current_policy = softmax(logits, axis=2)
-            selected_probability = current_policy[repetition_index, batch_index, action]
-            sampled_ratio = selected_probability / sampled_behavior[
-                repetition_index, batch_index, action
-            ]
-            residual = -current_policy
-            residual[repetition_index, batch_index, action] += 1.0
-            score = residual[:, :, :, None] * sampled_context[:, :, None, :]
-            h = advantage[:, :, None, None] * score
-            coefficient = sampled_ratio if cap is None else np.minimum(sampled_ratio, cap)
-            gradient = np.mean(coefficient[:, :, None, None] * h, axis=1)
-            updated_theta += step_size * gradient
-        improvement = batched_policy_value(updated_theta, contexts, reward_mean) - start_value
-        standard_error = float(np.std(improvement, ddof=1) / np.sqrt(repetitions))
-        harm_probability = float(np.mean(improvement < 0.0))
-        harm_standard_error = np.sqrt(
-            harm_probability * (1.0 - harm_probability) / repetitions
+    if abs(probability_total - 1.0) > 1e-10:
+        raise AssertionError("Multinomial probabilities do not sum to one.")
+    return {
+        "expected_policy_value": expected_value,
+        "non_improvement_probability": non_improvement_probability,
+    }
+
+
+def evaluate(config: Config) -> list[dict[str, float]]:
+    behavior_coverages = np.unique(
+        np.round(
+            np.concatenate(
+            (
+                np.geomspace(
+                    config.minimum_behavior_coverage,
+                    config.target_action_probability,
+                    config.coverage_points,
+                ),
+                np.array([0.01, 0.02, 0.03, 0.05, 0.07, 0.10, 0.15, 0.20, 0.30]),
+            )
+            ),
+            12,
         )
-        results[name] = {
-            "improvement_mean": float(np.mean(improvement)),
-            "improvement_ci95": 1.96 * standard_error,
-            "harm_probability": harm_probability,
-            "harm_ci95": 1.96 * harm_standard_error,
+    )
+    rows: list[dict[str, float]] = []
+    for behavior_coverage in behavior_coverages:
+        rho = 4.0 * behavior_coverage * (1.0 - behavior_coverage)
+        row: dict[str, float] = {
+            "behavior_coverage": float(behavior_coverage),
+            "rho": float(rho),
+            "effective_count": float(config.batch_size * rho),
+            "g2": float(config.contribution_magnitude**2),
+            "true_gradient": float(
+                config.contribution_magnitude
+                * (2.0 * config.positive_contribution_probability - 1.0)
+            ),
+            "batch_size": float(config.batch_size),
+            "step_size": float(config.step_size),
         }
-    return results
+        for method, cap in METHODS:
+            metrics = estimator_metrics(float(behavior_coverage), config, cap)
+            optimization = expected_policy_value(
+                float(behavior_coverage), config, cap
+            )
+            for key, value in metrics.items():
+                row[f"{method}_{key}"] = float(value)
+            for key, value in optimization.items():
+                row[f"{method}_{key}"] = float(value)
+        row["raw_mse_identity"] = (
+            row["g2"] / row["rho"] - row["true_gradient"] ** 2
+        ) / config.batch_size
+        rows.append(row)
+    return rows
 
 
 def write_csv(rows: list[dict[str, float]], output: Path) -> None:
@@ -223,11 +212,14 @@ def write_csv(rows: list[dict[str, float]], output: Path) -> None:
         writer.writerows(rows)
 
 
-def make_figure(rows: list[dict[str, float]], output_stem: Path) -> None:
+def make_main_figure(rows: list[dict[str, float]], output_stem: Path) -> None:
+    import matplotlib.pyplot as plt
+
     output_stem.parent.mkdir(parents=True, exist_ok=True)
     rho = np.array([row["rho"] for row in rows])
     colors = {"raw": "#20242b", "cap_3": "#0072B2", "cap_5": "#D55E00"}
-    labels = {"raw": "Untruncated", "cap_3": "Upper cap 3", "cap_5": "Upper cap 5"}
+    labels = {"raw": "Unclipped", "cap_3": "Upper cap 3", "cap_5": "Upper cap 5"}
+    markers = {"raw": "o", "cap_3": "s", "cap_5": "^"}
 
     plt.rcParams.update(
         {
@@ -238,79 +230,46 @@ def make_figure(rows: list[dict[str, float]], output_stem: Path) -> None:
             "figure.dpi": 160,
         }
     )
-    figure, axes = plt.subplots(1, 3, figsize=(10.8, 3.15), constrained_layout=True)
-
+    figure, axes = plt.subplots(1, 2, figsize=(7.2, 2.85), constrained_layout=True)
     for method in ("raw", "cap_3", "cap_5"):
         axes[0].plot(
             rho,
             [row[f"{method}_mse"] for row in rows],
-            marker="o",
-            markersize=3,
-            linewidth=1.6,
             color=colors[method],
+            marker=markers[method],
+            markevery=3,
+            markersize=3.5,
+            linewidth=1.7,
             label=labels[method],
         )
-    axes[0].set_yscale("log")
+        axes[1].plot(
+            rho,
+            [row[f"{method}_expected_policy_value"] for row in rows],
+            color=colors[method],
+            marker=markers[method],
+            markevery=3,
+            markersize=3.5,
+            linewidth=1.7,
+            label=labels[method],
+        )
+
     axes[0].set_xscale("log")
-    axes[0].set_xlim(max(rho) * 1.03, min(rho) * 0.97)
-    axes[0].set_title("(a) Exact gradient MSE")
+    axes[0].set_yscale("log")
+    axes[0].set_title("(a) Gradient MSE")
     axes[0].set_xlabel("Normalized sequence ESS, $\\rho$")
-    axes[0].set_ylabel("MSE, log scale")
+    axes[0].set_ylabel("Exact MSE")
     axes[0].legend(frameon=False)
 
-    for method in ("cap_3", "cap_5"):
-        axes[1].plot(
-            rho,
-            [row[f"{method}_bias_sq"] for row in rows],
-            linestyle="--",
-            linewidth=1.6,
-            color=colors[method],
-            label=f"{labels[method]} bias$^2$",
-        )
-        axes[1].plot(
-            rho,
-            [row[f"{method}_variance_over_n"] for row in rows],
-            linewidth=1.6,
-            color=colors[method],
-            label=f"{labels[method]} variance/$N$",
-        )
-    axes[1].set_yscale("log")
     axes[1].set_xscale("log")
-    axes[1].set_xlim(max(rho) * 1.03, min(rho) * 0.97)
-    axes[1].set_title("(b) Truncation decomposition")
+    axes[1].set_title("(b) One-step policy value")
     axes[1].set_xlabel("Normalized sequence ESS, $\\rho$")
-    axes[1].set_ylabel("Risk component, log scale")
-    axes[1].legend(frameon=False, ncol=1)
-
-    for method in ("raw", "cap_3", "cap_5"):
-        mean = np.array([row[f"{method}_harm_probability"] for row in rows])
-        ci = np.array([row[f"{method}_harm_ci95"] for row in rows])
-        axes[2].plot(
-            rho,
-            mean,
-            marker="o",
-            markersize=3,
-            linewidth=1.6,
-            color=colors[method],
-            label=labels[method],
-        )
-        axes[2].fill_between(
-            rho,
-            np.maximum(mean - ci, 0.0),
-            np.minimum(mean + ci, 1.0),
-            color=colors[method],
-            alpha=0.14,
-        )
-    axes[2].set_xscale("log")
-    axes[2].set_xlim(max(rho) * 1.03, min(rho) * 0.97)
-    axes[2].set_title("(c) Harm after eight reused updates")
-    axes[2].set_xlabel("Initial normalized sequence ESS, $\\rho$")
-    axes[2].set_ylabel("Probability of reward decrease")
-    axes[2].legend(frameon=False)
+    axes[1].set_ylabel("Exact expected reward")
+    axes[1].legend(frameon=False)
 
     for axis in axes:
         axis.grid(True, which="major", color="#dddddd", linewidth=0.6)
         axis.grid(True, which="minor", color="#eeeeee", linewidth=0.4)
+        axis.set_xlim(float(np.min(rho)) * 0.9, 1.05)
 
     figure.savefig(output_stem.with_suffix(".pdf"), bbox_inches="tight")
     figure.savefig(output_stem.with_suffix(".png"), bbox_inches="tight", dpi=220)
@@ -321,77 +280,32 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", type=Path, default=Path("simulation/results"))
     parser.add_argument("--figure-dir", type=Path, default=Path("figures"))
-    parser.add_argument("--repetitions", type=int, default=Config.repetitions)
+    parser.add_argument("--skip-figure", action="store_true")
     args = parser.parse_args()
 
-    config = Config(repetitions=args.repetitions)
-    contexts, behavior_theta, reward_mean, direction = make_problem(config)
-    behavior = policy(behavior_theta, contexts)
-    caps: tuple[float | None, ...] = (None, 3.0, 5.0)
-    drift_values = np.linspace(0.0, config.max_drift, config.drift_points)
-    intervention_rng = np.random.default_rng(config.seed + 1)
-
-    rows: list[dict[str, float]] = []
-    for drift in drift_values:
-        theta = behavior_theta + drift * direction
-        target = policy(theta, contexts)
-        exact = exact_metrics(
-            behavior,
-            target,
-            reward_mean,
-            contexts,
-            config.batch_size,
-            caps,
-        )
-        intervention = paired_intervention(
-            intervention_rng,
-            behavior,
-            reward_mean,
-            contexts,
-            theta,
-            config.batch_size,
-            config.repetitions,
-            config.step_size,
-            config.reuse_steps,
-            caps,
-        )
-        population = exact["population"]
-        row: dict[str, float] = {
-            "drift": float(drift),
-            "batch_size": float(config.batch_size),
-            "repetitions": float(config.repetitions),
-            "step_size": float(config.step_size),
-            "reuse_steps": float(config.reuse_steps),
-            "rho": float(population["rho"]),
-            "effective_count": float(population["effective_count"]),
-            "g2": float(population["g2"]),
-            "max_ratio": float(population["max_ratio"]),
-            "raw_mse_identity": float(population["raw_mse_identity"]),
-        }
-        for method in ("raw", "cap_3", "cap_5"):
-            row[f"{method}_mse"] = float(exact[method]["mse"])
-            row[f"{method}_bias_sq"] = float(exact[method]["bias_sq"])
-            row[f"{method}_variance_over_n"] = float(exact[method]["variance_over_n"])
-            row[f"{method}_tail_probability"] = float(exact[method]["tail_probability"])
-            row[f"{method}_tail_excess"] = float(exact[method]["tail_excess"])
-            row[f"{method}_improvement_mean"] = intervention[method]["improvement_mean"]
-            row[f"{method}_improvement_ci95"] = intervention[method]["improvement_ci95"]
-            row[f"{method}_harm_probability"] = intervention[method]["harm_probability"]
-            row[f"{method}_harm_ci95"] = intervention[method]["harm_ci95"]
-        rows.append(row)
-
+    config = Config()
+    rows = evaluate(config)
     csv_path = args.output_dir / "contextual_bandit_results.csv"
-    figure_stem = args.figure_dir / "contextual_bandit_ess"
+    figure_stem = args.figure_dir / "ess_theory_validation"
     write_csv(rows, csv_path)
-    make_figure(rows, figure_stem)
+    if not args.skip_figure:
+        make_main_figure(rows, figure_stem)
 
-    identity_error = max(abs(row["raw_mse"] - row["raw_mse_identity"]) for row in rows)
+    identity_error = max(
+        abs(row["raw_mse"] - row["raw_mse_identity"]) for row in rows
+    )
+    g2_range = max(row["g2"] for row in rows) - min(row["g2"] for row in rows)
     if identity_error > 1e-12:
-        raise AssertionError("Exact MSE identity failed its numerical check.")
+        raise AssertionError("The exact MSE identity failed its numerical check.")
+    if g2_range > 1e-15:
+        raise AssertionError("The weighted gradient scale is not held fixed.")
+
     print(f"Wrote {csv_path}")
-    print(f"Wrote {figure_stem.with_suffix('.pdf')}")
-    print(f"Wrote {figure_stem.with_suffix('.png')}")
+    if not args.skip_figure:
+        print(f"Wrote {figure_stem.with_suffix('.pdf')}")
+        print(f"Wrote {figure_stem.with_suffix('.png')}")
     print(f"Maximum raw-MSE identity error: {identity_error:.3e}")
+    print(f"Range of G2 across ESS conditions: {g2_range:.3e}")
 
 
 if __name__ == "__main__":
