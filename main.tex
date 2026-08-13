@@ -880,10 +880,9 @@ Theorems~\ref{thm:raw-mse} and \ref{thm:mse-improvement} establish the first two
 links in the population guarantee: ESS controls gradient MSE when the gradient
 scale is controlled, and that MSE controls a one-step improvement certificate.
 The practical claim also relies on sample ESS and realized masked updates, so
-the experiment tests the full chain.  Does higher ESS imply lower raw-gradient
-MSE?  Does the resulting MSE ordering appear in actual population reward after
-one update?  Finally, can ESS decide when to use the raw gradient and when to
-apply the actual PPO mask across coverage regimes?
+the experiment tests the full chain.  We ask whether higher ESS predicts lower
+raw-gradient MSE, whether lower MSE predicts a better policy update, and whether
+an ESS gate improves a complete fixed-rollout optimization epoch.
 
 We use the classification-to-contextual-bandit protocol of
 \citet{wang2017adaptive}.  Each Optdigits image is a context, the ten labels are
@@ -901,21 +900,30 @@ and apply one estimated-gradient step before evaluating the exact population
 reward.  On each of the same batches, the decision study compares the raw
 gradient, the PPO mask in Proposition~\ref{prop:ppo-mask}, and a prespecified
 gate that uses the raw gradient when sample ESS is at least $0.1$ and PPO
-masking otherwise.  Thus the gate must avoid clipping's masking cost at high
-coverage and avoid raw-gradient error at low coverage to beat both static
-choices.  Full details appear in Appendix~\ref{app:bandit}.
+masking otherwise.
+
+A one-step average can identify the mechanism while understating its effect on
+optimization.  We therefore add an eight-update fixed-rollout stress test at
+the lowest-coverage condition, where population ESS is $0.0025$ and sample ESS
+crosses the $0.1$ threshold.  Each method starts from the same policy and holds
+the same logged rollout fixed for eight updates.  The gate recomputes ESS before
+every update, so it must decide repeatedly between preserving signal and
+controlling estimation error.  We report step sizes $2$ and $5$; panel (c)
+shows the more aggressive stress condition.  Full details and both settings
+appear in Appendix~\ref{app:bandit}.
 
 \begin{figure}[tbp]
   \centering
   \includegraphics[width=\linewidth]{figures/ess_policy_validation.pdf}
   \caption{Validation of the ESS decision chain.  (a) Raw-gradient MSE rises as
-  normalized ESS falls; the dashed curve is the exact finite-population MSE.
+  normalized ESS falls; the horizontal range is restricted to
+  $10^{-3}\le\rho\le1$, and the dashed curve is the exact finite-population MSE.
   (b) The same loss of reliability reduces one-step population improvement and
   eventually makes the average update harmful; the dashed line uses the exact
-  gradient.  (c) The prespecified rule uses the raw update when sample ESS is at
-  least $0.1$ and PPO masking otherwise.  It retains the raw update's advantage
-  at high coverage and reduces its failures at low coverage.  Error bars are
-  95\% confidence intervals over 100 batches per condition.}
+  gradient.  (c) At population ESS $0.0025$, the prespecified rule uses the raw
+  update when sample ESS is at least $0.1$ and PPO masking otherwise during an
+  eight-update fixed-rollout epoch with step size $5$.  Error bars in (b) and
+  bands in (c) are 95\% confidence intervals over 100 independent rollouts.}
   \label{fig:ess-validation}
 \end{figure}
 
@@ -923,13 +931,22 @@ The three panels support the intended chain.  As population ESS falls from
 $1.0$ to $0.0025$, raw-gradient MSE increases from $0.0105$ to $0.918$, while
 mean one-step population gain falls from $0.00939$ to $-0.00570$.  The MSE
 deterioration predicted by the theorem therefore corresponds to a worse policy
-update in this controlled environment.  Across all 600 batch decisions, mean
+update in this controlled environment.  Across all 600 one-step decisions, mean
 gain is $0.00639\pm0.00056$ for the ESS gate, compared with
 $0.00535\pm0.00071$ for always-unclipped and $0.00582\pm0.00056$ for
 always-clipped PPO.  Paired differences favor the gate by
 $0.00104\pm0.00041$ over always-unclipped and $0.00056\pm0.00006$ over
-always-clipped.  The gate succeeds for the intended reason: it avoids PPO's
-premature masking at high ESS and suppresses unreliable raw updates at low ESS.
+always-clipped.
+
+The fixed-rollout epoch makes the decision consequence visible.  With step
+size $5$, final population gain is $0.06821\pm0.00862$ for the gate,
+$0.05397\pm0.00833$ for always-clipped PPO, and $0.03192\pm0.01457$ for the
+unclipped estimator.  Paired advantages are $0.01424\pm0.00210$ over PPO and
+$0.03629\pm0.01235$ over the unclipped estimator.  The gate selects an average
+of $2.85$ raw and $5.15$ masked updates, so it does not reduce to either static
+baseline.  The same ordering holds with step size $2$.  ESS therefore does more
+than correlate with gradient error: it identifies when each update is useful
+during optimization.  All reported $\pm$ values are standard errors.
 
 \section{Main experiments: ESS-gated RLVR}
 \label{sec:llm-experiments}
@@ -1127,6 +1144,25 @@ observation rather than selected from the bandit outcomes.  It is not claimed
 as a universal constant.  Because each batch supplies all three updates,
 differences between methods are evaluated in paired form.
 
+\subsection{Fixed-rollout optimization stress test}
+
+The one-step study isolates the causal chain, but policy optimization applies
+several updates to a collected rollout.  We test whether the estimator choice
+continues to matter over such an epoch at the logger perturbation $\alpha=2.5$,
+whose population ESS is $0.002531$.  This condition is intentionally difficult:
+sample ESS moves across the $0.1$ threshold as the target policy changes, so the
+gate uses both branches.
+
+For each of 100 independently sampled rollouts, all methods start from the same
+evaluation policy and hold that rollout fixed for eight updates.  Ratios,
+gradients, and sample ESS are recomputed under the current policy before every
+update.  The advantage baseline remains fixed at its value under the initial
+policy.  We evaluate the exact population reward after every update and compare
+the three methods in paired form.  Step size $2$ is a moderate condition and
+step size $5$ is an aggressive stress condition that makes gradient-estimation
+failures consequential within eight updates.  Figure~\ref{fig:ess-validation}(c)
+shows the latter, while Table~\ref{tab:bandit-epoch-results} reports both.
+
 \subsection{Results}
 
 Table~\ref{tab:bandit-full-results} reports the controlled sweep and the gate's
@@ -1157,6 +1193,32 @@ $\alpha$ & $\rho$ & Empirical MSE & Unclipped gain & PPO gain & Gate gain \\
 \end{tabular}
 \endgroup
 \end{table}
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Population reward gain after eight fixed-rollout updates at population
+ESS $0.002531$.  Values after $\pm$ are standard errors over 100 independent
+rollouts.}
+\label{tab:bandit-epoch-results}
+\begingroup
+\begin{tabular}{rrrr}
+\toprule
+Step size & Unclipped & PPO & ESS gate \\
+\midrule
+2 & $0.01276\pm0.00945$ & $0.01790\pm0.00566$ & $0.02803\pm0.00553$ \\
+5 & $0.03192\pm0.01457$ & $0.05397\pm0.00833$ & $0.06821\pm0.00862$ \\
+\bottomrule
+\end{tabular}
+\endgroup
+\end{table}
+
+At step size $2$, paired gate advantages are $0.01527\pm0.00859$ over the raw
+update and $0.01013\pm0.00166$ over PPO; the gate selects $3.13$ raw and $4.87$
+masked updates on average.  At step size $5$, the corresponding advantages are
+$0.03629\pm0.01235$ and $0.01424\pm0.00210$, with $2.85$ raw and $5.15$ masked
+updates.  These paired results show that the ordering is not caused by unusually
+favorable rollouts for the gated method.
 
 The implementation and complete result files are provided in the
 \texttt{simulation} directory.  Seed 37 fixes policy construction and batch

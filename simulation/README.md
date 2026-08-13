@@ -13,6 +13,8 @@ The experiment tests three claims from the paper:
 2. Lower gradient MSE should yield better one-step population improvement.
 3. A prespecified ESS gate should retain raw updates at high coverage and apply
    the actual PPO advantage-sign gradient mask after coverage falls.
+4. Repeating the decision through a fixed-rollout optimization epoch should
+   turn the reliability advantage into a visible population-reward advantage.
 
 The controlled logger sweep fixes one evaluation policy and perturbs logging
 logits independently of the gradient contributions.  Across the same coverage
@@ -21,6 +23,12 @@ gate that uses the unclipped update when sample ESS is at least 0.1 and PPO
 clipping otherwise.  The threshold is prespecified to match the motivating LLM
 observation and is not tuned on these results.  Each coverage condition uses
 100 independent batches.
+
+The optimization stress test uses the logger with population ESS 0.002531 and
+holds each logged rollout fixed for eight updates.  Ratios and ESS are
+recomputed before every update.  The main figure uses step size 5, and the
+result files also report step size 2 as a sensitivity check.  Each setting uses
+100 independent rollouts and paired comparisons.
 
 Install the two dependencies and run from the repository root:
 
@@ -42,6 +50,8 @@ Outputs:
 
 - `simulation/results/ess_coverage_results.csv`
 - `simulation/results/ess_gate_summary.csv`
+- `simulation/results/ess_optimization_summary.csv`
+- `simulation/results/ess_optimization_paths.csv`
 - `figures/ess_policy_validation.pdf`
 - `figures/ess_policy_validation.png`
 

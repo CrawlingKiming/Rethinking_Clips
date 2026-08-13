@@ -5,8 +5,8 @@ prior off-policy evaluation work.  Optdigits images are contexts, digit labels
 are actions, and a correct action receives reward one.  Because the population
 is finite and fully labeled, every policy value and gradient is enumerable.
 
-The script runs two connected experiments with 100 independent batches per
-coverage condition:
+The script runs three connected experiments with at most 100 independent
+batches per condition:
 
 1. A controlled logger sweep keeps one evaluation policy fixed and perturbs
    its logging policy independently of the gradient contributions.  This
@@ -15,6 +15,10 @@ coverage condition:
    0.1 and the actual PPO advantage-sign gradient mask otherwise.  The gate is
    compared with always-unclipped and always-clipped decisions across the same
    coverage sweep.
+3. An eight-update fixed-rollout stress test asks whether the one-step advantage
+   compounds during optimization.  Its logger has population ESS 0.0025, while
+   its sample ESS distribution crosses the prespecified threshold, so the gate
+   exercises both branches.  We report moderate and aggressive step sizes.
 """
 
 from __future__ import annotations
@@ -42,6 +46,10 @@ class Config:
     one_step_learning_rate: float = 0.8
     ppo_epsilon: float = 1.0
     ess_threshold: float = 0.1
+    optimization_logger_level: float = 2.5
+    optimization_learning_rates: tuple[float, ...] = (2.0, 5.0)
+    figure_learning_rate: float = 5.0
+    optimization_steps: int = 8
 
 
 def policy_value(probabilities: np.ndarray, labels: np.ndarray) -> float:
@@ -360,6 +368,182 @@ def decision_summary(
     return summary
 
 
+def optimize_fixed_rollout(
+    features: np.ndarray,
+    labels: np.ndarray,
+    initial_weights: np.ndarray,
+    behavior: np.ndarray,
+    baseline: np.ndarray,
+    batch: tuple[np.ndarray, np.ndarray, np.ndarray],
+    config: Config,
+    method: str,
+    learning_rate: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    weights = initial_weights.copy()
+    values = [policy_value(softmax(features @ weights.T), labels)]
+    effective_sizes: list[float] = []
+    raw_use: list[float] = []
+    for _ in range(config.optimization_steps):
+        raw_gradient, ess = batch_gradient(
+            features,
+            weights,
+            behavior,
+            baseline,
+            batch,
+            method="raw",
+            epsilon=config.ppo_epsilon,
+        )
+        ppo_gradient, _ = batch_gradient(
+            features,
+            weights,
+            behavior,
+            baseline,
+            batch,
+            method="ppo",
+            epsilon=config.ppo_epsilon,
+        )
+        if method == "Unclipped":
+            gradient = raw_gradient
+            use_raw = 1.0
+        elif method == "PPO clipped":
+            gradient = ppo_gradient
+            use_raw = 0.0
+        elif method == "ESS gated":
+            use_raw = float(ess >= config.ess_threshold)
+            gradient = raw_gradient if use_raw else ppo_gradient
+        else:
+            raise ValueError(f"Unknown optimization method: {method}")
+        weights += learning_rate * gradient
+        values.append(policy_value(softmax(features @ weights.T), labels))
+        effective_sizes.append(ess)
+        raw_use.append(use_raw)
+    return np.array(values), np.array(effective_sizes), np.array(raw_use)
+
+
+def optimization_experiment(
+    features: np.ndarray,
+    labels: np.ndarray,
+    initial_weights: np.ndarray,
+    config: Config,
+    learning_rate: float,
+) -> tuple[list[dict[str, float | str]], list[dict[str, float | str]]]:
+    target = softmax(features @ initial_weights.T)
+    baseline = target[np.arange(len(labels)), labels]
+    loggers = dict(
+        controlled_loggers(
+            target,
+            config.coverage_levels,
+            np.random.default_rng(config.seed + 1),
+        )
+    )
+    behavior = loggers[config.optimization_logger_level]
+    population = population_gradient_and_moments(
+        features, labels, initial_weights, behavior, baseline
+    )
+    rng = np.random.default_rng(config.seed + 3)
+    methods = ("Unclipped", "PPO clipped", "ESS gated")
+    paths: dict[str, list[np.ndarray]] = {method: [] for method in methods}
+    gate_effective_sizes: list[np.ndarray] = []
+    gate_raw_use: list[np.ndarray] = []
+    for _ in range(config.repetitions):
+        batch = sample_logged_batch(rng, behavior, labels, config.batch_size)
+        for method in methods:
+            values, effective_sizes, raw_use = optimize_fixed_rollout(
+                features,
+                labels,
+                initial_weights,
+                behavior,
+                baseline,
+                batch,
+                config,
+                method,
+                learning_rate,
+            )
+            paths[method].append(values)
+            if method == "ESS gated":
+                gate_effective_sizes.append(effective_sizes)
+                gate_raw_use.append(raw_use)
+
+    stacked = {method: np.stack(method_paths) for method, method_paths in paths.items()}
+    path_rows: list[dict[str, float | str]] = []
+    for method, method_paths in stacked.items():
+        gains = method_paths - method_paths[:, [0]]
+        for step in range(config.optimization_steps + 1):
+            path_rows.append(
+                {
+                    "method": method,
+                    "step": step,
+                    "mean_population_gain": float(np.mean(gains[:, step])),
+                    "population_gain_se": float(
+                        np.std(gains[:, step], ddof=1)
+                        / math.sqrt(config.repetitions)
+                    ),
+                    "mean_population_value": float(np.mean(method_paths[:, step])),
+                    "population_value_se": float(
+                        np.std(method_paths[:, step], ddof=1)
+                        / math.sqrt(config.repetitions)
+                    ),
+                    "learning_rate": learning_rate,
+                }
+            )
+
+    final_gains = {
+        method: method_paths[:, -1] - method_paths[:, 0]
+        for method, method_paths in stacked.items()
+    }
+    gate_minus_raw = final_gains["ESS gated"] - final_gains["Unclipped"]
+    gate_minus_ppo = final_gains["ESS gated"] - final_gains["PPO clipped"]
+    gate_ess = np.stack(gate_effective_sizes)
+    gate_raw = np.stack(gate_raw_use)
+    summary_rows: list[dict[str, float | str]] = []
+    for method in methods:
+        gains = final_gains[method]
+        summary_rows.append(
+            {
+                "method": method,
+                "final_population_gain": float(np.mean(gains)),
+                "final_population_gain_se": float(
+                    np.std(gains, ddof=1) / math.sqrt(config.repetitions)
+                ),
+                "difference_from_unclipped": float(np.mean(gate_minus_raw))
+                if method == "ESS gated"
+                else math.nan,
+                "difference_from_unclipped_se": float(
+                    np.std(gate_minus_raw, ddof=1)
+                    / math.sqrt(config.repetitions)
+                )
+                if method == "ESS gated"
+                else math.nan,
+                "difference_from_ppo": float(np.mean(gate_minus_ppo))
+                if method == "ESS gated"
+                else math.nan,
+                "difference_from_ppo_se": float(
+                    np.std(gate_minus_ppo, ddof=1)
+                    / math.sqrt(config.repetitions)
+                )
+                if method == "ESS gated"
+                else math.nan,
+                "mean_gate_raw_updates": float(np.mean(np.sum(gate_raw, axis=1)))
+                if method == "ESS gated"
+                else math.nan,
+                "mean_gate_clipped_updates": float(
+                    config.optimization_steps - np.mean(np.sum(gate_raw, axis=1))
+                )
+                if method == "ESS gated"
+                else math.nan,
+                "mean_gate_ess": float(np.mean(gate_ess))
+                if method == "ESS gated"
+                else math.nan,
+                "logger_perturbation": config.optimization_logger_level,
+                "population_ess": float(population["rho"]),
+                "learning_rate": learning_rate,
+                "optimization_steps": config.optimization_steps,
+                "repetitions": config.repetitions,
+            }
+        )
+    return summary_rows, path_rows
+
+
 def write_csv(rows: list[dict[str, float | str]], output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", newline="", encoding="utf-8") as handle:
@@ -370,6 +554,8 @@ def write_csv(rows: list[dict[str, float | str]], output: Path) -> None:
 
 def make_figure(
     coverage_rows: list[dict[str, float]],
+    optimization_paths: list[dict[str, float | str]],
+    figure_learning_rate: float,
     output_stem: Path,
 ) -> None:
     import matplotlib
@@ -381,7 +567,6 @@ def make_figure(
     coverage = sorted(coverage_rows, key=lambda row: row["rho"])
     rho = np.array([row["rho"] for row in coverage])
     empirical_mse = np.array([row["empirical_mse"] for row in coverage])
-    empirical_mse_se = np.array([row["empirical_mse_se"] for row in coverage])
     theory_mse = np.array([row["theory_mse"] for row in coverage])
     improvement = np.array([row["one_step_improvement"] for row in coverage])
     improvement_se = np.array(
@@ -390,13 +575,10 @@ def make_figure(
     exact_improvement = np.array(
         [row["exact_gradient_improvement"] for row in coverage]
     )
-    sample_ess = np.array([row["mean_sample_ess"] for row in coverage])
-
     figure, axes = plt.subplots(1, 3, figsize=(11.0, 3.15), constrained_layout=True)
-    axes[0].errorbar(
+    axes[0].plot(
         rho,
         empirical_mse,
-        yerr=1.96 * empirical_mse_se,
         color="#0072B2",
         marker="o",
         label="Observed",
@@ -428,48 +610,48 @@ def make_figure(
     axes[1].legend(frameon=False, fontsize=8)
 
     decision_styles = {
-        "Unclipped": (
-            "one_step_improvement",
-            "one_step_improvement_se",
-            "#0072B2",
-            "--",
-        ),
-        "PPO clipped": (
-            "ppo_improvement",
-            "ppo_improvement_se",
-            "#D55E00",
-            ":",
-        ),
-        "ESS gated": (
-            "gate_improvement",
-            "gate_improvement_se",
-            "#009E73",
-            "-",
-        ),
+        "Unclipped": ("#0072B2", "--"),
+        "PPO clipped": ("#D55E00", ":"),
+        "ESS gated": ("#009E73", "-"),
     }
-    for method, (mean_key, se_key, color, linestyle) in decision_styles.items():
-        means = np.array([float(row[mean_key]) for row in coverage])
-        standard_errors = np.array([float(row[se_key]) for row in coverage])
-        axes[2].errorbar(
-            sample_ess,
+    for method, (color, linestyle) in decision_styles.items():
+        selected = [
+            row
+            for row in optimization_paths
+            if row["method"] == method
+            and math.isclose(float(row["learning_rate"]), figure_learning_rate)
+        ]
+        selected.sort(key=lambda row: int(row["step"]))
+        steps = np.array([int(row["step"]) for row in selected])
+        means = np.array([float(row["mean_population_gain"]) for row in selected])
+        standard_errors = np.array(
+            [float(row["population_gain_se"]) for row in selected]
+        )
+        axes[2].plot(
+            steps,
             means,
-            yerr=1.96 * standard_errors,
             color=color,
             linestyle=linestyle,
             marker="o" if method == "ESS gated" else None,
             label=method,
         )
+        axes[2].fill_between(
+            steps,
+            means - 1.96 * standard_errors,
+            means + 1.96 * standard_errors,
+            color=color,
+            alpha=0.10,
+        )
     axes[2].axhline(0.0, color="#777777", linewidth=0.8)
-    axes[2].axvline(0.1, color="#009E73", linewidth=0.8, alpha=0.7)
-    axes[2].set_title("(c) ESS selects the update", fontsize=10)
-    axes[2].set_xlabel("Mean sample ESS, $\\widehat\\rho$")
-    axes[2].set_ylabel("One-step population gain")
+    axes[2].set_title("(c) ESS gating improves an epoch", fontsize=10)
+    axes[2].set_xlabel("Fixed-rollout update")
+    axes[2].set_ylabel("Population reward gain")
     axes[2].legend(frameon=False, fontsize=7)
 
     for axis in axes[:2]:
         axis.set_xlabel("Normalized ESS, $\\rho$")
-    for axis in (axes[0], axes[2]):
-        axis.set_xscale("log")
+    axes[0].set_xscale("log")
+    axes[0].set_xlim(1e-3, 1.05)
     for axis in axes:
         axis.grid(True, color="#e6e6e6", linewidth=0.5)
         axis.tick_params(labelsize=8)
@@ -484,6 +666,27 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=Path("simulation/results"))
     parser.add_argument("--figure-dir", type=Path, default=Path("figures"))
     parser.add_argument("--repetitions", type=int, default=Config.repetitions)
+    parser.add_argument(
+        "--optimization-logger-level",
+        type=float,
+        default=Config.optimization_logger_level,
+    )
+    parser.add_argument(
+        "--optimization-learning-rates",
+        type=float,
+        nargs="+",
+        default=Config.optimization_learning_rates,
+    )
+    parser.add_argument(
+        "--figure-learning-rate",
+        type=float,
+        default=Config.figure_learning_rate,
+    )
+    parser.add_argument(
+        "--optimization-steps",
+        type=int,
+        default=Config.optimization_steps,
+    )
     parser.add_argument("--skip-figure", action="store_true")
     args = parser.parse_args()
     if not 2 <= args.repetitions <= 100:
@@ -491,7 +694,13 @@ def main() -> None:
 
     config = Config(
         repetitions=args.repetitions,
+        optimization_logger_level=args.optimization_logger_level,
+        optimization_learning_rates=tuple(args.optimization_learning_rates),
+        figure_learning_rate=args.figure_learning_rate,
+        optimization_steps=args.optimization_steps,
     )
+    if config.figure_learning_rate not in config.optimization_learning_rates:
+        raise ValueError("figure learning rate must be one of the reported rates")
     features, labels = load_optdigits(args.data_dir)
     classifier_config = ClassifierConfig(training_steps=config.classifier_steps)
     fitted_weights = fit_softmax_classifier(features, labels, classifier_config)
@@ -499,13 +708,27 @@ def main() -> None:
 
     coverage_rows = coverage_experiment(features, labels, initial_weights, config)
     summary_rows = decision_summary(coverage_rows, config)
+    optimization_summary: list[dict[str, float | str]] = []
+    optimization_paths: list[dict[str, float | str]] = []
+    for learning_rate in config.optimization_learning_rates:
+        rate_summary, rate_paths = optimization_experiment(
+            features, labels, initial_weights, config, learning_rate
+        )
+        optimization_summary.extend(rate_summary)
+        optimization_paths.extend(rate_paths)
     coverage_csv = args.output_dir / "ess_coverage_results.csv"
     summary_csv = args.output_dir / "ess_gate_summary.csv"
+    optimization_summary_csv = args.output_dir / "ess_optimization_summary.csv"
+    optimization_paths_csv = args.output_dir / "ess_optimization_paths.csv"
     write_csv(coverage_rows, coverage_csv)
     write_csv(summary_rows, summary_csv)
+    write_csv(optimization_summary, optimization_summary_csv)
+    write_csv(optimization_paths, optimization_paths_csv)
     if not args.skip_figure:
         make_figure(
             coverage_rows,
+            optimization_paths,
+            config.figure_learning_rate,
             args.figure_dir / "ess_policy_validation",
         )
 
@@ -523,6 +746,8 @@ def main() -> None:
     )
     print(f"Wrote {coverage_csv}")
     print(f"Wrote {summary_csv}")
+    print(f"Wrote {optimization_summary_csv}")
+    print(f"Wrote {optimization_paths_csv}")
     print(f"Prespecified ESS threshold: {config.ess_threshold:.2f}")
     print(f"Correlation rho, log(MSE): {rho_mse_correlation:.4f}")
     print(f"Correlation log(MSE), one-step gain: {mse_gain_correlation:.4f}")
@@ -530,6 +755,13 @@ def main() -> None:
         print(
             f"{row['method']}: mean gain {float(row['mean_one_step_gain']):.5f} "
             f"+/- {float(row['gain_se']):.5f}"
+        )
+    for row in optimization_summary:
+        print(
+            f"{row['method']} (step size {float(row['learning_rate']):g}): "
+            f"eight-update gain "
+            f"{float(row['final_population_gain']):.5f} +/- "
+            f"{float(row['final_population_gain_se']):.5f}"
         )
 
 

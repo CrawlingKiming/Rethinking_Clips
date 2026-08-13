@@ -28,5 +28,7 @@ if __name__ == "__main__":
     results = Path("simulation/results")
     make_figure(
         read_rows(results / "ess_coverage_results.csv"),
+        read_rows(results / "ess_optimization_paths.csv"),
+        5.0,
         Path("figures/ess_policy_validation"),
     )
