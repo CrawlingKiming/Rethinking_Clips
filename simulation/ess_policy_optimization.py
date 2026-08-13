@@ -15,7 +15,7 @@ batches per condition:
    0.1 and the actual PPO advantage-sign gradient mask otherwise.  The gate is
    compared with always-unclipped and always-clipped decisions across the same
    coverage sweep.
-3. An eight-update fixed-rollout stress test asks whether the one-step advantage
+3. A sixteen-update fixed-rollout stress test asks whether the one-step advantage
    compounds during optimization.  Its logger has population ESS 0.0025, while
    its sample ESS distribution crosses the prespecified threshold, so the gate
    exercises both branches.  We report moderate and aggressive step sizes.
@@ -49,7 +49,7 @@ class Config:
     optimization_logger_level: float = 2.5
     optimization_learning_rates: tuple[float, ...] = (2.0, 5.0)
     figure_learning_rate: float = 5.0
-    optimization_steps: int = 8
+    optimization_steps: int = 16
 
 
 def policy_value(probabilities: np.ndarray, labels: np.ndarray) -> float:
@@ -465,6 +465,7 @@ def optimization_experiment(
                 gate_raw_use.append(raw_use)
 
     stacked = {method: np.stack(method_paths) for method, method_paths in paths.items()}
+    initial_value = float(next(iter(stacked.values()))[0, 0])
     path_rows: list[dict[str, float | str]] = []
     for method, method_paths in stacked.items():
         gains = method_paths - method_paths[:, [0]]
@@ -482,6 +483,15 @@ def optimization_experiment(
                     "population_value_se": float(
                         np.std(method_paths[:, step], ddof=1)
                         / math.sqrt(config.repetitions)
+                    ),
+                    "mean_relative_improvement_pct": float(
+                        100.0 * np.mean(gains[:, step]) / initial_value
+                    ),
+                    "relative_improvement_pct_se": float(
+                        100.0
+                        * np.std(gains[:, step], ddof=1)
+                        / math.sqrt(config.repetitions)
+                        / initial_value
                     ),
                     "learning_rate": learning_rate,
                 }
@@ -505,6 +515,15 @@ def optimization_experiment(
                 "final_population_gain_se": float(
                     np.std(gains, ddof=1) / math.sqrt(config.repetitions)
                 ),
+                "final_relative_improvement_pct": float(
+                    100.0 * np.mean(gains) / initial_value
+                ),
+                "final_relative_improvement_pct_se": float(
+                    100.0
+                    * np.std(gains, ddof=1)
+                    / math.sqrt(config.repetitions)
+                    / initial_value
+                ),
                 "difference_from_unclipped": float(np.mean(gate_minus_raw))
                 if method == "ESS gated"
                 else math.nan,
@@ -514,12 +533,38 @@ def optimization_experiment(
                 )
                 if method == "ESS gated"
                 else math.nan,
+                "relative_difference_from_unclipped_pct": float(
+                    100.0 * np.mean(gate_minus_raw) / initial_value
+                )
+                if method == "ESS gated"
+                else math.nan,
+                "relative_difference_from_unclipped_pct_se": float(
+                    100.0
+                    * np.std(gate_minus_raw, ddof=1)
+                    / math.sqrt(config.repetitions)
+                    / initial_value
+                )
+                if method == "ESS gated"
+                else math.nan,
                 "difference_from_ppo": float(np.mean(gate_minus_ppo))
                 if method == "ESS gated"
                 else math.nan,
                 "difference_from_ppo_se": float(
                     np.std(gate_minus_ppo, ddof=1)
                     / math.sqrt(config.repetitions)
+                )
+                if method == "ESS gated"
+                else math.nan,
+                "relative_difference_from_ppo_pct": float(
+                    100.0 * np.mean(gate_minus_ppo) / initial_value
+                )
+                if method == "ESS gated"
+                else math.nan,
+                "relative_difference_from_ppo_pct_se": float(
+                    100.0
+                    * np.std(gate_minus_ppo, ddof=1)
+                    / math.sqrt(config.repetitions)
+                    / initial_value
                 )
                 if method == "ESS gated"
                 else math.nan,
@@ -568,11 +613,13 @@ def make_figure(
     rho = np.array([row["rho"] for row in coverage])
     empirical_mse = np.array([row["empirical_mse"] for row in coverage])
     theory_mse = np.array([row["theory_mse"] for row in coverage])
-    improvement = np.array([row["one_step_improvement"] for row in coverage])
+    improvement = 1e3 * np.array(
+        [row["one_step_improvement"] for row in coverage]
+    )
     improvement_se = np.array(
         [row["one_step_improvement_se"] for row in coverage]
-    )
-    exact_improvement = np.array(
+    ) * 1e3
+    exact_improvement = 1e3 * np.array(
         [row["exact_gradient_improvement"] for row in coverage]
     )
     figure, axes = plt.subplots(1, 3, figsize=(11.0, 3.15), constrained_layout=True)
@@ -606,7 +653,7 @@ def make_figure(
     )
     axes[1].axhline(0.0, color="#777777", linewidth=0.8)
     axes[1].set_title("(b) Error reduces update quality", fontsize=10)
-    axes[1].set_ylabel("One-step population gain")
+    axes[1].set_ylabel("One-step reward gain ($\\times 10^{-3}$)")
     axes[1].legend(frameon=False, fontsize=8)
 
     decision_styles = {
@@ -621,11 +668,14 @@ def make_figure(
             if row["method"] == method
             and math.isclose(float(row["learning_rate"]), figure_learning_rate)
         ]
+        selected = [row for row in selected if int(row["step"]) in (4, 8, 12, 16)]
         selected.sort(key=lambda row: int(row["step"]))
         steps = np.array([int(row["step"]) for row in selected])
-        means = np.array([float(row["mean_population_gain"]) for row in selected])
+        means = np.array(
+            [float(row["mean_relative_improvement_pct"]) for row in selected]
+        )
         standard_errors = np.array(
-            [float(row["population_gain_se"]) for row in selected]
+            [float(row["relative_improvement_pct_se"]) for row in selected]
         )
         axes[2].plot(
             steps,
@@ -643,9 +693,11 @@ def make_figure(
             alpha=0.10,
         )
     axes[2].axhline(0.0, color="#777777", linewidth=0.8)
-    axes[2].set_title("(c) ESS gating improves an epoch", fontsize=10)
-    axes[2].set_xlabel("Fixed-rollout update")
-    axes[2].set_ylabel("Population reward gain")
+    axes[2].set_title("(c) ESS gating improves optimization", fontsize=10)
+    axes[2].set_xlabel("Optimization update")
+    axes[2].set_ylabel("Reward improvement (%)")
+    axes[2].set_xticks([4, 8, 12, 16])
+    axes[2].set_xlim(3.5, 16.5)
     axes[2].legend(frameon=False, fontsize=7)
 
     for axis in axes[:2]:
@@ -759,9 +811,12 @@ def main() -> None:
     for row in optimization_summary:
         print(
             f"{row['method']} (step size {float(row['learning_rate']):g}): "
-            f"eight-update gain "
+            f"sixteen-update relative improvement "
+            f"{float(row['final_relative_improvement_pct']):.2f}% +/- "
+            f"{float(row['final_relative_improvement_pct_se']):.2f}% "
+            f"(absolute gain "
             f"{float(row['final_population_gain']):.5f} +/- "
-            f"{float(row['final_population_gain_se']):.5f}"
+            f"{float(row['final_population_gain_se']):.5f})"
         )
 
 

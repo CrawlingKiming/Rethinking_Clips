@@ -6,7 +6,7 @@ context, the ten digit labels are actions, and selecting the correct label gives
 reward one. The finite labeled population makes the true policy gradient,
 importance-weight moments, and policy reward exactly computable.
 
-The experiment tests three claims from the paper:
+The experiment tests four claims from the paper:
 
 1. Higher ESS should predict lower raw-gradient MSE when gradient scale is
    controlled.
@@ -25,10 +25,11 @@ observation and is not tuned on these results.  Each coverage condition uses
 100 independent batches.
 
 The optimization stress test uses the logger with population ESS 0.002531 and
-holds each logged rollout fixed for eight updates.  Ratios and ESS are
-recomputed before every update.  The main figure uses step size 5, and the
-result files also report step size 2 as a sensitivity check.  Each setting uses
-100 independent rollouts and paired comparisons.
+holds each logged rollout fixed for 16 updates.  Ratios and ESS are recomputed
+before every update.  The main figure reports relative population-reward
+improvement at updates 4, 8, 12, and 16 using step size 5.  The result files
+also report step size 2 as a sensitivity check.  Each setting uses 100
+independent rollouts and paired comparisons.
 
 Install the two dependencies and run from the repository root:
 
