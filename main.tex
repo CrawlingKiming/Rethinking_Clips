@@ -882,32 +882,36 @@ controlled.  Second, this MSE ordering should determine the quality of a policy
 update.  Third, thresholding sample ESS should improve multi-update optimization
 relative to always applying or never applying PPO masking.
 
-We adopt the classification-to-contextual-bandit protocol of
-\citet{wang2017adaptive}.  Each Optdigits image is a context, the ten labels are
-actions, and a correct action yields unit reward \citep{alpaydin1998optdigits}.
-The finite labeled population makes the target gradient, gradient MSE, and
-population reward exactly computable.  The testbed therefore permits direct
-evaluation of the theoretical quantities without relying on a noisy training
-curve as a proxy.
+We use a standard classification-to-bandit construction
+\citep{dudik2011doubly,wang2017adaptive}.  Intuitively, the policy sees a digit
+image, chooses one of ten labels, and observes only whether that choice was
+correct.  Optdigits supplies 5,620 such examples in a compact 64-feature form
+\citep{alpaydin1998optdigits}.  Although the simulated learner receives only
+the reward for its chosen label, the experimenter retains the labels.  We can
+therefore enumerate the exact population gradient and reward against which the
+logged-data estimate is judged.
 
-The controlled sweep fixes one evaluation policy and varies only its logger.
-The logger perturbation is independent of the gradient contributions, which
-changes ESS while keeping the weighted gradient scale within a narrow range.
-For each of six coverage conditions, we draw 100 batches of 256 interactions,
-measure raw-gradient MSE, and evaluate the exact population reward after one
-estimated update.  The same batches compare the raw gradient, the PPO mask in
-Proposition~\ref{prop:ppo-mask}, and a gate that uses the raw gradient when
-$\widehat\rho\ge0.1$ and the PPO-masked gradient otherwise.  The threshold is
-specified before observing the bandit results.
+We first fix a stochastic digit policy and progressively make the logging
+policy less representative of it.  This produces six coverage conditions while
+leaving the underlying learning problem unchanged.  In each condition, 100
+independent logged batches of 256 decisions are used to estimate the gradient.
+We then ask two direct questions: does lower ESS predict larger error relative
+to the enumerated gradient, and does that error reduce the reward obtained by
+one policy update?  On the same batches, we also compare always using the raw
+gradient, always applying the PPO mask from
+Proposition~\ref{prop:ppo-mask}, and using the raw gradient only when
+$\widehat\rho\ge0.1$.  The threshold is specified before observing the bandit
+results.
 
-The multi-update study tests whether these one-step differences persist during
-optimization.  We use the lowest-coverage condition, whose population ESS is
-$0.0025$, and perform 16 updates on each fixed rollout.  Ratios and sample ESS
-are recomputed after every update, so the gate can change its decision as the
-policy moves.  Panel (c) reports checkpoints 4, 8, 12, and 16 using relative
-population-reward improvement, $100(V_t-V_0)/V_0$.  We evaluate step sizes $2$
-and $5$, with the latter shown in the main figure.  Appendix~\ref{app:bandit}
-provides the complete protocol and both settings.
+The multi-update study asks whether the one-step mechanism matters over a full
+optimization epoch.  Under the lowest-coverage logger, each method reuses the
+same logged batch for 16 updates, as in fixed-rollout policy optimization.
+Ratios and sample ESS are recomputed after every update, so the gate can switch
+between raw and masked gradients as the policy moves.  Panel (c) reports
+relative population-reward improvement after 4, 8, 12, and 16 updates.  We
+evaluate step sizes $2$ and $5$, with the more aggressive setting shown in the
+figure.  Appendix~\ref{app:bandit} defines every quantity, sampling step,
+hyperparameter, and uncertainty calculation.
 
 \begin{figure}[tbp]
   \centering
@@ -922,7 +926,8 @@ provides the complete protocol and both settings.
   update when sample ESS is at least $0.1$ and PPO masking otherwise during an
   16-update fixed-rollout optimization with step size $5$.  Relative improvement
   is $100(V_t-V_0)/V_0$.  Error bars in (b) and bands in (c) are 95\% confidence
-  intervals over 100 independent rollouts.}
+  intervals over 100 independent logged batches in (b) and 100 independent
+  fixed rollouts in (c).}
   \label{fig:ess-validation}
 \end{figure}
 
@@ -1047,129 +1052,306 @@ the LLM experiment, remains the paper's completed empirical evidence.
 \section{Optdigits contextual-bandit protocol}
 \label{app:bandit}
 
-\subsection{Established testbed and data}
+\subsection{What classification-to-bandit means}
 
-The protocol follows the classification reduction used by
-\citet{dudik2011doubly,wang2017adaptive}.  A labeled example is a context, the
-class labels are actions, and the reward equals one exactly when the selected
-action is the true label.  These studies use the construction because logged
-bandit feedback can be sampled while the full labeled data still reveal the
-target value.  We use the same advantage for gradient evaluation: the full
-empirical distribution also reveals the target gradient and all
-importance-weight moments.  The 2011 study included Optdigits in its UCI
-classification benchmark and used 30 repeated policy-learning runs; it also
-used 100 repetitions in a separate covariate-shift study
-\citep{dudik2011doubly}.  Our 100-repetition limit therefore remains consistent
-with established contextual-bandit practice.
+The experiment follows the classification-to-bandit reduction used by
+\citet{dudik2011doubly} and subsequently by \citet{wang2017adaptive}.  Start
+with a supervised example $(x,y)$, where $x$ is an input and
+$y\in\{0,\ldots,9\}$ is its class.  The bandit interaction is generated as
+follows:
+\begin{enumerate}
+  \item present only $x$ to the policy;
+  \item draw one action $A\in\{0,\ldots,9\}$ from a logging policy
+  $Q(\cdot\mid x)$;
+  \item reveal only the selected-action reward
+  $R(x,A)=\mathbb{1}\{A=y\}$.
+\end{enumerate}
+Thus the logged learner observes $(x,A,Q(A\mid x),R(x,A))$, not the rewards of
+the nine unselected actions.  The simulator retains $y$ only for population
+evaluation.  This construction produces genuine partial feedback while making
+the counterfactual rewards available to the experimenter.  Dud\'{i}k et al.
+used it to turn classification benchmarks, including Optdigits, into contextual
+bandits.  Wang et al. later used the same class-to-action and
+correct-class-to-unit-reward construction to evaluate off-policy estimators
+against known finite-population truth.  Our experiment adapts that established
+evaluation device to policy-gradient estimation; it is not a claim about image
+classification generalization.
 
-The Optdigits data contain $M=5{,}620$ examples, 64 pixel-aggregation features,
-and ten digit classes \citep{alpaydin1998optdigits}.  Features are divided by 16
-and augmented with an intercept.  We combine the original training and test
-files and place uniform mass on the resulting empirical population.  This step
-does not estimate predictive performance.  It defines a finite contextual
-bandit on which population quantities are exactly computable.
+\subsection{Optdigits data and preprocessing}
 
-\subsection{Policy class and controlled ESS sweep}
+Optdigits is the UCI Optical Recognition of Handwritten Digits data set
+\citep{alpaydin1998optdigits}.  The original examples are $32\times32$ binary
+images.  Each image is partitioned into $4\times4$ blocks, and the foreground
+pixels in each block are counted, yielding an $8\times8$ representation with
+64 integer features in $\{0,\ldots,16\}$.  The response is one of ten digits.
+The supplied files contain 3,823 training examples and 1,797 test examples,
+for $M=5{,}620$ examples in total.
 
-We fit a ten-class linear softmax classifier to the finite population and scale
-its weights by $0.3$ to obtain a stochastic evaluation policy.  For feature
-vector $x$ and action $a$, its score is
+We download the two official UCI files, concatenate them, divide all 64 features
+by 16, and append a constant feature equal to one.  Every context is therefore
+$x_j\in\mathbb{R}^{65}$.  We place probability $1/M$ on each context.  The
+original train-test distinction is deliberately not used because predictive
+generalization is not the estimand.  The concatenated data define a finite
+population whose policy value, gradient, and importance-weight moments can all
+be enumerated exactly.
+
+\subsection{Initial policy, reward, baseline, and objective}
+
+The policy is a ten-class linear softmax with parameter
+$\theta\in\mathbb{R}^{10\times65}$:
 \begin{equation}
-  S_\theta(x,a)=\{e_a-P_\theta(\cdot\mid x)\}\otimes x.
+  P_\theta(a\mid x)
+  =\frac{\exp(\theta_a^\top x)}
+  {\sum_{c=0}^{9}\exp(\theta_c^\top x)}.
+  \label{eq:optdigits-policy}
+\end{equation}
+To construct a nontrivial but stochastic initial policy, we first fit a softmax
+classifier to all $M$ examples.  Its weights start at zero and receive 400
+full-batch gradient-descent steps on multiclass cross-entropy, with learning
+rate $0.8$, no regularization, no minibatching, and no early stopping.  If
+$\theta_{\mathrm{fit}}$ denotes the result, every simulation starts at
+$\theta_0=0.3\theta_{\mathrm{fit}}$.  This scaling prevents the policy from
+becoming nearly deterministic before logging begins.
+
+The finite-population objective is the probability of choosing the correct
+digit under a uniformly drawn context:
+\begin{equation}
+  V(\theta)
+  =\frac1M\sum_{j=1}^{M}
+    P_\theta(y_j\mid x_j).
+  \label{eq:optdigits-value}
+\end{equation}
+The reward is $R_{j,a}=\mathbb{1}\{a=y_j\}$.  We use the fixed baseline
+$b_j=P_{\theta_0}(y_j\mid x_j)$ and define
+$A_{j,a}=R_{j,a}-b_j$.  Consequently $|A_{j,a}|\le1$.  The baseline is known
+from the initial policy and never fitted from the sampled bandit batch.  Its
+being fixed during the 16-update experiment does not change the population
+gradient because, for every context,
+$\sum_aP_\theta(a\mid x)\nabla_\theta\log P_\theta(a\mid x)=0$.
+
+For this policy, the score is the $10\times65$ matrix
+\begin{equation}
+  S_\theta(x_j,a)
+  =\nabla_\theta\log P_\theta(a\mid x_j)
+  =\{e_a-P_\theta(\cdot\mid x_j)\}x_j^\top,
   \label{eq:optdigits-score}
 \end{equation}
-The reward is $R(x,a)=\mathbb{1}\{a=y(x)\}$, and the prompt-only baseline is the
-target policy's probability of the correct label.  Hence $|A|\le1$, matching the
-bounded-reward regime discussed in Proposition~\ref{prop:g2-bound}.
+and one unweighted gradient contribution is
+$H_\theta(x_j,a)=A_{j,a}S_\theta(x_j,a)$.
 
-To isolate the coverage effect, we hold this evaluation policy and its gradient
-contributions fixed.  We draw one zero-mean Gaussian perturbation of the
-action logits for every context and define six logging policies by multiplying
-that perturbation by
+\subsection{Logging policies and the controlled coverage sweep}
+
+We vary only the mismatch between the fixed initial policy and the logger.  With
+random seed 38, draw one array
+$Z\in\mathbb{R}^{M\times10}$ with independent standard-normal entries and
+center every row so that $\sum_aZ_{j,a}=0$.  The six logging policies are
 \begin{equation}
+  Q_\alpha(a\mid x_j)
+  =\operatorname{softmax}_a
+    \left(\log P_{\theta_0}(a\mid x_j)+\alpha Z_{j,a}\right),
+  \qquad
   \alpha\in\{0,0.5,1,1.5,2,2.5\}.
   \label{eq:logger-perturbation}
 \end{equation}
-Because this perturbation is sampled independently of $H_\theta$, it varies
-coverage without deliberately aligning low coverage with large gradients.  In
-the realized sweep, $G_{2,\theta}$ remains between $2.65$ and $3.12$, while
-$\rho_\theta$ ranges from $1$ to $0.0025$.  This controlled design makes ESS the
-main varying quantity rather than a post hoc correlate.
+The same realized $Z$ is multiplied by each value of $\alpha$; it is not
+redrawn across conditions.  At $\alpha=0$, $Q_\alpha=P_{\theta_0}$.  Increasing
+$\alpha$ progressively changes which actions the logger favors.  Softmax gives
+strictly positive probability to every action, so all importance ratios are
+defined and the true raw importance-weighted gradient is unchanged across
+loggers.  Since $Z$ is sampled without using rewards, advantages, or scores,
+coverage is not deliberately aligned with large gradient contributions.  In
+the realized sweep, $G_{2,\theta_0}$ varies only from $2.65$ to $3.12$, whereas
+$\rho_{\theta_0}$ varies from $1$ to $0.002531$.
 
-\subsection{Population quantities and sampled estimators}
+\subsection{Exact gradient, exact MSE, and empirical MSE}
 
-For each logger $Q$, contexts are uniform over the $M$ examples and actions are
-drawn from $Q(\cdot\mid x)$.  We enumerate all $M\times10$ context-action pairs
-to calculate
+For a logger $Q=Q_\alpha$, a logged observation is generated by drawing
+$J\sim\operatorname{Uniform}\{1,\ldots,M\}$, then
+$A\sim Q(\cdot\mid x_J)$.  Define
+\begin{equation}
+  W_\theta(x_j,a)
+  =\frac{P_\theta(a\mid x_j)}{Q(a\mid x_j)}.
+  \label{eq:optdigits-weight}
+\end{equation}
+The phrase \emph{true gradient} refers to an exact finite sum, not to a larger
+Monte Carlo batch.  We evaluate all $M\times10=56{,}200$ context-action pairs:
 \begin{align}
-  g
-  &=\frac1M\sum_{x=1}^M\sum_{a=1}^{10}
-    P_\theta(a\mid x)H_\theta(x,a),
+  g(\theta)
+  &=\nabla_\theta V(\theta)
+    =\frac1M\sum_{j=1}^{M}\sum_{a=0}^{9}
+      P_\theta(a\mid x_j)H_\theta(x_j,a),
     \label{eq:optdigits-gradient}\\
   \rho_\theta^{-1}
-  &=\frac1M\sum_{x=1}^M\sum_{a=1}^{10}
-    Q(a\mid x)W_\theta(x,a)^2,
+  &=\frac1M\sum_{j=1}^{M}\sum_{a=0}^{9}
+    Q(a\mid x_j)W_\theta(x_j,a)^2,
     \label{eq:optdigits-rho}\\
   G_{2,\theta}
-  &=\rho_\theta\frac1M\sum_{x=1}^M\sum_{a=1}^{10}
-    Q(a\mid x)W_\theta(x,a)^2\|H_\theta(x,a)\|_2^2.
+  &=\rho_\theta\frac1M\sum_{j=1}^{M}\sum_{a=0}^{9}
+    Q(a\mid x_j)W_\theta(x_j,a)^2
+    \|H_\theta(x_j,a)\|_F^2.
     \label{eq:optdigits-g2}
 \end{align}
-Substitution into \eqref{eq:ess-factorization} gives the predicted raw MSE
-without Monte Carlo approximation.
+Equation~\eqref{eq:optdigits-gradient} is independent of $Q$ because the factor
+$QW_\theta$ equals $P_\theta$.  The program forms every score matrix in
+\eqref{eq:optdigits-score}, weights it by $P_\theta A_{j,a}/M$, and adds the
+result.  No sampled action enters this calculation.
 
-For each logger, we draw 100 independent batches with $N=256$.  We compute the
-raw-gradient squared error and update once with learning rate $0.8$.  The full
-population then gives the exact reward before and after each estimated update.
-The same step using the population gradient supplies a reference gain.
-
-\subsection{ESS-gated update decision}
-
-The decision study uses the same policy, loggers, batch size, and learning rate
-as the controlled sweep.  On each batch, the three candidate updates are
+For one logged batch $\mathcal{B}_r=\{(J_i,A_i,R_i)\}_{i=1}^{N}$, the raw
+estimate and normalized sample ESS are
+\begin{align}
+  \widehat g_r
+  &=\frac1N\sum_{i=1}^{N}
+    W_\theta(x_{J_i},A_i)H_\theta(x_{J_i},A_i),
+    \label{eq:optdigits-sample-gradient}\\
+  \widehat\rho_r
+  &=\frac{(\sum_{i=1}^{N}W_i)^2}
+    {N\sum_{i=1}^{N}W_i^2}.
+    \label{eq:optdigits-sample-ess}
+\end{align}
+We use $N=256$ and $R=100$ independently sampled batches per logger.  Each
+batch samples contexts with replacement and then samples one action from its
+logger.  The reported empirical gradient MSE is
 \begin{equation}
-  \widehat g_W,
-  \qquad
+  \widehat{\operatorname{MSE}}
+  =\frac1R\sum_{r=1}^{R}
+    \|\widehat g_r-g(\theta_0)\|_F^2.
+  \label{eq:optdigits-empirical-mse}
+\end{equation}
+This is the squared Euclidean error after vectorizing all $10\times65=650$
+gradient coordinates.  It is neither a per-coordinate average nor a root MSE.
+The exact finite-population MSE shown by the dashed curve in
+Figure~\ref{fig:ess-validation}(a) is
+\begin{equation}
+  \operatorname{MSE}(\widehat g_r)
+  =\frac1N\left[
+    \frac{G_{2,\theta_0}}{\rho_{\theta_0}}
+    -\|g(\theta_0)\|_F^2
+  \right],
+  \label{eq:optdigits-exact-mse}
+\end{equation}
+where every expectation is evaluated by the same 56,200-term sum.  At very low
+ESS, rare actions with extremely large weights contribute strongly to the exact
+second moment but may not occur in 100 batches.  The empirical average can
+therefore lie below the exact MSE even though it is an unbiased Monte Carlo
+estimate of that MSE.  This explains the visible gap at the lowest-coverage
+conditions.
+
+\subsection{One-step update and ESS decision}
+
+For each of the six loggers, the 100 batches are generated with seed 39.  A
+single batch is passed to all three methods, making every comparison paired.
+The raw estimator is given in \eqref{eq:optdigits-sample-gradient}.  The masked
+estimator and the ESS decision are
+\begin{equation}
   \widehat g_{\mathrm{PPO}}
-  =\frac1N\sum_{i=1}^N W_iM_{\epsilon,i}H_i,
+  =\frac1N\sum_{i=1}^N W_iM_{1,i}H_i,
   \qquad
   \widehat g_{\mathrm{gate}}
   =\begin{cases}
-    \widehat g_W,&\widehat\rho\ge0.1,\\
-    \widehat g_{\mathrm{PPO}},&\widehat\rho<0.1,
+    \widehat g_r,&\widehat\rho_r\ge0.1,\\
+    \widehat g_{\mathrm{PPO}},&\widehat\rho_r<0.1.
   \end{cases}
   \label{eq:experimental-estimators}
 \end{equation}
-with $\epsilon=1$.  The value $0.1$ is prespecified to match the motivating LLM
-observation rather than selected from the bandit outcomes.  It is not claimed
-as a universal constant.  Because each batch supplies all three updates,
-differences between methods are evaluated in paired form.
+Here $M_{1,i}$ is exactly the advantage-sign mask in
+Proposition~\ref{prop:ppo-mask} with $\epsilon=1$.  Thus a nonnegative-advantage
+sample is retained when $W_i\le2$, and a negative-advantage sample is retained
+when $W_i\ge0$.  Since ratios are positive, the latter condition is always
+satisfied.  In this testbed the PPO rule therefore removes only high-ratio,
+nonnegative-advantage contributions.  It does not numerically truncate a ratio
+that it retains.
 
-\subsection{Fixed-rollout optimization stress test}
+The threshold $0.1$ is fixed before examining any bandit outcome to match the
+motivating LLM rule; it is not tuned on these simulations and is not presented
+as universal.  Each method updates
+$\theta_1=\theta_0+0.8\widehat g$.  We then enumerate
+$V(\theta_1)$ using \eqref{eq:optdigits-value} and report
+$V(\theta_1)-V(\theta_0)$.  Replacing $\widehat g$ by the enumerated
+$g(\theta_0)$ gives the exact-gradient reference in
+Figure~\ref{fig:ess-validation}(b).
 
-The one-step study isolates the causal chain, but policy optimization applies
-several updates to a collected rollout.  We test whether the estimator choice
-continues to matter over such an epoch at the logger perturbation $\alpha=2.5$,
-whose population ESS is $0.002531$.  This condition is intentionally difficult:
-sample ESS moves across the $0.1$ threshold as the target policy changes, so the
-gate uses both branches.
+\subsection{Sixteen-update fixed-rollout experiment}
 
-For each of 100 independently sampled rollouts, all methods start from the same
-evaluation policy and hold that rollout fixed for 16 updates.  Ratios,
-gradients, and sample ESS are recomputed under the current policy before every
-update.  The advantage baseline remains fixed at its value under the initial
-policy.  We evaluate the exact population reward after every update and compare
-the three methods in paired form.  Results are reported at updates 4, 8, 12,
-and 16 using
+The optimization experiment uses $Q_{2.5}$, whose population ESS at
+$\theta_0$ is $0.002531$.  With seed 40, we independently sample 100 fixed
+rollouts of $N=256$ interactions.  For each rollout and each method, set
+$\theta^{(0)}=\theta_0$ and repeat the following steps for
+$t=0,\ldots,15$:
+\begin{enumerate}
+  \item recompute $P_{\theta^{(t)}}$, every ratio
+  $P_{\theta^{(t)}}(A_i\mid x_{J_i})/Q_{2.5}(A_i\mid x_{J_i})$, and
+  $\widehat\rho^{(t)}$ on the same 256 interactions;
+  \item compute the raw and PPO-masked gradients using the current policy
+  score and the fixed initial-policy baseline $b_j$;
+  \item select the raw gradient, the masked gradient, or the
+  $\widehat\rho^{(t)}\ge0.1$ decision according to the method;
+  \item update $\theta^{(t+1)}=\theta^{(t)}+\eta\widehat g^{(t)}$;
+  \item enumerate $V(\theta^{(t+1)})$ over all 5,620 contexts.
+\end{enumerate}
+The logger, actions, rewards, and contexts stay fixed within a rollout.  Only
+the target policy, ratios, scores, ESS, and selected update change.  All three
+methods use the same rollout, and the same 100 rollouts are used for step sizes
+$\eta=2$ and $\eta=5$.  The moderate setting reports behavior under smaller
+updates; the aggressive setting tests whether unreliable gradients accumulate
+over an epoch and is the setting displayed in Figure~\ref{fig:ess-validation}(c).
+No learning rate is selected separately for any method.
+
+At checkpoint $t$, relative improvement is
 \begin{equation}
   \Delta_t^{\mathrm{rel}}
-  =100\frac{V(\theta_t)-V(\theta_0)}{V(\theta_0)}.
+  =100\frac{V(\theta^{(t)})-V(\theta^{(0)})}
+  {V(\theta^{(0)})}.
   \label{eq:relative-improvement}
 \end{equation}
-Step size $2$ is a moderate condition, while step size $5$ is an aggressive
-stress condition that makes gradient-estimation failures consequential within
-16 updates.  Figure~\ref{fig:ess-validation}(c) shows the latter, and
-Table~\ref{tab:bandit-epoch-results} reports both.
+The initial value is $V(\theta_0)=0.42154$.  Text and tables report the mean and
+standard error $s/\sqrt{100}$ across rollouts.  Figure error bars and bands are
+the mean plus or minus $1.96s/\sqrt{100}$.  Method differences are first taken
+within each paired rollout and then summarized, which is why their standard
+errors need not equal the sum of the marginal standard errors.
+
+\subsection{Complete implementation specification}
+
+Table~\ref{tab:bandit-specification} collects every fixed choice.  The initial
+classifier has no randomness.  Seed 38 constructs the logger perturbation,
+seed 39 generates the one-step batches, and seed 40 generates the fixed
+rollouts.  The source script is
+\texttt{simulation/ess\_policy\_optimization.py}; running it with its defaults
+downloads the official data, regenerates all CSV files in
+\texttt{simulation/results}, and regenerates
+\texttt{figures/ess\_policy\_validation.pdf}.  The computation uses NumPy for
+the finite sums and Matplotlib only for plotting.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Complete specification of the Optdigits simulation.}
+\label{tab:bandit-specification}
+\begingroup
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{ll}
+\toprule
+Component & Fixed choice \\
+\midrule
+Population & 5,620 concatenated UCI examples, sampled uniformly \\
+Context & 64 features divided by 16, plus one intercept \\
+Actions and reward & 10 digits; $R=1$ for the correct digit and $0$ otherwise \\
+Policy & Linear softmax, $10\times65$ parameters \\
+Classifier fit & Zero start, 400 full-batch steps, step size $0.8$, no penalty \\
+Initial policy & $\theta_0=0.3\theta_{\mathrm{fit}}$ \\
+Logger sweep & $\alpha\in\{0,0.5,1,1.5,2,2.5\}$ using one Gaussian array \\
+Logged batch & 256 contexts sampled with replacement, one logged action each \\
+Replications & 100 independent batches or rollouts per condition \\
+One-step update & Step size $0.8$ \\
+PPO mask & Advantage-sign mask with $\epsilon=1$ \\
+ESS gate & Raw if $\widehat\rho\ge0.1$, PPO-masked otherwise \\
+Epoch experiment & $Q_{2.5}$, 16 fixed-rollout updates, step sizes $2$ and $5$ \\
+Random seeds & 37 base configuration, 38 logger, 39 one-step, 40 epoch \\
+Evaluation & Exact enumeration over all 5,620 contexts \\
+Uncertainty & Standard error $s/\sqrt{100}$; figure intervals use $1.96$ SE \\
+\bottomrule
+\end{tabular}
+\endgroup
+\end{table}
 
 \subsection{Results}
 
@@ -1178,10 +1360,10 @@ decision consequence.  MSE increases by almost two orders of magnitude as ESS
 collapses, and the raw update becomes harmful in the lowest-ESS regime.  PPO
 masking is costly at high ESS but becomes comparatively useful at low ESS, so
 the gate can improve over both static choices.  The implementation and complete
-result files are provided in the \texttt{simulation} directory; seed 37 fixes
-policy construction and batch sampling.
+result files are provided in the \texttt{simulation} directory; all random
+seeds and their roles are specified in Table~\ref{tab:bandit-specification}.
 
-\begin{table}[htbp]
+\begin{table}[H]
 \centering
 \small
 \caption{Controlled ESS sweep and update decision with 100 independent batches
@@ -1205,7 +1387,7 @@ $\alpha$ & $\rho$ & Empirical MSE & Unclipped gain & PPO gain & Gate gain \\
 \endgroup
 \end{table}
 
-\begin{table}[htbp]
+\begin{table}[H]
 \centering
 \small
 \caption{Relative population-reward improvement after 16 fixed-rollout updates
