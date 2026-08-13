@@ -2,4 +2,5 @@
 /out/
 /tmp/
 /simulation/data/
+/simulation/__pycache__/
 /.claude/state/outputs-manifest-*.json

@@ -34,80 +34,77 @@ Sequence ESS Governs the Reliability of Unclipped Updates}
 \maketitle
 
 \begin{abstract}
-Reinforcement learning with verifiable rewards often takes several optimization
-steps on fixed rollout data.  Clipping is commonly treated as necessary once
-the policy moves away from those data, but update count alone does not determine
+Reinforcement learning with verifiable rewards often takes several policy
+updates on fixed rollout data.  PPO clipping is commonly treated as necessary
+once the policy moves away from those data, yet elapsed updates do not determine
 whether an unclipped update is reliable.  We show that reliability depends on
-both policy coverage and the influence of poorly covered samples.  Effective
-sample size connects the first quantity to gradient-estimation error, while the
-second determines when that connection is informative.  This view separates
-diagnosis from intervention: clipping helps only when the variance it removes
-exceeds the bias it introduces.  On an established classification-based
-contextual-bandit testbed, observed error follows this joint prediction, whereas
-effective sample size alone does not order estimator quality.  A clipping rule
-calibrated on separate data helps only in the regimes predicted by the
-bias--variance comparison.  Validation in language-model training remains open.
+both policy coverage and the influence of the samples that have poor coverage.
+Effective sample size connects these quantities to gradient-estimation error.
+We also show that PPO clipping is advantage-sign gradient masking, not a cap on
+all large importance ratios.  This distinction yields an ESS-guided rule: use
+the unbiased gradient while coverage is sufficient and apply PPO masking after
+coverage deteriorates.  In a controlled contextual bandit, high ESS predicts
+low gradient error, low error predicts better policy updates, and the gated
+method avoids the loss caused by clipping throughout optimization.
+Validation in language-model training remains open.
 \end{abstract}
 
 \section{Introduction}
 
 RLVR improves data efficiency by taking several policy updates on fixed rollout
-data.  As the policy changes, however, those responses become less
-representative of its current behavior.  The central practical question is
-therefore not how many optimization steps have elapsed, but whether the rollout
-distribution still supports a reliable update.
+data.  As the policy changes, those responses become less representative of its
+current behavior.  The central question is therefore not how many updates have
+elapsed, but whether the rollout data still support an accurate gradient.
 
-Ratio clipping is the standard answer in PPO-style training
-\citep{schulman2017ppo}.  Its usual justification treats an unclipped update as
-increasingly unstable as the policy moves away from the rollout distribution.
-Recent work has questioned the ratio itself as a measure of harmful policy
-change \citep{qi2026dppo}, while
-adaptive methods track how concentrated off-policy weights have become
-\citep{zheng2025m2po,huang2026vcpo,fakoor2026p3o}.  These methods expose a
-logically prior question.  Before choosing how to regulate an update, one must
-determine whether the unclipped update has actually become unreliable.
+PPO addresses policy change with a clipped surrogate
+\citep{schulman2017ppo}.  This mechanism is often discussed as if it established
+that an unclipped update becomes statistically unstable after enough reuse.
+That conclusion does not follow from the update count or from clipping itself.
+Recent work has likewise questioned whether a fixed ratio interval identifies
+harmful policy change \citep{qi2026dppo}, while adaptive methods instead monitor
+the concentration of off-policy weights
+\citep{zheng2025m2po,huang2026vcpo,fakoor2026p3o}.  These observations leave a
+prior question unanswered: when is the unclipped estimator actually unreliable?
 
-The optimization step count cannot answer that question.  Two rollout datasets
-observed after the same number of updates can differ sharply in how well they
-represent the current policy.
-One may remain broadly informative, while the other may be dominated by only a
-few responses.  Sequence effective sample size (ESS) captures this difference
-and provides a more meaningful notion of coverage than update count alone.
+The answer begins with coverage.  Two rollout datasets at the same optimization
+step can differ sharply in how well they represent the current policy.  One may
+remain broadly informative, while a few responses may dominate the other.
+Sequence effective sample size (ESS) measures this distinction and therefore
+replaces update count with a statistical quantity.
 
-We show that ESS supplies the missing theoretical bridge, but not the whole
-answer.  It connects policy coverage to estimation error after accounting for
-the scale of the gradient contributions attached to large ratios.  Data
-collected many steps earlier can therefore remain reliable, while more recent
-data can already be poor.  Conversely, high ESS does not guarantee low error if
-the influential samples carry unusually large gradients.  This qualification
-is essential to both the theorem and its empirical test.
+Our main result connects ESS to the mean-squared error of the unclipped
+gradient.  The connection also exposes the required qualification: coverage
+must be considered together with the gradient scale carried by poorly covered
+samples.  Thus stale data can remain reliable, and recent data can already be
+unreliable.  ESS is the bridge from policy coverage to gradient reliability,
+not a complete decision rule by itself.
 
-This diagnosis changes the role of clipping.  Clipping is not what defines a
-stable update.  It limits the influence of extreme responses, but also changes
-the update in a systematic way.  We make this tradeoff explicit: clipping is
-preferred exactly when its covariance reduction exceeds its squared bias.
-Specific cap values have no theorem-level status and must be calibrated rather
-than treated as a contribution.  Verifier rewards remain helpful because they
-bound one source of gradient scale.
+This bridge clarifies what should happen next.  PPO clipping and ratio
+truncation are not the same intervention.  Differentiating the PPO surrogate
+masks a sample according to the sign of its advantage and the side on which its
+ratio crosses the clipping interval.  Explicit ratio truncation instead caps
+every large importance coefficient.  We derive the bias and covariance of each
+estimator separately.  This distinction rules out both a universal ESS
+threshold and a privileged truncation cap.
 
-We test these claims using the classification-to-contextual-bandit protocol of
-\citet{wang2017adaptive} on the UCI Optdigits data
-\citep{alpaydin1998optdigits}.  This established construction supplies real
-contexts, ten actions, bounded rewards, and a known finite population, so the
-true gradient and every theoretical moment can be calculated.  Two logger
-families vary coverage and gradient scale separately.  Across 100 independent
-batches per condition, we report predicted and observed raw-gradient MSE, the
-gradient scale against ESS, and held-out clipped-to-raw MSE.  The study tests the
-theory directly without claiming to settle language-model training.
+We validate this chain before making any claim about language-model training.
+Following the classification-to-contextual-bandit protocol of
+\citet{wang2017adaptive}, we use Optdigits images as contexts, labels as actions,
+and correctness as a bounded reward \citep{alpaydin1998optdigits}.  The finite
+population lets us calculate the true gradient and all theoretical moments.
+Across 100 batches per condition, the experiment tests whether high ESS predicts
+low raw-gradient error, whether lower error improves the next policy update,
+and whether an ESS gate improves fixed-rollout optimization over always clipping.
 
 \paragraph{Contributions.}
 \begin{enumerate}
 \item We identify sequence ESS as the bridge between policy coverage and the
 reliability of an unclipped update.
-\item We characterize when clipping is worth the distortion it introduces and
-show that the decision cannot be reduced to a universal ESS or cap.
-\item We validate the quantitative prediction on a contextual-bandit benchmark
-adopted from prior off-policy evaluation work.
+\item We show that PPO clipping is an advantage-sign gradient mask, distinguish
+it from ratio truncation, and derive the exact risk comparison for each.
+\item We validate the chain from ESS to gradient error, one-step policy
+improvement, and ESS-gated fixed-rollout optimization on an established
+contextual-bandit benchmark.
 \end{enumerate}
 
 The next section makes the setting precise and separates population correctness
@@ -383,161 +380,150 @@ optimization, $\theta$ depends on the fixed rollout data.  Extending
 stability or complexity control.
 \end{remark}
 
-The raw risk is now explicit, but an estimator error matters only through its
-effect on policy optimization.  The next section supplies that link before we
-compare unclipped and clipped estimators.
+The raw risk is now explicit.  The next question is what PPO clipping actually
+does to this gradient and how that operation differs from ratio truncation.
 
-\section{Why gradient reliability matters for policy optimization}
-\label{sec:optimization}
+\section{PPO clipping and ratio truncation are different estimators}
+\label{sec:clipping}
 
-The main theorem characterizes gradient error.  The next result shows how that
-error enters a standard first-order optimization guarantee.
-
-\begin{proposition}[MSE-controlled stationarity]
-\label{prop:stationarity}
-Suppose $J$ is $L$-smooth and bounded above by $J_{\max}$.  For
-$\theta_{k+1}=\theta_k+\eta\widehat g_k$ with $0<\eta\le 1/L$,
+For a detached advantage $A$, the per-sample PPO surrogate is
 \begin{equation}
-  \frac1T\sum_{k=0}^{T-1}\E\|\nabla J(\theta_k)\|_2^2
-  \le
-  \frac{2\{J_{\max}-\E J(\theta_0)\}}{\eta T}
-  +\frac1T\sum_{k=0}^{T-1}
-   \E\|\widehat g_k-\nabla J(\theta_k)\|_2^2.
-  \label{eq:stationarity}
+  \ell_\epsilon^{\mathrm{PPO}}(\theta)
+  :=\min\left\{
+    W_\theta A,
+    \operatorname{clip}(W_\theta,1-\epsilon,1+\epsilon)A
+  \right\}.
+  \label{eq:ppo-objective}
+\end{equation}
+Clipping this scalar objective does not cap the gradient coefficient.  Its
+derivative instead masks samples according to advantage sign.
+
+\begin{proposition}[PPO clipping is advantage-sign gradient masking]
+\label{prop:ppo-mask}
+Away from the two clipping boundaries, define
+\begin{equation}
+  M_\epsilon
+  :=\mathbb{1}\{A\ge0, W_\theta\le1+\epsilon\}
+   +\mathbb{1}\{A<0, W_\theta\ge1-\epsilon\}.
+  \label{eq:ppo-mask}
+\end{equation}
+Then
+\begin{equation}
+  \nabla_\theta\ell_\epsilon^{\mathrm{PPO}}(\theta)
+  =W_\theta M_\epsilon H_\theta.
+  \label{eq:ppo-gradient}
 \end{equation}
 \end{proposition}
 
 \begin{proof}
-Let $g_k:=\nabla J(\theta_k)$ and $e_k:=\widehat g_k-g_k$.  The ascent form of
-$L$-smoothness gives
+When $A\ge0$, multiplication by $A$ preserves order.  Hence
 \begin{align}
-  J(\theta_{k+1})-J(\theta_k)
-  &\ge g_k^\top(\theta_{k+1}-\theta_k)
-    -\frac L2\|\theta_{k+1}-\theta_k\|_2^2
-    \label{eq:stationarity-proof-1}\\
-  &=\eta g_k^\top\widehat g_k
-    -\frac{L\eta^2}{2}\|\widehat g_k\|_2^2
-    \label{eq:stationarity-proof-2}\\
-  &=\frac\eta2\|g_k\|_2^2
-    +\frac\eta2\|\widehat g_k\|_2^2
-    -\frac\eta2\|e_k\|_2^2
-    -\frac{L\eta^2}{2}\|\widehat g_k\|_2^2
-    \label{eq:stationarity-proof-3}\\
-  &=\frac\eta2\|g_k\|_2^2
-    +\frac\eta2(1-L\eta)\|\widehat g_k\|_2^2
-    -\frac\eta2\|e_k\|_2^2
-    \label{eq:stationarity-proof-4}\\
-  &\ge\frac\eta2\|g_k\|_2^2
-    -\frac\eta2\|e_k\|_2^2.
-    \label{eq:stationarity-proof-5}
+  \ell_\epsilon^{\mathrm{PPO}}
+  &=A\min\{W_\theta,1+\epsilon\}
+    \label{eq:ppo-positive-proof-1}\\
+  \nabla_\theta\ell_\epsilon^{\mathrm{PPO}}
+  &=A\nabla_\theta W_\theta
+    \mathbb{1}\{W_\theta<1+\epsilon\}
+    \label{eq:ppo-positive-proof-2}\\
+  &=AW_\theta S_\theta
+    \mathbb{1}\{W_\theta<1+\epsilon\}.
+    \label{eq:ppo-positive-proof-3}
 \end{align}
-Equation~\eqref{eq:stationarity-proof-2} substitutes the update.  Equation
-\eqref{eq:stationarity-proof-3} uses
-$2g_k^\top\widehat g_k=\|g_k\|_2^2+\|\widehat g_k\|_2^2-
-\|e_k\|_2^2$.  The last line uses $\eta\le1/L$.
+The second line differentiates the active branch.  The third uses
+$\nabla_\theta W_\theta=W_\theta S_\theta$.
 
-Rearranging \eqref{eq:stationarity-proof-5}, taking expectations, and summing
-over $k$ gives
+When $A<0$, multiplication reverses order.  Therefore
 \begin{align}
-  \frac\eta2\sum_{k=0}^{T-1}\E\|g_k\|_2^2
-  &\le \E[J(\theta_T)-J(\theta_0)]
-    +\frac\eta2\sum_{k=0}^{T-1}\E\|e_k\|_2^2
-    \label{eq:stationarity-proof-6}\\
-  &\le J_{\max}-\E J(\theta_0)
-    +\frac\eta2\sum_{k=0}^{T-1}\E\|e_k\|_2^2.
-    \label{eq:stationarity-proof-7}
+  \ell_\epsilon^{\mathrm{PPO}}
+  &=A\max\{W_\theta,1-\epsilon\}
+    \label{eq:ppo-negative-proof-1}\\
+  \nabla_\theta\ell_\epsilon^{\mathrm{PPO}}
+  &=A\nabla_\theta W_\theta
+    \mathbb{1}\{W_\theta>1-\epsilon\}
+    \label{eq:ppo-negative-proof-2}\\
+  &=AW_\theta S_\theta
+    \mathbb{1}\{W_\theta>1-\epsilon\}.
+    \label{eq:ppo-negative-proof-3}
 \end{align}
-The second line uses the upper bound on $J$.  Dividing by $\eta T/2$ yields
-\eqref{eq:stationarity}.
+Combining the two cases and substituting $H_\theta=AS_\theta$ gives
+\eqref{eq:ppo-gradient}.  When $A=0$, the gradient is zero.  At the two
+boundaries, any fixed valid subgradient convention preserves the distinction.
 \end{proof}
 
-Lower gradient MSE therefore tightens the statistical term in
-\eqref{eq:stationarity}.  The proposition does not analyze Adam or imply a
-global ordering of training trajectories.  It supplies the limited bridge
-needed here: if clipping reduces MSE, it improves this first-order guarantee;
-if clipping increases MSE, it worsens it.  This use of MSE is consistent with
-analyses of biased stochastic gradients \cite{driggs2022biased,tang2022biased},
-while persistent clipping bias can still create an error floor
-\cite{ajalloeian2020biased,koloskova2023clipping}.
+PPO therefore removes an upper-ratio gradient only for nonnegative advantages
+and a lower-ratio gradient only for negative advantages.  In particular, a
+large ratio with negative advantage remains active.  PPO clipping is a
+directional mask, not a global bound on importance coefficients.
 
-The optimization consequence reduces the intervention question to an estimator
-comparison.  We now ask exactly when the variance removed by clipping is worth
-the bias it introduces.
-
-\section{When clipping improves the estimator}
-\label{sec:clipping}
-
-Let $U_\theta=U(W_\theta)$ be a bounded, detached sequence coefficient.  The
-modified estimator
+To compare this mask with other estimators, let $C_\theta$ be any scalar
+coefficient for which $C_\theta H_\theta$ has a finite second moment.  Define
 \begin{equation}
-  \widehat g_U:=\frac1N\sum_{i=1}^N U_{\theta,i}H_{\theta,i}
-  \label{eq:clipped-estimator}
+  \widehat g_C:=\frac1N\sum_{i=1}^N C_{\theta,i}H_{\theta,i},
+  \qquad
+  b_C:=\E_Q[(C_\theta-W_\theta)H_\theta],
+  \label{eq:modified-estimator}
 \end{equation}
-has gradient bias and one-sample covariances
+and
 \begin{equation}
-  b_U:=\E_Q[(U_\theta-W_\theta)H_\theta],
-  \quad
   \Sigma_W:=\Cov_Q(W_\theta H_\theta),
-  \quad
-  \Sigma_U:=\Cov_Q(U_\theta H_\theta).
+  \qquad
+  \Sigma_C:=\Cov_Q(C_\theta H_\theta).
   \label{eq:bias-covariance}
 \end{equation}
-Detachment matters: differentiating a scalar expression containing
-$U(W_\theta)$ generally produces additional chain-rule terms.
 
-\begin{theorem}[Exact clipping crossover]
+\begin{theorem}[Exact estimator crossover]
 \label{thm:crossover}
 For fixed $\theta$ and finite second moments,
 \begin{equation}
   \operatorname{MSE}(\widehat g_W)
   =\frac1N\operatorname{tr}(\Sigma_W),
   \qquad
-  \operatorname{MSE}(\widehat g_U)
-  =\|b_U\|_2^2+\frac1N\operatorname{tr}(\Sigma_U).
+  \operatorname{MSE}(\widehat g_C)
+  =\|b_C\|_2^2+\frac1N\operatorname{tr}(\Sigma_C).
   \label{eq:two-risks}
 \end{equation}
 Therefore,
 \begin{equation}
-  \operatorname{MSE}(\widehat g_U)
+  \operatorname{MSE}(\widehat g_C)
   <\operatorname{MSE}(\widehat g_W)
   \iff
-  \operatorname{tr}(\Sigma_W)-\operatorname{tr}(\Sigma_U)
-  >N\|b_U\|_2^2.
+  \operatorname{tr}(\Sigma_W)-\operatorname{tr}(\Sigma_C)
+  >N\|b_C\|_2^2.
   \label{eq:crossover}
 \end{equation}
 \end{theorem}
 
 \begin{proof}
-Write $\mu_U:=\E[\widehat g_U]$.  Its displacement from the target is
+Write $\mu_C:=\E[\widehat g_C]$.  Its displacement from the target is
 \begin{align}
-  \mu_U-g
-  &=\E_Q[U_\theta H_\theta]-\E_Q[W_\theta H_\theta]
+  \mu_C-g
+  &=\E_Q[C_\theta H_\theta]-\E_Q[W_\theta H_\theta]
     \label{eq:modified-bias-proof-1}\\
-  &=\E_Q[(U_\theta-W_\theta)H_\theta]
+  &=\E_Q[(C_\theta-W_\theta)H_\theta]
     \label{eq:modified-bias-proof-2}\\
-  &=b_U.
+  &=b_C.
     \label{eq:modified-bias-proof-3}
 \end{align}
-Centering the modified estimator at $\mu_U$ now yields
+Centering the modified estimator at $\mu_C$ now yields
 \begin{align}
-  \E\|\widehat g_U-g\|_2^2
-  &=\E\|\widehat g_U-\mu_U+b_U\|_2^2
+  \E\|\widehat g_C-g\|_2^2
+  &=\E\|\widehat g_C-\mu_C+b_C\|_2^2
     \label{eq:modified-risk-proof-1}\\
-  &=\E\|\widehat g_U-\mu_U\|_2^2
-    +2b_U^\top\E[\widehat g_U-\mu_U]
-    +\|b_U\|_2^2
+  &=\E\|\widehat g_C-\mu_C\|_2^2
+    +2b_C^\top\E[\widehat g_C-\mu_C]
+    +\|b_C\|_2^2
     \label{eq:modified-risk-proof-2}\\
-  &=\E\|\widehat g_U-\mu_U\|_2^2+\|b_U\|_2^2
+  &=\E\|\widehat g_C-\mu_C\|_2^2+\|b_C\|_2^2
     \label{eq:modified-risk-proof-3}\\
-  &=\frac1N\operatorname{tr}(\Sigma_U)+\|b_U\|_2^2.
+  &=\frac1N\operatorname{tr}(\Sigma_C)+\|b_C\|_2^2.
     \label{eq:modified-risk-proof-4}
 \end{align}
 Equations~\eqref{eq:modified-bias-proof-1}--\eqref{eq:modified-bias-proof-3}
 substitute $g=\E_Q[W_\theta H_\theta]$, use linearity, and invoke the definition
-of $b_U$, respectively.  Equation~\eqref{eq:modified-risk-proof-1} adds and
+of $b_C$, respectively.  Equation~\eqref{eq:modified-risk-proof-1} adds and
 subtracts $\mu_U$.  Equation~\eqref{eq:modified-risk-proof-2} expands the
 squared norm.  Equation~\eqref{eq:modified-risk-proof-3} uses
-$\E[\widehat g_U-\mu_U]=0$.  Equation~\eqref{eq:modified-risk-proof-4} uses
+$\E[\widehat g_C-\mu_C]=0$.  Equation~\eqref{eq:modified-risk-proof-4} uses
 independence of the $N$ sampled responses, exactly as in
 \eqref{eq:raw-proof-2}--\eqref{eq:raw-proof-3}.  The raw estimator is unbiased by
 Theorem~\ref{thm:raw-mse}, so the same covariance calculation gives
@@ -548,33 +534,45 @@ Theorem~\ref{thm:raw-mse}, so the same covariance calculation gives
 \end{equation}
 Subtracting the two risks gives
 \begin{align}
-  &\operatorname{MSE}(\widehat g_U)
+  &\operatorname{MSE}(\widehat g_C)
     -\operatorname{MSE}(\widehat g_W)
     \label{eq:crossover-proof-1}\\
-  &\quad=\|b_U\|_2^2
+  &\quad=\|b_C\|_2^2
     -\frac1N\left\{
-      \operatorname{tr}(\Sigma_W)-\operatorname{tr}(\Sigma_U)
+      \operatorname{tr}(\Sigma_W)-\operatorname{tr}(\Sigma_C)
     \right\}.
     \label{eq:crossover-proof-2}
 \end{align}
 The left side is negative exactly when the covariance reduction exceeds
-$N\|b_U\|_2^2$, which is \eqref{eq:crossover}.
+$N\|b_C\|_2^2$, which is \eqref{eq:crossover}.
 \end{proof}
 
-The exact crossover still contains estimator-specific moments.  One-sided
-upper truncation makes those moments interpretable.  For $c>0$, define
+For PPO, the coefficient is $C_\theta^{\mathrm{PPO}}=W_\theta M_\epsilon$.
+Its exact bias is
+\begin{align}
+  b_\epsilon^{\mathrm{PPO}}
+  &=\E_Q[(W_\theta M_\epsilon-W_\theta)H_\theta]
+    \label{eq:ppo-bias-1}\\
+  &=-\E_Q[W_\theta(1-M_\epsilon)H_\theta].
+    \label{eq:ppo-bias-2}
+\end{align}
+Theorem~\ref{thm:crossover} compares the covariance removed by this
+sign-specific mask with its squared bias.
+
+Ratio truncation is different.  It changes the importance coefficient after
+the gradient form has been specified.  For $c>0$, define
 \begin{equation}
-  U_c:=\min(W_\theta,c),
+  C_c^{\mathrm{tr}}:=\min(W_\theta,c),
   \qquad
   T_c:=(W_\theta-c)_+,
   \qquad
   \tau_c:=\E_Q[T_c].
   \label{eq:upper-truncation}
 \end{equation}
-The cap changes only ratios above $c$, while $\tau_c$ measures how much target
-mass those changes remove.
+The contribution above $c$ is then $cH_\theta$, not zero.  This is a detached
+importance-weight estimator, not the derivative of the PPO surrogate.
 
-\begin{corollary}[Bias and MSE of upper ratio truncation]
+\begin{corollary}[Bias and MSE of upper-ratio truncation]
 \label{cor:upper-truncation}
 Suppose $\|H_\theta\|_2\le H_{\max}$ almost surely.  The detached estimator
 $\widehat g_c=N^{-1}\sum_i U_{c,i}H_{\theta,i}$ satisfies
@@ -589,11 +587,11 @@ $\widehat g_c=N^{-1}\sum_i U_{c,i}H_{\theta,i}$ satisfies
 \end{corollary}
 
 \begin{proof}
-The coefficient difference is $U_c-W_\theta=-T_c$.  Substitution into
+The coefficient difference is $C_c^{\mathrm{tr}}-W_\theta=-T_c$.  Substitution into
 \eqref{eq:bias-covariance} gives
 \begin{align}
   b_c
-  &=\E_Q[(U_c-W_\theta)H_\theta]
+  &=\E_Q[(C_c^{\mathrm{tr}}-W_\theta)H_\theta]
     \label{eq:cap-proof-1}\\
   &=-\E_Q[T_cH_\theta].
     \label{eq:cap-proof-2}
@@ -611,11 +609,11 @@ The triangle inequality and the bound on $H_\theta$ then give
 For the covariance term, use the trace identity and remove its nonnegative
 mean-squared term:
 \begin{align}
-  \operatorname{tr}\{\Cov_Q(U_cH_\theta)\}
-  &=\E_Q[U_c^2\|H_\theta\|_2^2]
-    -\|\E_Q[U_cH_\theta]\|_2^2
+  \operatorname{tr}\{\Cov_Q(C_c^{\mathrm{tr}}H_\theta)\}
+  &=\E_Q[(C_c^{\mathrm{tr}})^2\|H_\theta\|_2^2]
+    -\|\E_Q[C_c^{\mathrm{tr}}H_\theta]\|_2^2
     \label{eq:cap-proof-6}\\
-  &\le H_{\max}^2\E_Q[U_c^2]
+  &\le H_{\max}^2\E_Q[(C_c^{\mathrm{tr}})^2]
     \label{eq:cap-proof-7}\\
   &\le cH_{\max}^2\E_Q[W_\theta]
     \label{eq:cap-proof-8}\\
@@ -623,7 +621,8 @@ mean-squared term:
     \label{eq:cap-proof-9}
 \end{align}
 Equation~\eqref{eq:cap-proof-7} uses the bound on $H_\theta$.
-Equation~\eqref{eq:cap-proof-8} uses $U_c^2\le cW_\theta$, which holds both
+Equation~\eqref{eq:cap-proof-8} uses $(C_c^{\mathrm{tr}})^2\le cW_\theta$,
+which holds both
 when $W_\theta\le c$ and when $W_\theta>c$.  The final line uses
 $\E_Q[W_\theta]=1$.  Combining \eqref{eq:two-risks},
 \eqref{eq:cap-proof-5}, and \eqref{eq:cap-proof-9} proves
@@ -637,17 +636,15 @@ not a scientific claim.  Truncated importance ratios also appear in ACER with
 bias correction \citep{wang2017acer} and in the V-trace correction used by
 IMPALA \citep{espeholt2018impala}; recent LLM methods likewise control extreme
 weight moments \citep{zheng2025m2po,fakoor2026p3o}.  These precedents motivate
-the intervention, while Corollary~\ref{cor:upper-truncation} states the bias quantity that
-must be measured for this estimator.
+truncation as a separate importance-sampling device.  They do not make it
+equivalent to PPO clipping.
 
-The ESS identity and crossover produce a conditional conclusion.  When $G_{2,\theta}$ is
-controlled, high ESS keeps the raw ratio-driven error small and leaves little
-variance for clipping to remove.  Falling ESS enlarges the ratio second moment
-and can make variance reduction worth its bias.  But ESS cannot determine the
-sign of \eqref{eq:crossover}, because the decision also depends on
-$G_{2,\theta}$ and on what the clipping rule removes.
-The claim is therefore not ``clip below a universal ESS,'' but ``ESS locates
-the regime in which the clipping MSE comparison becomes consequential.''
+The ESS identity and crossover now give the intended decision logic.  When
+$G_{2,\theta}$ is controlled, high ESS certifies a small raw-gradient MSE and
+there is little statistical reason to mask an otherwise useful update.  As ESS
+falls, raw-gradient MSE grows and intervention becomes more valuable.  The
+threshold must still be calibrated because PPO's benefit depends on its
+sign-specific bias and covariance.
 
 \section{From theory to an ESS-guided estimator rule}
 \label{sec:practice}
@@ -658,9 +655,9 @@ Population ESS is unavailable during training.  Its plug-in estimate is
   :=\frac{(\sum_{i=1}^N W_i)^2}{N\sum_{i=1}^N W_i^2}.
   \label{eq:sample-ess}
 \end{equation}
-It should be computed from raw, pre-clipping sequence ratios.  A candidate gate
-uses the low-bias objective while $\widehat\rho$ is high and switches to a
-bounded objective when it falls below a calibrated threshold.
+It should be computed from raw, pre-clipping sequence ratios.  The ESS gate uses
+the raw gradient while $\widehat\rho$ is high and the PPO masked gradient once
+$\widehat\rho$ falls below a calibrated threshold.
 
 This rule is a hypothesis, not a consequence of
 Theorem~\ref{thm:crossover}.  First, sample ESS can miss unobserved tail mass.  Second,
@@ -672,80 +669,67 @@ already adapt updates using ESS, weight moments, or sequence reshaping
 empirical question is whether their relevant regime change coincides with the
 gradient-MSE crossover in \eqref{eq:crossover}.
 
-\paragraph{Candidate rule.}
-\begin{itemize}
-\item Aggressive estimator: use the detached raw sequence ratio $W_i$ in
-\eqref{eq:raw-estimator}.
-\item Conservative estimator: replace $W_i$ by the detached coefficient
-$\min(W_i,c)$, with $c$ selected from a prespecified grid on held-out data.
-\item Calibration: choose a gate on held-out runs by locating the measured MSE
-crossover, then monitor raw $\widehat\rho$, estimated tail excess, and a
-weighted score-scale proxy.  Freeze both the gate and cap before evaluation.
-\end{itemize}
-
-The rule makes the estimator choice reproducible without claiming a universal
-ESS threshold.  The controlled study below tests the identities that motivate
-it before considering an LLM-scale gate.
+The rule is simple.  Compute raw sequence ESS, use the unmasked update above a
+threshold, and use PPO masking below it.  Select the threshold on validation
+runs and freeze it before evaluation.  The controlled study below tests the
+full chain from ESS to gradient error, policy improvement, and the gated
+optimization trajectory.
 
 \section{Empirical validation of the theory}
 \label{sec:experiments}
 
-The experiment must validate the quantities in the theory rather than an
-arbitrary bandit outcome.  It therefore asks three questions in order.  First,
-does observed raw-gradient MSE match the exact factorization in
-\eqref{eq:ess-factorization}?  Second, can two logging regimes with similar ESS
-have different error because their weighted gradient scales differ?  Third,
-after choosing a cap on separate calibration batches, does clipping reduce MSE
-only when variance reduction pays for its bias?  These questions test the
-reliability bridge, its qualification, and the clipping crossover, respectively.
+The main theorem is about gradient error, but the paper's practical claim is
+about policy updates.  The experiment must therefore validate the full chain.
+It asks three questions in order.  Does higher ESS imply lower raw-gradient MSE
+when the gradient scale is controlled?  Does lower MSE produce a better update
+when measured by population reward?  Finally, can ESS decide when to use the
+raw gradient and when to apply the actual PPO mask during fixed-rollout
+optimization?
 
-We adopt the classification-to-contextual-bandit protocol used by
-\citet{wang2017adaptive} for off-policy evaluation.  Each Optdigits image is a
-context, the ten labels are actions, and choosing the correct label yields unit
-reward \citep{alpaydin1998optdigits}.  This is useful here because the empirical
-distribution over all 5,620 labeled examples is a known finite population.
-Consequently, the target gradient, ESS, weighted gradient scale, clipping bias,
-and predicted MSE can all be computed exactly before drawing any batches.  We
-compare aligned loggers with loggers trained under covariate shift, then vary
-their temperatures to change coverage.  Prior importance-sampling policy
-optimization studies likewise report ESS and weight dispersion when diagnosing
-off-policy reliability \citep{metelli2018pois}; our test adds the gradient-scale
-and MSE measurements required by the present theorem.
+We use the classification-to-contextual-bandit protocol of
+\citet{wang2017adaptive}.  Each Optdigits image is a context, the ten labels are
+actions, and a correct action yields unit reward \citep{alpaydin1998optdigits}.
+This established testbed is necessary because its finite labeled population
+makes the target gradient and policy reward exactly computable.  We can thus
+measure gradient MSE and the policy consequence of each estimated update rather
+than infer either from a noisy training curve.
 
-For every logger, we report predicted raw MSE, empirical raw MSE, weighted
-gradient scale, and the ratio of calibrated clipped MSE to raw MSE.  Results use
-100 independent batches of 256 interactions.  The first 40 batches select a cap
-from a fixed grid, and the remaining 60 evaluate it.  Thus no particular cap is
-part of the hypothesis, and the evaluation data do not choose the estimator.
-Full policy construction, estimators, and numerical results appear in
-Appendix~\ref{app:bandit}.
+The first study fixes one evaluation policy and perturbs only its logger.  The
+perturbation is independent of the gradient contributions, so it varies ESS
+while keeping the weighted gradient scale in a narrow range.  We draw 100
+batches of 256 interactions at each ESS level, compute the raw-gradient MSE,
+and apply one estimated-gradient step before evaluating the exact population
+reward.  The second study draws one fixed rollout batch per run and takes 35
+updates with the raw gradient, the PPO mask in
+Proposition~\ref{prop:ppo-mask}, or an ESS gate between them.  Forty runs select
+the ESS threshold; the remaining 60 runs report policy reward.  Full details
+appear in Appendix~\ref{app:bandit}.
 
 \begin{figure}[tbp]
   \centering
-  \includegraphics[width=\linewidth]{figures/ess_theory_validation.pdf}
-  \caption{Contextual-bandit validation.  (a) Observed raw-gradient MSE against
-  the exact prediction in \eqref{eq:ess-factorization}; the dashed line is
-  equality.  (b) The weighted gradient scale changes across loggers and ESS
-  levels, so ESS alone cannot order error.  (c) Test MSE of the cap selected on
-  calibration batches, divided by raw test MSE; values below one favor clipping.
-  Population quantities are exact and empirical summaries use 100 batches per
-  condition.}
+  \includegraphics[width=\linewidth]{figures/ess_policy_validation.pdf}
+  \caption{Validation of the ESS decision chain.  (a) Raw-gradient MSE rises as
+  normalized ESS falls; the dashed curve is the exact finite-population MSE.
+  (b) The same loss of reliability reduces one-step population improvement and
+  eventually makes the average update harmful; the dashed line uses the exact
+  gradient.  (c) Over 35 updates on one fixed rollout batch, an ESS gate retains
+  the benefit of raw updates at high coverage and applies PPO masking after
+  coverage falls.  Curves and intervals use 60 held-out runs after threshold
+  selection on 40 validation runs.}
   \label{fig:ess-validation}
 \end{figure}
 
-The results support all three statements at this fixed learner.  Across
-conditions, the log correlation between observed MSE and the joint factor
-$G_{2,\theta}/\rho_\theta$ is $0.988$, and the points track the exact MSE
-prediction in Figure~\ref{fig:ess-validation}(a).  ESS alone does not give this
-ordering.  For example, two conditions with nearly equal ESS, $0.933$ and
-$0.926$, have weighted gradient scales $0.409$ and $0.708$ and observed MSE
-$1.77\times10^{-3}$ and $2.93\times10^{-3}$.  At the lowest tested ESS values,
-$0.385$ and $0.378$, calibrated clipping reduces held-out MSE by $23.4\%$ and
-$25.3\%$, respectively.  At several higher-coverage points it is inactive or
-gives only a small change.  The experiment therefore validates the joint
-reliability factorization and a data-dependent crossover, not a universal ESS
-threshold or a privileged cap.  Transfer to token-level RLVR remains
-\textbf{[TO BE FILLED]}.
+The three panels support the intended chain.  As ESS falls from $1.0$ to
+$0.0025$, raw-gradient MSE increases from $0.0105$ to $0.918$.  Over the same
+sweep, mean one-step population gain falls from $0.00939$ to $-0.00570$.
+Thus the MSE deterioration predicted by the theorem corresponds to a worse
+policy update in this controlled environment.  In fixed-rollout optimization,
+the validation-selected ESS gate reaches test reward $0.7891\pm0.0019$, compared
+with $0.7707\pm0.0012$ for always-clipped PPO and $0.7903\pm0.0018$ for the
+unclipped estimator.  The gate removes most of the bias from clipping too early
+while preserving the raw estimator's performance in this testbed.  It does not
+significantly outperform the unclipped baseline here, so the result validates
+ESS as a useful criterion rather than claiming universal dominance.
 
 \section{Limitations}
 
@@ -782,12 +766,11 @@ files and place uniform mass on the resulting empirical population.  This step
 does not estimate predictive performance.  It defines a finite contextual
 bandit on which population quantities are exactly computable.
 
-\subsection{Target and logging policies}
+\subsection{Policy class and controlled ESS sweep}
 
-We fit a ten-class linear softmax classifier to the finite population using 500
-full-batch gradient steps with learning rate $0.8$.  Temperature $0.75$ defines
-the stochastic target policy $P_\theta$.  For feature vector $x$ and action $a$,
-its score with respect to the temperature-scaled classifier parameters is
+We fit a ten-class linear softmax classifier to the finite population and scale
+its weights by $0.3$ to obtain a stochastic evaluation policy.  For feature
+vector $x$ and action $a$, its score is
 \begin{equation}
   S_\theta(x,a)=\{e_a-P_\theta(\cdot\mid x)\}\otimes x.
   \label{eq:optdigits-score}
@@ -796,20 +779,19 @@ The reward is $R(x,a)=\mathbb{1}\{a=y(x)\}$, and the prompt-only baseline is the
 target policy's probability of the correct label.  Hence $|A|\le1$, matching the
 bounded-reward regime discussed in Proposition~\ref{prop:g2-bound}.
 
-The aligned logger uses the same classifier at temperatures
-$0.75,1,1.5,2.5,$ and $4$.  The shifted logger follows the covariate-shift idea
-in \citet{wang2017adaptive}: a second classifier is fit after weighting each
-example by
+To isolate the coverage effect, we hold this evaluation policy and its gradient
+contributions fixed.  We draw one zero-mean Gaussian perturbation of the
+action logits for every context and define six logging policies by multiplying
+that perturbation by
 \begin{equation}
-  0.1+0.9\{1+\exp(-2z)\}^{-1},
-  \label{eq:shift-weight}
+  \alpha\in\{0,0.5,1,1.5,2,2.5\}.
+  \label{eq:logger-perturbation}
 \end{equation}
-where $z$ is a standardized random projection of its features.  The same five
-temperatures are applied to this classifier.  Every logger is mixed with five
-percent uniform exploration to guarantee support.  The aligned family mainly
-varies concentration around the target decision boundary, while the shifted
-family also changes which contexts carry large ratios.  Comparing them prevents
-the experiment from building the conclusion into a one-dimensional ESS sweep.
+Because this perturbation is sampled independently of $H_\theta$, it varies
+coverage without deliberately aligning low coverage with large gradients.  In
+the realized sweep, $G_{2,\theta}$ remains between $2.65$ and $3.12$, while
+$\rho_\theta$ ranges from $1$ to $0.0025$.  This controlled design makes ESS the
+main varying quantity rather than a post hoc correlate.
 
 \subsection{Population quantities and sampled estimators}
 
@@ -833,58 +815,68 @@ to calculate
 Substitution into \eqref{eq:ess-factorization} gives the predicted raw MSE
 without Monte Carlo approximation.
 
-We then draw 100 independent batches with $N=256$.  For each batch we compute
-the squared error of the raw gradient and of upper-truncated estimators with
-caps in the prespecified grid
+For each logger, we draw 100 independent batches with $N=256$.  We compute the
+raw-gradient squared error and update once with learning rate $0.8$.  The full
+population then gives the exact reward before and after each estimated update.
+The same step using the population gradient supplies a reference gain.
+
+\subsection{Fixed-rollout optimization and ESS gate}
+
+The optimization study starts from the same policy.  Its logging policy mixes
+the initial policy with ten percent uniform exploration and remains fixed for
+the entire run.  Each of 100 runs draws one batch of 256 interactions and takes
+35 updates on that batch with learning rate $5$.  The three methods are
 \begin{equation}
-  \{1.25,1.5,2,3,5,10,20,\infty\}.
-  \label{eq:cap-grid}
+  \widehat g_W,
+  \qquad
+  \widehat g_{\mathrm{PPO}}
+  =\frac1N\sum_{i=1}^N W_iM_{\epsilon,i}H_i,
+  \qquad
+  \widehat g_{\mathrm{gate}}
+  =\begin{cases}
+    \widehat g_W,&\widehat\rho\ge\lambda,\\
+    \widehat g_{\mathrm{PPO}},&\widehat\rho<\lambda,
+  \end{cases}
+  \label{eq:experimental-estimators}
 \end{equation}
-The first 40 batches select the lowest-MSE cap separately for each logger.  The
-remaining 60 batches estimate raw MSE and selected-cap MSE, with standard errors
-computed across batches.  The grid includes the raw estimator, so calibration
-can decline to clip.  The numerical cap is not compared across conditions and
-is not interpreted as a result.
+with $\epsilon=1$.  The threshold grid is fixed in advance.  The first 40 runs
+select $\lambda$ by final population reward, and the remaining 60 evaluate the
+frozen threshold.  The selected value is $\lambda=0.45$.
 
 \subsection{Results}
 
-Table~\ref{tab:bandit-full-results} reports representative conditions.  The first
-two rows are especially diagnostic: their ESS values are nearly equal, yet the
-shifted logger has a much larger weighted gradient scale and 65 percent higher
-raw MSE.  The calibrated estimator is unchanged for the aligned logger but
-reduces MSE for the shifted logger.  This contrast shows why neither estimator
-reliability nor the clipping decision is a function of ESS alone.
+Table~\ref{tab:bandit-full-results} reports the controlled sweep.  MSE increases
+by almost two orders of magnitude as ESS collapses, and the mean population gain
+becomes negative in the lowest-ESS regime.  This is the empirical bridge needed
+by the decision rule: ESS predicts when the raw update ceases to be reliable,
+and that unreliability has a measurable policy consequence.
 
 \begin{table}[htbp]
 \centering
 \small
-\caption{Representative contextual-bandit results.  Reported empirical MSE and
-standard errors use the 60 held-out test batches.  The last column is selected
-clipped MSE divided by raw MSE.}
+\caption{Controlled ESS sweep with 100 independent batches per condition.
+Values after $\pm$ are standard errors.}
 \label{tab:bandit-full-results}
 \begingroup
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{llrrrrr}
+\begin{tabular}{rrrrr}
 \toprule
-Logger & Temp. & $\rho$ & $G_{2,\theta}$ & Predicted MSE & Empirical MSE & Selected/raw \\
+$\alpha$ & $\rho$ & $G_{2,\theta}$ & Empirical MSE & One-step gain \\
 \midrule
-Aligned & 1.00 & 0.933 & 0.409 & 0.001715 & $0.001774\pm0.000105$ & 1.000 \\
-Shifted & 0.75 & 0.926 & 0.708 & 0.002986 & $0.002929\pm0.000190$ & 0.798 \\
-Aligned & 2.50 & 0.584 & 0.224 & 0.001498 & $0.001414\pm0.000107$ & 0.863 \\
-Shifted & 2.50 & 0.571 & 0.226 & 0.001547 & $0.001493\pm0.000084$ & 0.823 \\
-Aligned & 4.00 & 0.385 & 0.176 & 0.001785 & $0.001687\pm0.000100$ & 0.766 \\
-Shifted & 4.00 & 0.378 & 0.176 & 0.001817 & $0.001706\pm0.000102$ & 0.747 \\
+0.0 & 1.0000 & 2.645 & $0.0105\pm0.0004$ & $0.00939\pm0.00012$ \\
+0.5 & 0.8194 & 2.693 & $0.0124\pm0.0004$ & $0.00907\pm0.00013$ \\
+1.0 & 0.4250 & 2.798 & $0.0255\pm0.0018$ & $0.00865\pm0.00018$ \\
+1.5 & 0.1271 & 2.901 & $0.0542\pm0.0056$ & $0.00714\pm0.00034$ \\
+2.0 & 0.0222 & 3.004 & $0.1350\pm0.0218$ & $0.00356\pm0.00099$ \\
+2.5 & 0.0025 & 3.123 & $0.9182\pm0.6248$ & $-0.00570\pm0.00390$ \\
 \bottomrule
 \end{tabular}
 \endgroup
 \end{table}
 
-The implementation is provided in
-\path{simulation/contextual_bandit_ess.py}, and every condition is recorded in
-\path{simulation/results/contextual_bandit_results.csv}.  Seed 19 fixes policy
-construction and batch sampling.  The study validates the pointwise estimator
-theory at one finite-population learner.  It does not test adaptive training
-paths, language-model policies, or downstream return.
+The implementation and complete result files are provided in the
+\texttt{simulation} directory.  Seed 37 fixes policy construction and batch
+sampling.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
