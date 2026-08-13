@@ -4,6 +4,7 @@
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{booktabs}
 \usepackage{graphicx}
+\usepackage{float}
 \IfFileExists{microtype.sty}{\usepackage{microtype}}{}
 \usepackage{xcolor}
 \usepackage[numbers,sort&compress]{natbib}
@@ -25,8 +26,8 @@
 \newcommand{\E}{\mathbb{E}}
 \newcommand{\Cov}{\operatorname{Cov}}
 
-\title{\bf Rethinking Clipping in RLVR:\\
-Sequence ESS Governs the Reliability of Unclipped Updates}
+\title{\bf When Should We Clip in RLVR?\\
+Effective Sample Size as a Reliability Criterion}
 \author{Anonymous authors}
 \date{}
 
@@ -34,89 +35,114 @@ Sequence ESS Governs the Reliability of Unclipped Updates}
 \maketitle
 
 \begin{abstract}
-Reinforcement learning with verifiable rewards often takes several policy
-updates on fixed rollout data.  PPO clipping is commonly treated as necessary
-once the policy moves away from those data, yet elapsed updates do not determine
-whether an unclipped update is reliable.  We show that reliability depends on
-both policy coverage and the influence of the samples that have poor coverage.
-Effective sample size connects these quantities to gradient-estimation error,
-and we prove that lower error gives a stronger guarantee on the next policy
-improvement.  We also show that PPO clipping is advantage-sign gradient
-masking, not a cap on all large importance ratios.  This distinction yields an
-ESS-guided rule: use the unbiased gradient while coverage is sufficient and
-apply PPO masking after coverage deteriorates.  In a controlled contextual
-bandit, high ESS predicts low gradient error, low error predicts better policy
-updates, and a prespecified ESS gate improves the mean update over either always
-clipping or never clipping.
-Validation in language-model training remains open.
+Clipping is widely used to stabilize reinforcement learning from fixed rollout
+data, but it can also discard useful learning signal.  This tension is
+especially visible in language-model training, where permissive updates often
+learn faster but can fail after the policy moves too far from its data.  We
+argue that clipping should therefore be triggered by the reliability of the
+data, not applied throughout training.  Effective sample size provides this
+reliability criterion by measuring how broadly the current policy is supported
+by the rollout batch.  Our analysis connects effective sample size to gradient
+error, connects gradient error to policy improvement, and casts clipping as a
+bias--variance trade-off rather than a universal stability requirement.  This
+view leads to a simple rule: retain the efficient update while the data remain
+reliable, and clip only after reliability deteriorates.  A controlled
+contextual-bandit study validates the full chain and shows that a prespecified
+gate improves over both always clipping and never clipping.
 \end{abstract}
 
 \section{Introduction}
 
-RLVR improves data efficiency by taking several policy updates on fixed rollout
-data.  As the policy changes, those responses become less representative of its
-current behavior.  The central question is therefore not how many updates have
-elapsed, but whether the rollout data still support an accurate gradient.
+Clipping is treated as a basic safeguard in policy optimization.  RLVR methods
+draw an expensive rollout batch, take several updates on that batch, and use a
+clipped objective to limit the effect of the resulting policy drift
+\citep{schulman2017ppo,shao2024deepseekmath}.  The usual intuition is simple:
+once likelihood ratios move away from one, an unrestricted update is unsafe.
+That intuition has made clipping nearly synonymous with stable training.
 
-PPO addresses policy change with a clipped surrogate
-\citep{schulman2017ppo}.  This mechanism is often discussed as if it established
-that an unclipped update becomes statistically unstable after enough reuse.
-That conclusion does not follow from the update count or from clipping itself.
-Recent work has likewise questioned whether a fixed ratio interval identifies
-harmful policy change \citep{qi2026dppo}, while adaptive methods instead monitor
-the concentration of off-policy weights
-\citep{zheng2025m2po,huang2026vcpo,fakoor2026p3o}.  These observations leave a
-prior question unanswered: when is the unclipped estimator actually unreliable?
+Language-model training exposes a conflict with this conventional view.
+Clipping can mask precisely the low-probability tokens that carry new reasoning
+behavior, which slows early learning and can accelerate entropy collapse
+\citep{yu2025dapo,park2025clipping}.  More permissive objectives respond by
+raising the upper clipping threshold or by retaining gradients outside the PPO
+interval; CISPO, for example, clips importance weights without zeroing those
+gradients \citep{minimax2025m1}.  These methods can learn efficiently, yet a
+fully permissive run may later deteriorate when a small fraction of responses
+dominates the update.  Clipping is therefore neither always necessary nor
+always harmful.  The unresolved question is when its bias becomes worth paying.
 
-The answer begins with coverage.  Two rollout datasets at the same optimization
-step can differ sharply in how well they represent the current policy.  One may
-remain broadly informative, while a few responses may dominate the other.
-Sequence effective sample size (ESS) measures this distinction and therefore
-replaces update count with a statistical quantity.
+\begin{figure}[H]
+  \centering
+  \fbox{\parbox[c][1.28in][c]{0.94\linewidth}{\centering
+  \textbf{LLM empirical motivation placeholder}\\[4pt]
+  Insert the supplied training curves showing efficient early learning without
+  PPO masking, followed by the late CISPO collapse.  Overlay sequence ESS on
+  the same update axis and mark the proposed threshold at $0.1$.}}
+  \caption{The empirical tension that motivates this work.  A permissive update
+  can improve reward faster while the rollout batch remains representative, but
+  the same update can fail after its effective support collapses.  The final
+  version will report the model, benchmark, seeds, confidence intervals, and the
+  exact onset of the ESS decline.}
+  \label{fig:llm-motivation}
+\end{figure}
 
-Our main result connects ESS to the mean-squared error of the unclipped
-gradient.  The connection also exposes the required qualification: coverage
-must be considered together with the gradient scale carried by poorly covered
-samples.  Thus stale data can remain reliable, and recent data can already be
-unreliable.  We then prove why this estimation result matters for optimization:
-lower gradient error raises a certified lower bound on the expected reward of
-the next policy step.  ESS is therefore the bridge from policy coverage to an
-optimization consequence, not a complete decision rule by itself.
+Existing clipping rules do not answer this question because they monitor the
+intervention rather than the reliability problem.  A token ratio says how one
+sample changed, and an update count says how long a batch has been optimized.
+Neither says whether the batch still contains enough independent support for
+the current gradient.  Divergence-based constraints improve how policy change
+is measured \citep{qi2026dppo}, while recent adaptive methods monitor weight
+concentration \citep{zheng2025m2po,huang2026vcpo,fakoor2026p3o}.  What is still
+missing is a direct bridge from that concentration to optimization quality.
 
-This bridge clarifies what should happen next.  PPO clipping and ratio
-truncation are not the same intervention.  Differentiating the PPO surrogate
-masks a sample according to the sign of its advantage and the side on which its
-ratio crosses the clipping interval.  Explicit ratio truncation instead caps
-every large importance coefficient.  We derive the bias and covariance of each
-estimator separately.  This distinction rules out both a universal ESS
-threshold and a privileged truncation cap.
+We provide this bridge through sequence effective sample size (ESS).  ESS is
+high when the update is supported across many responses and low when a few
+responses carry most of the importance weight.  Our central claim is that this
+quantity governs when an unclipped update is statistically reliable.  High ESS
+supports the unbiased and efficient update.  Low ESS raises its gradient error,
+creating the regime in which a biased clipping mechanism can improve the
+bias--variance trade-off.
 
-We validate this chain before making any claim about language-model training.
-Following the classification-to-contextual-bandit protocol of
-\citet{wang2017adaptive}, we use Optdigits images as contexts, labels as actions,
-and correctness as a bounded reward \citep{alpaydin1998optdigits}.  The finite
-population lets us calculate the true gradient and all theoretical moments.
-Across 100 batches per condition, the experiment tests whether high ESS predicts
-low raw-gradient error, whether lower error improves the next policy update,
-and whether an ESS gate improves the update over either static clipping choice.
+The theory turns this claim into a decision chain.  First, we factor the exact
+mean-squared error of the unclipped gradient into sequence ESS and a weighted
+gradient scale.  Second, we show that lower gradient error strengthens a
+one-step policy-improvement guarantee.  Third, we differentiate the PPO
+objective and show that clipping is an advantage-sign gradient mask, whereas
+ratio truncation is a different estimator.  This distinction lets us compare
+unclipped and clipped updates by their gradient MSE and yields the practical
+rule suggested by Figure~\ref{fig:llm-motivation}: do not clip while ESS is high;
+introduce the chosen safeguard only after ESS falls.
+
+We test the mechanism before returning to large language models.  An
+enumerable contextual bandit lets us vary coverage while calculating the exact
+gradient and exact population reward.  Across 100 batches per condition, high
+ESS predicts low gradient error, low error predicts a better policy step, and a
+prespecified $0.1$ gate improves over both always-clipped and always-unclipped
+updates.  Section~\ref{sec:llm-experiments} then specifies the decisive RLVR
+test: apply the same gate to conventional PPO clipping, Clip-Higher, and a DPPO
+constraint, and report whether each reliability-gated variant improves the
+corresponding always-constrained baseline.
 
 \paragraph{Contributions.}
 \begin{enumerate}
-\item We identify sequence ESS as the bridge from policy coverage to gradient
-error, then prove how that error controls a one-step policy-improvement
-guarantee.
-\item We show that PPO clipping is an advantage-sign gradient mask, distinguish
-it from ratio truncation, and derive the exact risk comparison for each.
-\item We validate the chain from ESS to gradient error, one-step policy
-improvement, and ESS-gated update selection on an established contextual-bandit
-benchmark.
+\item We identify sequence ESS as the missing reliability criterion for fixed
+rollout optimization and derive its exact connection to gradient MSE.
+\item We connect gradient MSE to policy improvement and characterize clipping
+as a biased variance-reduction decision rather than an unconditional safeguard.
+\item We validate the complete mechanism in a controlled bandit and formulate a
+matched LLM evaluation across conventional clipping, Clip-Higher, and DPPO.
 \end{enumerate}
 
-The next section makes the setting precise and separates population correctness
-from finite-sample reliability.
+The paper follows the same argument in order.  Section~\ref{sec:setting}
+defines the fixed-rollout gradient and sequence ESS.  Section~\ref{sec:theory}
+develops the reliability and clipping analysis.  Section~\ref{sec:simulation}
+isolates the predicted mechanism, and Section~\ref{sec:llm-experiments} tests
+whether that mechanism improves RLVR training.
 
-\section{Problem formulation and sequence coverage}
+\section{Preliminaries}
 \label{sec:setting}
+
+\subsection{Fixed-rollout policy gradient}
 
 We first separate the target of an update from the accuracy with which it is
 estimated.  Let $X\sim\nu$ be a prompt, let $Y$ be a complete response drawn
@@ -193,7 +219,16 @@ used in importance-sampling policy optimization
 \citep{metelli2018pois,metelli2020is}.  Coverage is scalar, whereas the update
 is a vector, so the next section establishes the exact bridge between them.
 
-\section{Main result: ESS governs finite-sample reliability}
+\section{Theoretical analysis}
+\label{sec:theory}
+
+The analysis answers three questions in the order required by the practical
+decision.  We first ask when the fixed-rollout gradient is reliable, then ask
+why that reliability matters for policy improvement, and finally ask when
+clipping improves the resulting estimator.  These steps turn ESS from a
+descriptive statistic into a criterion for choosing the update.
+
+\subsection{ESS governs finite-sample reliability}
 \label{sec:raw}
 
 Population correctness does not prevent a small number of responses from
@@ -523,8 +558,15 @@ stability or complexity control.
 The raw risk is now explicit.  The next question is what PPO clipping actually
 does to this gradient and how that operation differs from ratio truncation.
 
-\section{PPO clipping and ratio truncation are different estimators}
+\subsection{Clipping trades bias for variance}
 \label{sec:clipping}
+
+The reliability result identifies when the raw estimator becomes noisy, but it
+does not yet establish that clipping is preferable.  That comparison requires
+the exact gradient induced by clipping and the bias it introduces.  We begin
+with PPO because its gradient is often confused with a globally capped ratio.
+
+\subsubsection{PPO clipping is an advantage-sign gradient mask}
 
 For a detached advantage $A$, the per-sample PPO surrogate is
 \begin{equation}
@@ -610,6 +652,8 @@ and
   \Sigma_C:=\Cov_Q(C_\theta H_\theta).
   \label{eq:bias-covariance}
 \end{equation}
+
+\subsubsection{The estimator crossover}
 
 \begin{theorem}[Exact estimator crossover]
 \label{thm:crossover}
@@ -710,6 +754,8 @@ MSE-based improvement certificates is
 Thus \eqref{eq:crossover} identifies when masking or truncation has the larger
 one-step certificate, not only when it has lower estimator risk.
 
+\subsubsection{Ratio truncation is a different intervention}
+
 Ratio truncation is different.  It changes the importance coefficient after
 the gradient form has been specified.  For $c>0$, define
 \begin{equation}
@@ -797,7 +843,7 @@ MSE grows and an intervention becomes valuable exactly when its variance
 reduction repays its squared bias.  The threshold must still be calibrated
 because PPO's benefit depends on this sign-specific crossover.
 
-\section{From theory to an ESS-guided estimator rule}
+\subsection{The ESS-guided decision rule}
 \label{sec:practice}
 
 Population ESS is unavailable during training.  Its plug-in estimate is
@@ -827,8 +873,8 @@ controlled study below, we prespecify $0.1$ rather than choosing it from the
 bandit outcomes, then test the full chain from ESS to gradient error, policy
 improvement, and the gated update decision.
 
-\section{Empirical validation of the theory}
-\label{sec:experiments}
+\section{Simulation: validating the decision mechanism}
+\label{sec:simulation}
 
 Theorems~\ref{thm:raw-mse} and \ref{thm:mse-improvement} establish the first two
 links in the population guarantee: ESS controls gradient MSE when the gradient
@@ -859,7 +905,7 @@ masking otherwise.  Thus the gate must avoid clipping's masking cost at high
 coverage and avoid raw-gradient error at low coverage to beat both static
 choices.  Full details appear in Appendix~\ref{app:bandit}.
 
-\begin{figure}[tbp]
+\begin{figure}[H]
   \centering
   \includegraphics[width=\linewidth]{figures/ess_policy_validation.pdf}
   \caption{Validation of the ESS decision chain.  (a) Raw-gradient MSE rises as
@@ -885,13 +931,98 @@ $0.00104\pm0.00041$ over always-unclipped and $0.00056\pm0.00006$ over
 always-clipped.  The gate succeeds for the intended reason: it avoids PPO's
 premature masking at high ESS and suppresses unreliable raw updates at low ESS.
 
-\section{Limitations}
+\section{Main experiments: ESS-gated RLVR}
+\label{sec:llm-experiments}
 
-\noindent\textbf{[TO BE FILLED].}
+The simulation establishes that ESS can identify the lower-MSE update when the
+target gradient is observable.  The main experiment asks whether the same
+criterion improves language-model training, where neither the true gradient nor
+its MSE can be measured.  The test must therefore compare final performance,
+learning efficiency, and collapse behavior under matched training runs.
 
-\section{Conclusion}
+\subsection{Decision rule and comparison set}
 
-\noindent\textbf{[TO BE FILLED].}
+At every policy update, compute sequence ESS from the raw ratios before any
+masking or truncation.  When $\widehat\rho\ge0.1$, use a permissive update that
+retains the available learning signal, instantiated as either the fully
+unclipped estimator or the CISPO-style weight-clipped estimator
+\citep{minimax2025m1}.  When $\widehat\rho<0.1$, activate one of three safeguards:
+conventional PPO clipping, Clip-Higher \citep{yu2025dapo}, or the divergence
+constraint of DPPO \citep{qi2026dppo}.  Each gated method must be compared with
+its always-active counterpart under identical rollouts, optimizer settings,
+token budgets, and evaluation checkpoints.  This matched design isolates the
+value of the ESS decision from the value of the underlying safeguard.
+
+\begin{equation}
+  \widehat g_{\mathrm{LLM}}
+  =\begin{cases}
+    \widehat g_{\mathrm{permissive}},&\widehat\rho\ge0.1,\\
+    \widehat g_{\mathrm{safeguard}},&\widehat\rho<0.1.
+  \end{cases}
+  \label{eq:llm-gate}
+\end{equation}
+The threshold is fixed before the reported runs.  It is not retuned for each
+safeguard, model, or benchmark, because per-setting tuning would no longer test
+ESS as a transferable reliability criterion.
+
+\subsection{Evaluation protocol}
+
+The primary plot should show evaluation reward against training steps for the
+permissive baseline, each always-active safeguard, and its ESS-gated version.
+A companion plot should align sequence ESS with the same horizontal axis and
+mark every switch of Equation~\eqref{eq:llm-gate}.  Report at least three seeds,
+the mean and confidence interval, peak reward, final reward, samples or tokens
+to a fixed reward target, and a prespecified collapse statistic.  The collapse
+statistic should capture the motivating CISPO failure directly, for example the
+largest sustained reward decline after the peak, and should be accompanied by
+entropy and response-length diagnostics when available.
+
+\begin{figure}[H]
+  \centering
+  \fbox{\parbox[c][1.42in][c]{0.94\linewidth}{\centering
+  \textbf{Main RLVR result placeholder}\\[4pt]
+  Insert matched reward curves for: permissive update, always PPO, ESS-gated
+  PPO, always Clip-Higher, ESS-gated Clip-Higher, always DPPO, and ESS-gated
+  DPPO.  Show mean and confidence interval across seeds.}}
+  \caption{Main RLVR comparison.  The decisive pattern is not whether one
+  clipping variant wins globally, but whether the same ESS gate improves every
+  matched safeguard by preserving efficient updates above $0.1$ and activating
+  protection below $0.1$.  Replace this placeholder only after all curves use
+  the same rollout and evaluation protocol.}
+  \label{fig:llm-main}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Main RLVR results to be completed from the matched runs.  Higher is
+better for peak and final reward; lower is better for time to target and
+post-peak collapse.}
+\label{tab:llm-main}
+\begin{tabular}{lrrrr}
+\toprule
+Update rule & Peak reward $\uparrow$ & Final reward $\uparrow$ & Time to target $\downarrow$ & Collapse $\downarrow$ \\
+\midrule
+Permissive only & TBD & TBD & TBD & TBD \\
+PPO always active & TBD & TBD & TBD & TBD \\
+ESS-gated PPO & TBD & TBD & TBD & TBD \\
+Clip-Higher always active & TBD & TBD & TBD & TBD \\
+ESS-gated Clip-Higher & TBD & TBD & TBD & TBD \\
+DPPO always active & TBD & TBD & TBD & TBD \\
+ESS-gated DPPO & TBD & TBD & TBD & TBD \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Claim supported by the main experiment}
+
+The intended conclusion is narrow and testable.  If each gated variant retains
+the fast progress of the permissive estimator while improving final reward and
+reducing collapse relative to its two static alternatives, then ESS identifies
+when clipping becomes useful across distinct safeguards.  The final manuscript
+must replace this paragraph with the measured effect sizes and uncertainty.
+Until those values and the supplied curves are inserted, the simulation, not
+the LLM experiment, remains the paper's completed empirical evidence.
 
 \appendix
 
