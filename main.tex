@@ -8,7 +8,6 @@
 \usepackage{xcolor}
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage{hyperref}
-\usepackage{cleveref}
 
 \hypersetup{
   colorlinks=true,
@@ -36,18 +35,18 @@ Sequence ESS Governs the Reliability of Unclipped Updates}
 
 \begin{abstract}
 Reinforcement learning with verifiable rewards often takes several optimization
-steps on fixed rollout data.  Clipping is commonly treated as necessary because
-later steps are assumed to make an unclipped update unstable.  We show that the
-step count alone does not determine reliability.  What matters is whether the
-rollout distribution still covers the current policy, and sequence effective
-sample size provides the missing bridge from policy drift to update error.  This
-view also separates diagnosis from intervention: clipping is useful only when
-the stability it gains is worth the distortion it introduces.  In an exactly
-enumerable contextual bandit, high ESS yields low unclipped error and leaves
-clipping inactive.  As ESS falls, unclipped error grows and moderate upper caps
-eventually improve both gradient estimation and the next policy update.  These
-findings motivate an adaptive clipping rule while leaving its validation in
-language-model training as open work.
+steps on fixed rollout data.  Clipping is commonly treated as necessary once
+the policy moves away from those data, but update count alone does not determine
+whether an unclipped update is reliable.  We show that reliability depends on
+both policy coverage and the influence of poorly covered samples.  Effective
+sample size connects the first quantity to gradient-estimation error, while the
+second determines when that connection is informative.  This view separates
+diagnosis from intervention: clipping helps only when the variance it removes
+exceeds the bias it introduces.  On an established classification-based
+contextual-bandit testbed, observed error follows this joint prediction, whereas
+effective sample size alone does not order estimator quality.  A clipping rule
+calibrated on separate data helps only in the regimes predicted by the
+bias--variance comparison.  Validation in language-model training remains open.
 \end{abstract}
 
 \section{Introduction}
@@ -75,36 +74,40 @@ One may remain broadly informative, while the other may be dominated by only a
 few responses.  Sequence effective sample size (ESS) captures this difference
 and provides a more meaningful notion of coverage than update count alone.
 
-We show that ESS is the missing theoretical bridge.  For the exact
-update studied here, it connects policy coverage directly to estimation error.
-The result also identifies a necessary qualification: coverage alone is not
-enough because a few responses may still exert unusually large influence.  Data
-collected many steps earlier can therefore remain reliable, while data separated
-by fewer steps can already be poor, depending on these two factors.
+We show that ESS supplies the missing theoretical bridge, but not the whole
+answer.  It connects policy coverage to estimation error after accounting for
+the scale of the gradient contributions attached to large ratios.  Data
+collected many steps earlier can therefore remain reliable, while more recent
+data can already be poor.  Conversely, high ESS does not guarantee low error if
+the influential samples carry unusually large gradients.  This qualification
+is essential to both the theorem and its empirical test.
 
 This diagnosis changes the role of clipping.  Clipping is not what defines a
 stable update.  It limits the influence of extreme responses, but also changes
-the update in a systematic way.  We make this tradeoff explicit and show why a
-moderately high upper cap can remove harmful extremes while otherwise leaving
-the update largely unchanged.  Verifier rewards make this regime especially
-relevant because their signal is naturally bounded.
+the update in a systematic way.  We make this tradeoff explicit: clipping is
+preferred exactly when its covariance reduction exceeds its squared bias.
+Specific cap values have no theorem-level status and must be calibrated rather
+than treated as a contribution.  Verifier rewards remain helpful because they
+bound one source of gradient scale.
 
-We test the resulting account in a controlled contextual bandit where all
-relevant quantities can be computed exactly.  The experiment holds the target
-policy and gradient scale fixed while varying only rollout coverage.  High ESS
-then produces low unclipped error and no effect from caps 3 and 5.  At low ESS,
-unclipped error rises sharply, and the caps eventually improve both estimation
-and the next policy update.  This controlled result validates the proposed
-mechanism without claiming that it settles language-model training.
+We test these claims using the classification-to-contextual-bandit protocol of
+\citet{wang2017adaptive} on the UCI Optdigits data
+\citep{alpaydin1998optdigits}.  This established construction supplies real
+contexts, ten actions, bounded rewards, and a known finite population, so the
+true gradient and every theoretical moment can be calculated.  Two logger
+families vary coverage and gradient scale separately.  Across 100 independent
+batches per condition, we report predicted and observed raw-gradient MSE, the
+gradient scale against ESS, and held-out clipped-to-raw MSE.  The study tests the
+theory directly without claiming to settle language-model training.
 
 \paragraph{Contributions.}
 \begin{enumerate}
 \item We identify sequence ESS as the bridge between policy coverage and the
 reliability of an unclipped update.
 \item We characterize when clipping is worth the distortion it introduces and
-explain why moderate upper caps can reduce estimation error.
-\item We validate the mechanism in a controlled contextual bandit and
-state precisely what remains to be tested in language models.
+show that the decision cannot be reduced to a universal ESS or cap.
+\item We validate the quantitative prediction on a contextual-bandit benchmark
+adopted from prior off-policy evaluation work.
 \end{enumerate}
 
 The next section makes the setting precise and separates population correctness
@@ -368,7 +371,7 @@ magnitude.
 These bounds isolate what advantage normalization can and cannot establish.
 They control the advantage factor, while a bound or empirical estimate of the
 score factor remains necessary.  Moreover, group normalization couples the $K$
-responses, so \Cref{thm:raw-mse} does not apply response by response without a
+responses, so Theorem~\ref{thm:raw-mse} does not apply response by response without a
 group-level sampling analysis.  The binary-reward, prompt-baseline case obeys
 the theorem directly; the GRPO bound supplies scale information rather than an
 i.i.d. justification.
@@ -537,7 +540,7 @@ squared norm.  Equation~\eqref{eq:modified-risk-proof-3} uses
 $\E[\widehat g_U-\mu_U]=0$.  Equation~\eqref{eq:modified-risk-proof-4} uses
 independence of the $N$ sampled responses, exactly as in
 \eqref{eq:raw-proof-2}--\eqref{eq:raw-proof-3}.  The raw estimator is unbiased by
-\Cref{thm:raw-mse}, so the same covariance calculation gives
+Theorem~\ref{thm:raw-mse}, so the same covariance calculation gives
 \begin{equation}
   \E\|\widehat g_W-g\|_2^2
   =\frac1N\operatorname{tr}(\Sigma_W).
@@ -627,14 +630,14 @@ $\E_Q[W_\theta]=1$.  Combining \eqref{eq:two-risks},
 \eqref{eq:cap-mse-bound}.
 \end{proof}
 
-The bound explains why a moderately large cap can be useful.  It replaces the
-raw second-moment dependence by $c/N$, while its bias is small when the tail
-excess $\tau_c$ is small.  Caps such as 3 or 5 are therefore candidates to test,
-not universal constants.  Truncated importance ratios also appear in ACER with
+The bound explains when upper truncation can be useful.  It replaces the raw
+second-moment dependence by $c/N$, while its bias is small when the tail excess
+$\tau_c$ is small.  The cap is therefore an estimator parameter to calibrate,
+not a scientific claim.  Truncated importance ratios also appear in ACER with
 bias correction \citep{wang2017acer} and in the V-trace correction used by
 IMPALA \citep{espeholt2018impala}; recent LLM methods likewise control extreme
 weight moments \citep{zheng2025m2po,fakoor2026p3o}.  These precedents motivate
-the intervention, while \Cref{cor:upper-truncation} states the bias quantity that
+the intervention, while Corollary~\ref{cor:upper-truncation} states the bias quantity that
 must be measured for this estimator.
 
 The ESS identity and crossover produce a conditional conclusion.  When $G_{2,\theta}$ is
@@ -660,7 +663,7 @@ uses the low-bias objective while $\widehat\rho$ is high and switches to a
 bounded objective when it falls below a calibrated threshold.
 
 This rule is a hypothesis, not a consequence of
-\Cref{thm:crossover}.  First, sample ESS can miss unobserved tail mass.  Second,
+Theorem~\ref{thm:crossover}.  First, sample ESS can miss unobserved tail mass.  Second,
 the same batch usually determines both the gate and the gradient.  Third,
 a token-local surrogate is not algebraically equal to
 \eqref{eq:raw-estimator}.  Recent LLM RL methods
@@ -674,10 +677,10 @@ gradient-MSE crossover in \eqref{eq:crossover}.
 \item Aggressive estimator: use the detached raw sequence ratio $W_i$ in
 \eqref{eq:raw-estimator}.
 \item Conservative estimator: replace $W_i$ by the detached coefficient
-$\min(W_i,c)$, with $c\in\{3,5\}$ treated as a calibration choice.
+$\min(W_i,c)$, with $c$ selected from a prespecified grid on held-out data.
 \item Calibration: choose a gate on held-out runs by locating the measured MSE
 crossover, then monitor raw $\widehat\rho$, estimated tail excess, and a
-weighted score-scale proxy.  Freeze both the threshold and cap before transfer.
+weighted score-scale proxy.  Freeze both the gate and cap before evaluation.
 \end{itemize}
 
 The rule makes the estimator choice reproducible without claiming a universal
@@ -687,37 +690,62 @@ it before considering an LLM-scale gate.
 \section{Empirical validation of the theory}
 \label{sec:experiments}
 
-The controlled experiment tests the theory in the order in which it is
-developed.  We hold the target policy, reward model, true gradient, and
-$G_{2,\theta}$ fixed, then vary only the coverage of the rollout policy.  This
-isolates three predictions: high ESS should give low unclipped MSE, low ESS
-should increase that MSE, and sufficiently low ESS should create a regime in
-which upper truncation improves both gradient estimation and the next policy
-update.  We use an exactly enumerable contextual bandit so that no population
-quantity is approximated.  The complete construction and derivation appear in
-\Cref{app:bandit}.
+The experiment must validate the quantities in the theory rather than an
+arbitrary bandit outcome.  It therefore asks three questions in order.  First,
+does observed raw-gradient MSE match the exact factorization in
+\eqref{eq:ess-factorization}?  Second, can two logging regimes with similar ESS
+have different error because their weighted gradient scales differ?  Third,
+after choosing a cap on separate calibration batches, does clipping reduce MSE
+only when variance reduction pays for its bias?  These questions test the
+reliability bridge, its qualification, and the clipping crossover, respectively.
 
-\begin{figure}[h]
+We adopt the classification-to-contextual-bandit protocol used by
+\citet{wang2017adaptive} for off-policy evaluation.  Each Optdigits image is a
+context, the ten labels are actions, and choosing the correct label yields unit
+reward \citep{alpaydin1998optdigits}.  This is useful here because the empirical
+distribution over all 5,620 labeled examples is a known finite population.
+Consequently, the target gradient, ESS, weighted gradient scale, clipping bias,
+and predicted MSE can all be computed exactly before drawing any batches.  We
+compare aligned loggers with loggers trained under covariate shift, then vary
+their temperatures to change coverage.  Prior importance-sampling policy
+optimization studies likewise report ESS and weight dispersion when diagnosing
+off-policy reliability \citep{metelli2018pois}; our test adds the gradient-scale
+and MSE measurements required by the present theorem.
+
+For every logger, we report predicted raw MSE, empirical raw MSE, weighted
+gradient scale, and the ratio of calibrated clipped MSE to raw MSE.  Results use
+100 independent batches of 256 interactions.  The first 40 batches select a cap
+from a fixed grid, and the remaining 60 evaluate it.  Thus no particular cap is
+part of the hypothesis, and the evaluation data do not choose the estimator.
+Full policy construction, estimators, and numerical results appear in
+Appendix~\ref{app:bandit}.
+
+\begin{figure}[tbp]
   \centering
   \includegraphics[width=\linewidth]{figures/ess_theory_validation.pdf}
-  \caption{Direct validation of the ESS theory with $G_{2,\theta}$ held fixed.
-  High ESS yields low unclipped MSE and leaves caps 3 and 5 inactive.  As ESS
-  falls, unclipped MSE grows according to \eqref{eq:ess-factorization}; after the
-  clipping crossover, the capped estimators also achieve higher expected reward
-  after one gradient step.  All curves are exact finite enumerations.}
+  \caption{Contextual-bandit validation.  (a) Observed raw-gradient MSE against
+  the exact prediction in \eqref{eq:ess-factorization}; the dashed line is
+  equality.  (b) The weighted gradient scale changes across loggers and ESS
+  levels, so ESS alone cannot order error.  (c) Test MSE of the cap selected on
+  calibration batches, divided by raw test MSE; values below one favor clipping.
+  Population quantities are exact and empirical summaries use 100 batches per
+  condition.}
   \label{fig:ess-validation}
 \end{figure}
 
-The results follow the predicted sequence.  With $G_{2,\theta}=1/16$ throughout,
-unclipped MSE rises from $1.46\times10^{-3}$ at $\rho=1$ to
-$2.44\times10^{-2}$ at $\rho=0.0784$.  At high ESS the tested caps do nothing
-because no ratio reaches them.  At $\rho=0.0784$, however, caps 3 and 5 reduce
-MSE to $3.72\times10^{-3}$ and $3.80\times10^{-3}$, respectively.  The same
-crossover appears in policy optimization: expected reward after one step is
-$0.640$ without clipping, $0.645$ with cap 3, and $0.648$ with cap 5.  Thus the
-experiment validates the claimed progression from coverage, to gradient
-reliability, to the usefulness of clipping.  Transfer to token-level RLVR
-remains \textbf{[TO BE FILLED]}.
+The results support all three statements at this fixed learner.  Across
+conditions, the log correlation between observed MSE and the joint factor
+$G_{2,\theta}/\rho_\theta$ is $0.988$, and the points track the exact MSE
+prediction in Figure~\ref{fig:ess-validation}(a).  ESS alone does not give this
+ordering.  For example, two conditions with nearly equal ESS, $0.933$ and
+$0.926$, have weighted gradient scales $0.409$ and $0.708$ and observed MSE
+$1.77\times10^{-3}$ and $2.93\times10^{-3}$.  At the lowest tested ESS values,
+$0.385$ and $0.378$, calibrated clipping reduces held-out MSE by $23.4\%$ and
+$25.3\%$, respectively.  At several higher-coverage points it is inactive or
+gives only a small change.  The experiment therefore validates the joint
+reliability factorization and a data-dependent crossover, not a universal ESS
+threshold or a privileged cap.  Transfer to token-level RLVR remains
+\textbf{[TO BE FILLED]}.
 
 \section{Limitations}
 
@@ -729,161 +757,134 @@ remains \textbf{[TO BE FILLED]}.
 
 \appendix
 
-\section{Exact contextual-bandit construction}
+\section{Optdigits contextual-bandit protocol}
 \label{app:bandit}
 
-\subsection{Environment and coverage intervention}
+\subsection{Established testbed and data}
 
-The validation uses a two-context, two-action bandit, a minimal instance of a
-contextual bandit with linear payoffs \citep{chu2011contextual}.  The context is
-uniform on $\{-1,+1\}$, and the identity of the correct action depends on that
-context.  Conditional on $X$, the correct action has Bernoulli reward mean
-$3/4$, while the other action has reward mean $1/4$.
+The protocol follows the classification reduction used by
+\citet{dudik2011doubly,wang2017adaptive}.  A labeled example is a context, the
+class labels are actions, and the reward equals one exactly when the selected
+action is the true label.  These studies use the construction because logged
+bandit feedback can be sampled while the full labeled data still reveal the
+target value.  We use the same advantage for gradient evaluation: the full
+empirical distribution also reveals the target gradient and all
+importance-weight moments.  The 2011 study included Optdigits in its UCI
+classification benchmark and used 30 repeated policy-learning runs; it also
+used 100 repetitions in a separate covariate-shift study
+\citep{dudik2011doubly}.  Our 100-repetition limit therefore remains consistent
+with established contextual-bandit practice.
 
-The policy has one scalar parameter and selects the correct action with
-probability $\sigma(\theta)$.  We evaluate the gradient at $\theta_0=0$, so the
-target policy selects either action with probability $1/2$.  The rollout policy
-selects the correct action with probability $q\in(0,1/2]$.  Varying $q$ changes
-coverage while leaving the target policy, reward model, and gradient geometry
-unchanged.  The two likelihood ratios are
+The Optdigits data contain $M=5{,}620$ examples, 64 pixel-aggregation features,
+and ten digit classes \citep{alpaydin1998optdigits}.  Features are divided by 16
+and augmented with an intercept.  We combine the original training and test
+files and place uniform mass on the resulting empirical population.  This step
+does not estimate predictive performance.  It defines a finite contextual
+bandit on which population quantities are exactly computable.
+
+\subsection{Target and logging policies}
+
+We fit a ten-class linear softmax classifier to the finite population using 500
+full-batch gradient steps with learning rate $0.8$.  Temperature $0.75$ defines
+the stochastic target policy $P_\theta$.  For feature vector $x$ and action $a$,
+its score with respect to the temperature-scaled classifier parameters is
 \begin{equation}
-  w_1=\frac{1}{2q},
-  \qquad
-  w_0=\frac{1}{2(1-q)},
-  \label{eq:bandit-ratios}
+  S_\theta(x,a)=\{e_a-P_\theta(\cdot\mid x)\}\otimes x.
+  \label{eq:optdigits-score}
 \end{equation}
-where subscripts 1 and 0 denote the correct and incorrect actions.
+The reward is $R(x,a)=\mathbb{1}\{a=y(x)\}$, and the prompt-only baseline is the
+target policy's probability of the correct label.  Hence $|A|\le1$, matching the
+bounded-reward regime discussed in Proposition~\ref{prop:g2-bound}.
 
-We use baseline $b=1/2$.  At $\theta_0$, the score is $1/2$ for the correct
-action and $-1/2$ for the incorrect action.  Consequently,
+The aligned logger uses the same classifier at temperatures
+$0.75,1,1.5,2.5,$ and $4$.  The shifted logger follows the covariate-shift idea
+in \citet{wang2017adaptive}: a second classifier is fit after weighting each
+example by
 \begin{equation}
-  H=(R-1/2)S_{\theta_0}\in\{-1/4,+1/4\}.
-  \label{eq:bandit-h}
+  0.1+0.9\{1+\exp(-2z)\}^{-1},
+  \label{eq:shift-weight}
 \end{equation}
-For either action, $H=+1/4$ with probability $3/4$ and $H=-1/4$ with
-probability $1/4$.  Thus $H$ is independent of the action indicator under the
-rollout distribution, and
-\begin{equation}
-  \E[H]=\frac18,
-  \qquad
-  H^2=\frac1{16}.
-  \label{eq:bandit-h-moments}
-\end{equation}
-This symmetry is the key control in the experiment: the weighted gradient scale
-does not change when ESS changes.
+where $z$ is a standardized random projection of its features.  The same five
+temperatures are applied to this classifier.  Every logger is mixed with five
+percent uniform exploration to guarantee support.  The aligned family mainly
+varies concentration around the target decision boundary, while the shifted
+family also changes which contexts carry large ratios.  Comparing them prevents
+the experiment from building the conclusion into a one-dimensional ESS sweep.
 
-\subsection{Exact theoretical predictions}
+\subsection{Population quantities and sampled estimators}
 
-The sequence ESS follows directly from \eqref{eq:bandit-ratios}:
+For each logger $Q$, contexts are uniform over the $M$ examples and actions are
+drawn from $Q(\cdot\mid x)$.  We enumerate all $M\times10$ context-action pairs
+to calculate
 \begin{align}
-  \E_Q[W^2]
-  &=q\left(\frac1{2q}\right)^2
-    +(1-q)\left(\frac1{2(1-q)}\right)^2
-    \label{eq:bandit-ew2-1}\\
-  &=\frac1{4q(1-q)},
-    \label{eq:bandit-ew2-2}\\
-  \rho
-  &=4q(1-q).
-    \label{eq:bandit-rho}
+  g
+  &=\frac1M\sum_{x=1}^M\sum_{a=1}^{10}
+    P_\theta(a\mid x)H_\theta(x,a),
+    \label{eq:optdigits-gradient}\\
+  \rho_\theta^{-1}
+  &=\frac1M\sum_{x=1}^M\sum_{a=1}^{10}
+    Q(a\mid x)W_\theta(x,a)^2,
+    \label{eq:optdigits-rho}\\
+  G_{2,\theta}
+  &=\rho_\theta\frac1M\sum_{x=1}^M\sum_{a=1}^{10}
+    Q(a\mid x)W_\theta(x,a)^2\|H_\theta(x,a)\|_2^2.
+    \label{eq:optdigits-g2}
 \end{align}
-The first line enumerates the two actions, the second combines the fractions,
-and the third applies \eqref{eq:population-ess}.  Since $H^2=1/16$,
-\begin{align}
-  G_2
-  &=\frac{\E_Q[W^2H^2]}{\E_Q[W^2]}
-    \label{eq:bandit-g2-1}\\
-  &=\frac1{16}
-    \label{eq:bandit-g2-2}
-\end{align}
-for every $q$.  Also, $g=\E_Q[WH]=1/8$.  Substitution into
-\eqref{eq:ess-factorization} yields the exact prediction
+Substitution into \eqref{eq:ess-factorization} gives the predicted raw MSE
+without Monte Carlo approximation.
+
+We then draw 100 independent batches with $N=256$.  For each batch we compute
+the squared error of the raw gradient and of upper-truncated estimators with
+caps in the prespecified grid
 \begin{equation}
-  \operatorname{MSE}(\widehat g_W)
-  =\frac1N\left(\frac1{16\rho}-\frac1{64}\right).
-  \label{eq:bandit-raw-mse}
+  \{1.25,1.5,2,3,5,10,20,\infty\}.
+  \label{eq:cap-grid}
 \end{equation}
-The construction therefore isolates the claimed ESS effect rather than allowing
-$G_2$ to move with coverage.
+The first 40 batches select the lowest-MSE cap separately for each logger.  The
+remaining 60 batches estimate raw MSE and selected-cap MSE, with standard errors
+computed across batches.  The grid includes the raw estimator, so calibration
+can decline to clip.  The numerical cap is not compared across conditions and
+is not interpreted as a result.
 
-For cap $c$, let
-\begin{equation}
-  u_1=\min\left(\frac1{2q},c\right),
-  \qquad
-  u_0=\min\left(\frac1{2(1-q)},c\right).
-  \label{eq:bandit-caps}
-\end{equation}
-Independence of $H$ and the action indicator gives
-\begin{align}
-  m_c
-  &:=\E_Q[U_cH]
-    =\frac18\{qu_1+(1-q)u_0\},
-    \label{eq:bandit-cap-mean}\\
-  \operatorname{MSE}(\widehat g_c)
-  &=\left(m_c-\frac18\right)^2
-    +\frac1N\left[
-      \frac1{16}\{qu_1^2+(1-q)u_0^2\}-m_c^2
-    \right].
-    \label{eq:bandit-cap-mse}
-\end{align}
-The first term in \eqref{eq:bandit-cap-mse} is squared bias and the second is
-variance over $N$, so the experiment evaluates the exact crossover in
-\Cref{thm:crossover}.
+\subsection{Results}
 
-\subsection{Policy update and exact enumeration}
+Table~\ref{tab:bandit-full-results} reports representative conditions.  The first
+two rows are especially diagnostic: their ESS values are nearly equal, yet the
+shifted logger has a much larger weighted gradient scale and 65 percent higher
+raw MSE.  The calibrated estimator is unchanged for the aligned logger but
+reduces MSE for the shifted logger.  This contrast shows why neither estimator
+reliability nor the clipping decision is a function of ESS alone.
 
-The population objective is
-\begin{equation}
-  J(\theta)=\frac14+\frac12\sigma(\theta).
-  \label{eq:bandit-objective}
-\end{equation}
-Its gradient at $\theta_0=0$ is $1/8$, matching
-\eqref{eq:bandit-h-moments}.  We apply one update
-$\theta_1=\theta_0+\eta\widehat g$ with $N=32$ and $\eta=20$.  The objective is
-$L$-smooth with $L=1/(12\sqrt3)$, so $\eta<1/L$ as required by
-\Cref{prop:stationarity}.
-
-Expected post-update reward is computed without Monte Carlo.  Each sample falls
-into one of four categories given by correct or incorrect action and positive
-or negative $H$.  Their probabilities are
-\begin{equation}
-  \left(\frac{3q}{4},\frac{q}{4},
-        \frac{3(1-q)}{4},\frac{1-q}{4}\right).
-  \label{eq:bandit-categories}
-\end{equation}
-We enumerate every four-category count vector summing to $N$, calculate its
-multinomial probability, form the corresponding gradient estimate, and evaluate
-$J(\theta_1)$.  This same enumeration produces every curve in
-\Cref{fig:ess-validation}.  The implementation is provided in
-\path{simulation/contextual_bandit_ess.py}, and the complete numeric output is
-provided in \path{simulation/results/contextual_bandit_results.csv}.
-
-\begin{table}[t]
+\begin{table}[htbp]
 \centering
 \small
-\caption{Exact MSE and expected one-step reward at representative ESS values.
-The weighted gradient scale is $G_2=1/16$ in every row.}
+\caption{Representative contextual-bandit results.  Reported empirical MSE and
+standard errors use the 60 held-out test batches.  The last column is selected
+clipped MSE divided by raw MSE.}
 \label{tab:bandit-full-results}
 \begingroup
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{rrrrrrr}
+\begin{tabular}{llrrrrr}
 \toprule
-$\rho$ & Raw MSE & Cap 3 MSE & Cap 5 MSE & Raw reward & Cap 3 reward & Cap 5 reward \\
+Logger & Temp. & $\rho$ & $G_{2,\theta}$ & Predicted MSE & Empirical MSE & Selected/raw \\
 \midrule
-1.0000 & 0.001465 & 0.001465 & 0.001465 & 0.7031 & 0.7031 & 0.7031 \\
-0.6400 & 0.002563 & 0.002563 & 0.002563 & 0.6969 & 0.6969 & 0.6969 \\
-0.1900 & 0.009791 & 0.003101 & 0.003657 & 0.6661 & 0.6577 & 0.6640 \\
-0.0784 & 0.024424 & 0.003722 & 0.003799 & 0.6403 & 0.6448 & 0.6479 \\
-0.0199 & 0.097659 & 0.004125 & 0.004126 & 0.6347 & 0.6378 & 0.6386 \\
+Aligned & 1.00 & 0.933 & 0.409 & 0.001715 & $0.001774\pm0.000105$ & 1.000 \\
+Shifted & 0.75 & 0.926 & 0.708 & 0.002986 & $0.002929\pm0.000190$ & 0.798 \\
+Aligned & 2.50 & 0.584 & 0.224 & 0.001498 & $0.001414\pm0.000107$ & 0.863 \\
+Shifted & 2.50 & 0.571 & 0.226 & 0.001547 & $0.001493\pm0.000084$ & 0.823 \\
+Aligned & 4.00 & 0.385 & 0.176 & 0.001785 & $0.001687\pm0.000100$ & 0.766 \\
+Shifted & 4.00 & 0.378 & 0.176 & 0.001817 & $0.001706\pm0.000102$ & 0.747 \\
 \bottomrule
 \end{tabular}
 \endgroup
 \end{table}
 
-The table separates the two crossovers.  Capping first reduces gradient MSE,
-while the unbiased estimator can still give higher one-step reward at moderate
-mismatch.  Once ESS is sufficiently low, the variance cost dominates and the
-capped estimators also improve the policy update.  This distinction is why ESS
-locates the regime of concern but does not define a universal clipping threshold.
+The implementation is provided in
+\path{simulation/contextual_bandit_ess.py}, and every condition is recorded in
+\path{simulation/results/contextual_bandit_results.csv}.  Seed 19 fixes policy
+construction and batch sampling.  The study validates the pointwise estimator
+theory at one finite-population learner.  It does not test adaptive training
+paths, language-model policies, or downstream return.
 
 \bibliographystyle{plainnat}
 \bibliography{references}

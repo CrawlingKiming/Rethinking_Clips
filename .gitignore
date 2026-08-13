@@ -1,3 +1,5 @@
 /main.pdf
 /out/
 /tmp/
+/simulation/data/
+/.claude/state/outputs-manifest-*.json
