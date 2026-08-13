@@ -28,7 +28,7 @@
 
 \title{\bf When Should We Clip in RLVR?\\
 Effective Sample Size as a Reliability Criterion}
-\author{Anonymous authors}
+\author{Dongkyu Derek Cho, Thomas Voice}
 \date{}
 
 \begin{document}
@@ -228,7 +228,7 @@ why that reliability matters for policy improvement, and finally ask when
 clipping improves the resulting estimator.  These steps turn ESS from a
 descriptive statistic into a criterion for choosing the update.
 
-\subsection{ESS governs finite-sample reliability}
+\subsection{ESS and finite-sample reliability}
 \label{sec:raw}
 
 Population correctness does not prevent a small number of responses from
@@ -330,7 +330,7 @@ failure.  Gradient error would still be only a statistical diagnostic, however,
 unless it implied a concrete optimization consequence.  The next result makes
 that implication explicit.
 
-\subsection{Why gradient MSE controls policy improvement}
+\subsection{Gradient MSE and policy improvement}
 \label{sec:mse-improvement}
 
 Policy-gradient theory supplies the missing optimization link.  Theorem~7 of
@@ -566,7 +566,7 @@ does not yet establish that clipping is preferable.  That comparison requires
 the exact gradient induced by clipping and the bias it introduces.  We begin
 with PPO because its gradient is often confused with a globally capped ratio.
 
-\subsubsection{PPO clipping is an advantage-sign gradient mask}
+\subsubsection{PPO clipping as an advantage-sign gradient mask}
 
 For a detached advantage $A$, the per-sample PPO surrogate is
 \begin{equation}
@@ -754,7 +754,7 @@ MSE-based improvement certificates is
 Thus \eqref{eq:crossover} identifies when masking or truncation has the larger
 one-step certificate, not only when it has lower estimator risk.
 
-\subsubsection{Ratio truncation is a different intervention}
+\subsubsection{Ratio truncation bias trade-off}
 
 Ratio truncation is different.  It changes the importance coefficient after
 the gradient form has been specified.  For $c>0$, define
