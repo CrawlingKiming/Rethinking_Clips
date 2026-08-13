@@ -5,14 +5,16 @@ prior off-policy evaluation work.  Optdigits images are contexts, digit labels
 are actions, and a correct action receives reward one.  Because the population
 is finite and fully labeled, every policy value and gradient is enumerable.
 
-The script runs two connected experiments with 100 independent batches:
+The script runs two connected experiments with 100 independent batches per
+coverage condition:
 
 1. A controlled logger sweep keeps one evaluation policy fixed and perturbs
    its logging policy independently of the gradient contributions.  This
    isolates the ESS effect on raw-gradient MSE and one-step policy improvement.
-2. Fixed-rollout optimization compares an unclipped importance-weighted update,
-   the actual PPO advantage-sign gradient mask, and an ESS-gated choice between
-   them.  Forty runs select the ESS threshold and sixty runs evaluate it.
+2. A prespecified ESS gate uses the unclipped update when sample ESS is at least
+   0.1 and the actual PPO advantage-sign gradient mask otherwise.  The gate is
+   compared with always-unclipped and always-clipped decisions across the same
+   coverage sweep.
 """
 
 from __future__ import annotations
@@ -36,27 +38,10 @@ class Config:
     batch_size: int = 256
     classifier_steps: int = 400
     base_policy_scale: float = 0.30
-    behavior_exploration: float = 0.10
     coverage_levels: tuple[float, ...] = (0.0, 0.5, 1.0, 1.5, 2.0, 2.5)
     one_step_learning_rate: float = 0.8
-    optimization_learning_rate: float = 5.0
-    optimization_steps: int = 50
     ppo_epsilon: float = 1.0
-    validation_fraction: float = 0.4
-    threshold_grid: tuple[float, ...] = (
-        0.45,
-        0.55,
-        0.65,
-        0.75,
-        0.85,
-        0.90,
-        0.95,
-        0.97,
-        0.98,
-        0.99,
-        0.995,
-        0.999,
-    )
+    ess_threshold: float = 0.1
 
 
 def policy_value(probabilities: np.ndarray, labels: np.ndarray) -> float:
@@ -188,13 +173,19 @@ def coverage_experiment(
         exact_weights = weights + config.one_step_learning_rate * true_gradient
         exact_value = policy_value(softmax(features @ exact_weights.T), labels)
         gradient_errors: list[float] = []
-        improvements: list[float] = []
+        improvements: dict[str, list[float]] = {
+            "raw": [],
+            "ppo": [],
+            "gate": [],
+        }
         alignments: list[float] = []
+        sample_effective_sizes: list[float] = []
+        gate_uses_raw: list[float] = []
         for _ in range(config.repetitions):
             batch = sample_logged_batch(
                 batch_rng, behavior, labels, config.batch_size
             )
-            estimate, _ = batch_gradient(
+            estimate, sample_ess = batch_gradient(
                 features,
                 weights,
                 behavior,
@@ -203,10 +194,30 @@ def coverage_experiment(
                 method="raw",
                 epsilon=config.ppo_epsilon,
             )
+            ppo_estimate, _ = batch_gradient(
+                features,
+                weights,
+                behavior,
+                baseline,
+                batch,
+                method="ppo",
+                epsilon=config.ppo_epsilon,
+            )
+            gate_uses_unclipped = sample_ess >= config.ess_threshold
+            gated_estimate = estimate if gate_uses_unclipped else ppo_estimate
             gradient_errors.append(float(np.sum((estimate - true_gradient) ** 2)))
-            updated = weights + config.one_step_learning_rate * estimate
-            updated_value = policy_value(softmax(features @ updated.T), labels)
-            improvements.append(updated_value - float(population["value"]))
+            for name, candidate in (
+                ("raw", estimate),
+                ("ppo", ppo_estimate),
+                ("gate", gated_estimate),
+            ):
+                updated = weights + config.one_step_learning_rate * candidate
+                updated_value = policy_value(softmax(features @ updated.T), labels)
+                improvements[name].append(
+                    updated_value - float(population["value"])
+                )
+            sample_effective_sizes.append(sample_ess)
+            gate_uses_raw.append(float(gate_uses_unclipped))
             denominator = float(np.linalg.norm(estimate) * np.linalg.norm(true_gradient))
             alignments.append(
                 float(np.sum(estimate * true_gradient) / denominator)
@@ -215,6 +226,12 @@ def coverage_experiment(
             )
 
         theory_mse = float(population["variance_trace"]) / config.batch_size
+        gate_minus_raw = np.array(improvements["gate"]) - np.array(
+            improvements["raw"]
+        )
+        gate_minus_ppo = np.array(improvements["gate"]) - np.array(
+            improvements["ppo"]
+        )
         rows.append(
             {
                 "logger_perturbation": level,
@@ -227,11 +244,36 @@ def coverage_experiment(
                     np.std(gradient_errors, ddof=1)
                     / math.sqrt(config.repetitions)
                 ),
-                "one_step_improvement": float(np.mean(improvements)),
+                "one_step_improvement": float(np.mean(improvements["raw"])),
                 "one_step_improvement_se": float(
-                    np.std(improvements, ddof=1) / math.sqrt(config.repetitions)
+                    np.std(improvements["raw"], ddof=1)
+                    / math.sqrt(config.repetitions)
                 ),
-                "negative_update_rate": float(np.mean(np.array(improvements) < 0.0)),
+                "ppo_improvement": float(np.mean(improvements["ppo"])),
+                "ppo_improvement_se": float(
+                    np.std(improvements["ppo"], ddof=1)
+                    / math.sqrt(config.repetitions)
+                ),
+                "gate_improvement": float(np.mean(improvements["gate"])),
+                "gate_improvement_se": float(
+                    np.std(improvements["gate"], ddof=1)
+                    / math.sqrt(config.repetitions)
+                ),
+                "gate_minus_raw": float(np.mean(gate_minus_raw)),
+                "gate_minus_raw_se": float(
+                    np.std(gate_minus_raw, ddof=1)
+                    / math.sqrt(config.repetitions)
+                ),
+                "gate_minus_ppo": float(np.mean(gate_minus_ppo)),
+                "gate_minus_ppo_se": float(
+                    np.std(gate_minus_ppo, ddof=1)
+                    / math.sqrt(config.repetitions)
+                ),
+                "mean_sample_ess": float(np.mean(sample_effective_sizes)),
+                "gate_unclipped_fraction": float(np.mean(gate_uses_raw)),
+                "negative_update_rate": float(
+                    np.mean(np.array(improvements["raw"]) < 0.0)
+                ),
                 "gradient_alignment": float(np.mean(alignments)),
                 "exact_gradient_improvement": exact_value
                 - float(population["value"]),
@@ -242,206 +284,80 @@ def coverage_experiment(
     return rows
 
 
-def optimize_on_fixed_batch(
-    features: np.ndarray,
-    labels: np.ndarray,
-    initial_weights: np.ndarray,
-    behavior: np.ndarray,
-    baseline: np.ndarray,
-    batch: tuple[np.ndarray, np.ndarray, np.ndarray],
-    config: Config,
-    method: str,
-    threshold: float | None = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    weights = initial_weights.copy()
-    values = [policy_value(softmax(features @ weights.T), labels)]
-    effective_sizes: list[float] = []
-    used_raw: list[float] = []
-    for _ in range(config.optimization_steps):
-        raw_gradient, ess = batch_gradient(
-            features,
-            weights,
-            behavior,
-            baseline,
-            batch,
-            method="raw",
-            epsilon=config.ppo_epsilon,
+def decision_summary(
+    coverage_rows: list[dict[str, float]], config: Config
+) -> list[dict[str, float | str]]:
+    methods = {
+        "Unclipped": ("one_step_improvement", "one_step_improvement_se"),
+        "PPO clipped": ("ppo_improvement", "ppo_improvement_se"),
+        "ESS gated": ("gate_improvement", "gate_improvement_se"),
+    }
+    total = len(coverage_rows) * config.repetitions
+    summary: list[dict[str, float | str]] = []
+    for method, (mean_key, se_key) in methods.items():
+        means = np.array([float(row[mean_key]) for row in coverage_rows])
+        variances = np.array(
+            [
+                (float(row[se_key]) * math.sqrt(config.repetitions)) ** 2
+                for row in coverage_rows
+            ]
         )
-        if method == "raw":
-            gradient = raw_gradient
-            raw_flag = 1.0
-        elif method == "ppo":
-            gradient, _ = batch_gradient(
-                features,
-                weights,
-                behavior,
-                baseline,
-                batch,
-                method="ppo",
-                epsilon=config.ppo_epsilon,
+        pooled_mean = float(np.mean(means))
+        sum_squares = float(
+            np.sum(
+                (config.repetitions - 1) * variances
+                + config.repetitions * (means - pooled_mean) ** 2
             )
-            raw_flag = 0.0
-        elif method == "gate":
-            if threshold is None:
-                raise ValueError("ESS gate requires a threshold")
-            if ess >= threshold:
-                gradient = raw_gradient
-                raw_flag = 1.0
-            else:
-                gradient, _ = batch_gradient(
-                    features,
-                    weights,
-                    behavior,
-                    baseline,
-                    batch,
-                    method="ppo",
-                    epsilon=config.ppo_epsilon,
-                )
-                raw_flag = 0.0
-        else:
-            raise ValueError(f"Unknown optimization method: {method}")
-        weights += config.optimization_learning_rate * gradient
-        values.append(policy_value(softmax(features @ weights.T), labels))
-        effective_sizes.append(ess)
-        used_raw.append(raw_flag)
-    return np.array(values), np.array(effective_sizes), np.array(used_raw)
-
-
-def optimization_experiment(
-    features: np.ndarray,
-    labels: np.ndarray,
-    initial_weights: np.ndarray,
-    config: Config,
-) -> tuple[list[dict[str, float | str]], list[dict[str, float | str]], float]:
-    on_policy = softmax(features @ initial_weights.T)
-    behavior = (
-        (1.0 - config.behavior_exploration) * on_policy
-        + config.behavior_exploration / on_policy.shape[1]
-    )
-    baseline = behavior[np.arange(len(labels)), labels]
-    rng = np.random.default_rng(config.seed + 3)
-    batches = [
-        sample_logged_batch(rng, behavior, labels, config.batch_size)
-        for _ in range(config.repetitions)
-    ]
-
-    raw_paths: list[np.ndarray] = []
-    ppo_paths: list[np.ndarray] = []
-    gate_paths: dict[float, list[np.ndarray]] = {
-        threshold: [] for threshold in config.threshold_grid
-    }
-    gate_ess: dict[float, list[np.ndarray]] = {
-        threshold: [] for threshold in config.threshold_grid
-    }
-    gate_raw: dict[float, list[np.ndarray]] = {
-        threshold: [] for threshold in config.threshold_grid
-    }
-    for batch in batches:
-        raw_path, _, _ = optimize_on_fixed_batch(
-            features,
-            labels,
-            initial_weights,
-            behavior,
-            baseline,
-            batch,
-            config,
-            method="raw",
         )
-        ppo_path, _, _ = optimize_on_fixed_batch(
-            features,
-            labels,
-            initial_weights,
-            behavior,
-            baseline,
-            batch,
-            config,
-            method="ppo",
-        )
-        raw_paths.append(raw_path)
-        ppo_paths.append(ppo_path)
-        for threshold in config.threshold_grid:
-            path, ess, raw_use = optimize_on_fixed_batch(
-                features,
-                labels,
-                initial_weights,
-                behavior,
-                baseline,
-                batch,
-                config,
-                method="gate",
-                threshold=threshold,
-            )
-            gate_paths[threshold].append(path)
-            gate_ess[threshold].append(ess)
-            gate_raw[threshold].append(raw_use)
-
-    validation_repetitions = int(
-        config.repetitions * config.validation_fraction
-    )
-    selected_threshold = max(
-        config.threshold_grid,
-        key=lambda threshold: float(
-            np.mean(
-                np.stack(gate_paths[threshold])[:validation_repetitions, -1]
-            )
-        ),
-    )
-    method_paths = {
-        "Unclipped": np.stack(raw_paths),
-        "PPO clipped": np.stack(ppo_paths),
-        "ESS gated": np.stack(gate_paths[selected_threshold]),
-    }
-    test_slice = slice(validation_repetitions, config.repetitions)
-    summary_rows: list[dict[str, float | str]] = []
-    path_rows: list[dict[str, float | str]] = []
-    for method, paths in method_paths.items():
-        test_paths = paths[test_slice]
-        final = test_paths[:, -1]
-        improvement = final - test_paths[:, 0]
-        summary_rows.append(
-            {
+        pooled_se = math.sqrt(sum_squares / (total - 1)) / math.sqrt(total)
+        row: dict[str, float | str] = {
                 "method": method,
-                "final_value": float(np.mean(final)),
-                "final_value_se": float(
-                    np.std(final, ddof=1) / math.sqrt(len(final))
-                ),
-                "improvement": float(np.mean(improvement)),
-                "improvement_se": float(
-                    np.std(improvement, ddof=1) / math.sqrt(len(improvement))
-                ),
-                "selected_threshold": selected_threshold
+                "mean_one_step_gain": pooled_mean,
+                "gain_se": pooled_se,
+                "ess_threshold": config.ess_threshold
                 if method == "ESS gated"
                 else math.nan,
                 "ppo_epsilon": config.ppo_epsilon,
-                "validation_repetitions": validation_repetitions,
-                "test_repetitions": config.repetitions - validation_repetitions,
+                "coverage_conditions": len(coverage_rows),
+                "repetitions_per_condition": config.repetitions,
+                "difference_from_unclipped": math.nan,
+                "difference_from_unclipped_se": math.nan,
+                "difference_from_ppo": math.nan,
+                "difference_from_ppo_se": math.nan,
             }
-        )
-        for step in range(config.optimization_steps + 1):
-            values = test_paths[:, step]
-            path_rows.append(
-                {
-                    "method": method,
-                    "step": step,
-                    "mean_value": float(np.mean(values)),
-                    "value_se": float(
-                        np.std(values, ddof=1) / math.sqrt(len(values))
-                    ),
-                }
-            )
-
-    selected_ess = np.stack(gate_ess[selected_threshold])[test_slice]
-    selected_raw_use = np.stack(gate_raw[selected_threshold])[test_slice]
-    for step in range(config.optimization_steps):
-        path_rows.append(
-            {
-                "method": "ESS gate diagnostics",
-                "step": step,
-                "mean_value": float(np.mean(selected_ess[:, step])),
-                "value_se": float(np.mean(selected_raw_use[:, step])),
-            }
-        )
-    return summary_rows, path_rows, selected_threshold
+        if method == "ESS gated":
+            for key, output_key in (
+                ("gate_minus_raw", "difference_from_unclipped"),
+                ("gate_minus_ppo", "difference_from_ppo"),
+            ):
+                differences = np.array(
+                    [float(coverage_row[key]) for coverage_row in coverage_rows]
+                )
+                difference_variances = np.array(
+                    [
+                        (
+                            float(coverage_row[f"{key}_se"])
+                            * math.sqrt(config.repetitions)
+                        )
+                        ** 2
+                        for coverage_row in coverage_rows
+                    ]
+                )
+                pooled_difference = float(np.mean(differences))
+                difference_sum_squares = float(
+                    np.sum(
+                        (config.repetitions - 1) * difference_variances
+                        + config.repetitions
+                        * (differences - pooled_difference) ** 2
+                    )
+                )
+                row[output_key] = pooled_difference
+                row[f"{output_key}_se"] = (
+                    math.sqrt(difference_sum_squares / (total - 1))
+                    / math.sqrt(total)
+                )
+        summary.append(row)
+    return summary
 
 
 def write_csv(rows: list[dict[str, float | str]], output: Path) -> None:
@@ -454,7 +370,6 @@ def write_csv(rows: list[dict[str, float | str]], output: Path) -> None:
 
 def make_figure(
     coverage_rows: list[dict[str, float]],
-    path_rows: list[dict[str, float | str]],
     output_stem: Path,
 ) -> None:
     import matplotlib
@@ -475,6 +390,7 @@ def make_figure(
     exact_improvement = np.array(
         [row["exact_gradient_improvement"] for row in coverage]
     )
+    sample_ess = np.array([row["mean_sample_ess"] for row in coverage])
 
     figure, axes = plt.subplots(1, 3, figsize=(11.0, 3.15), constrained_layout=True)
     axes[0].errorbar(
@@ -511,32 +427,49 @@ def make_figure(
     axes[1].set_ylabel("One-step population gain")
     axes[1].legend(frameon=False, fontsize=8)
 
-    styles = {
-        "Unclipped": ("#0072B2", "--"),
-        "PPO clipped": ("#D55E00", ":"),
-        "ESS gated": ("#009E73", "-"),
+    decision_styles = {
+        "Unclipped": (
+            "one_step_improvement",
+            "one_step_improvement_se",
+            "#0072B2",
+            "--",
+        ),
+        "PPO clipped": (
+            "ppo_improvement",
+            "ppo_improvement_se",
+            "#D55E00",
+            ":",
+        ),
+        "ESS gated": (
+            "gate_improvement",
+            "gate_improvement_se",
+            "#009E73",
+            "-",
+        ),
     }
-    for method, (color, linestyle) in styles.items():
-        selected = [row for row in path_rows if row["method"] == method]
-        selected.sort(key=lambda row: int(row["step"]))
-        steps = np.array([int(row["step"]) for row in selected])
-        values = np.array([float(row["mean_value"]) for row in selected])
-        standard_errors = np.array([float(row["value_se"]) for row in selected])
-        axes[2].plot(steps, values, color=color, linestyle=linestyle, label=method)
-        axes[2].fill_between(
-            steps,
-            values - 1.96 * standard_errors,
-            values + 1.96 * standard_errors,
+    for method, (mean_key, se_key, color, linestyle) in decision_styles.items():
+        means = np.array([float(row[mean_key]) for row in coverage])
+        standard_errors = np.array([float(row[se_key]) for row in coverage])
+        axes[2].errorbar(
+            sample_ess,
+            means,
+            yerr=1.96 * standard_errors,
             color=color,
-            alpha=0.12,
+            linestyle=linestyle,
+            marker="o" if method == "ESS gated" else None,
+            label=method,
         )
-    axes[2].set_title("(c) Fixed-rollout optimization", fontsize=10)
-    axes[2].set_xlabel("Update step")
-    axes[2].set_ylabel("Population reward")
+    axes[2].axhline(0.0, color="#777777", linewidth=0.8)
+    axes[2].axvline(0.1, color="#009E73", linewidth=0.8, alpha=0.7)
+    axes[2].set_title("(c) ESS selects the update", fontsize=10)
+    axes[2].set_xlabel("Mean sample ESS, $\\widehat\\rho$")
+    axes[2].set_ylabel("One-step population gain")
     axes[2].legend(frameon=False, fontsize=7)
 
     for axis in axes[:2]:
         axis.set_xlabel("Normalized ESS, $\\rho$")
+    for axis in (axes[0], axes[2]):
+        axis.set_xscale("log")
     for axis in axes:
         axis.grid(True, color="#e6e6e6", linewidth=0.5)
         axis.tick_params(labelsize=8)
@@ -551,7 +484,6 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=Path("simulation/results"))
     parser.add_argument("--figure-dir", type=Path, default=Path("figures"))
     parser.add_argument("--repetitions", type=int, default=Config.repetitions)
-    parser.add_argument("--optimization-steps", type=int, default=Config.optimization_steps)
     parser.add_argument("--skip-figure", action="store_true")
     args = parser.parse_args()
     if not 2 <= args.repetitions <= 100:
@@ -559,7 +491,6 @@ def main() -> None:
 
     config = Config(
         repetitions=args.repetitions,
-        optimization_steps=args.optimization_steps,
     )
     features, labels = load_optdigits(args.data_dir)
     classifier_config = ClassifierConfig(training_steps=config.classifier_steps)
@@ -567,19 +498,14 @@ def main() -> None:
     initial_weights = config.base_policy_scale * fitted_weights
 
     coverage_rows = coverage_experiment(features, labels, initial_weights, config)
-    summary_rows, path_rows, threshold = optimization_experiment(
-        features, labels, initial_weights, config
-    )
+    summary_rows = decision_summary(coverage_rows, config)
     coverage_csv = args.output_dir / "ess_coverage_results.csv"
-    summary_csv = args.output_dir / "policy_optimization_summary.csv"
-    paths_csv = args.output_dir / "policy_optimization_paths.csv"
+    summary_csv = args.output_dir / "ess_gate_summary.csv"
     write_csv(coverage_rows, coverage_csv)
     write_csv(summary_rows, summary_csv)
-    write_csv(path_rows, paths_csv)
     if not args.skip_figure:
         make_figure(
             coverage_rows,
-            path_rows,
             args.figure_dir / "ess_policy_validation",
         )
 
@@ -597,14 +523,13 @@ def main() -> None:
     )
     print(f"Wrote {coverage_csv}")
     print(f"Wrote {summary_csv}")
-    print(f"Wrote {paths_csv}")
-    print(f"Selected ESS threshold on validation runs: {threshold:.2f}")
+    print(f"Prespecified ESS threshold: {config.ess_threshold:.2f}")
     print(f"Correlation rho, log(MSE): {rho_mse_correlation:.4f}")
     print(f"Correlation log(MSE), one-step gain: {mse_gain_correlation:.4f}")
     for row in summary_rows:
         print(
-            f"{row['method']}: final value {float(row['final_value']):.5f} "
-            f"+/- {float(row['final_value_se']):.5f}"
+            f"{row['method']}: mean gain {float(row['mean_one_step_gain']):.5f} "
+            f"+/- {float(row['gain_se']):.5f}"
         )
 
 

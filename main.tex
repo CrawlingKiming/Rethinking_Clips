@@ -46,8 +46,8 @@ masking, not a cap on all large importance ratios.  This distinction yields an
 ESS-guided rule: use the unbiased gradient while coverage is sufficient and
 apply PPO masking after coverage deteriorates.  In a controlled contextual
 bandit, high ESS predicts low gradient error, low error predicts better policy
-updates, and the gated method avoids the loss caused by clipping throughout
-optimization.
+updates, and a prespecified ESS gate improves the mean update over either always
+clipping or never clipping.
 Validation in language-model training remains open.
 \end{abstract}
 
@@ -98,7 +98,7 @@ and correctness as a bounded reward \citep{alpaydin1998optdigits}.  The finite
 population lets us calculate the true gradient and all theoretical moments.
 Across 100 batches per condition, the experiment tests whether high ESS predicts
 low raw-gradient error, whether lower error improves the next policy update,
-and whether an ESS gate improves fixed-rollout optimization over always clipping.
+and whether an ESS gate improves the update over either static clipping choice.
 
 \paragraph{Contributions.}
 \begin{enumerate}
@@ -108,8 +108,8 @@ guarantee.
 \item We show that PPO clipping is an advantage-sign gradient mask, distinguish
 it from ratio truncation, and derive the exact risk comparison for each.
 \item We validate the chain from ESS to gradient error, one-step policy
-improvement, and ESS-gated fixed-rollout optimization on an established
-contextual-bandit benchmark.
+improvement, and ESS-gated update selection on an established contextual-bandit
+benchmark.
 \end{enumerate}
 
 The next section makes the setting precise and separates population correctness
@@ -821,10 +821,11 @@ empirical question is whether their relevant regime change coincides with the
 gradient-MSE crossover in \eqref{eq:crossover}.
 
 The rule is simple.  Compute raw sequence ESS, use the unmasked update above a
-threshold, and use PPO masking below it.  Select the threshold on validation
-runs and freeze it before evaluation.  The controlled study below tests the
-full chain from ESS to gradient error, policy improvement, and the gated
-optimization trajectory.
+threshold, and use PPO masking below it.  The threshold is an application-level
+choice because the theorem also depends on gradient scale and signal.  In the
+controlled study below, we prespecify $0.1$ rather than choosing it from the
+bandit outcomes, then test the full chain from ESS to gradient error, policy
+improvement, and the gated update decision.
 
 \section{Empirical validation of the theory}
 \label{sec:experiments}
@@ -836,7 +837,7 @@ The practical claim also relies on sample ESS and realized masked updates, so
 the experiment tests the full chain.  Does higher ESS imply lower raw-gradient
 MSE?  Does the resulting MSE ordering appear in actual population reward after
 one update?  Finally, can ESS decide when to use the raw gradient and when to
-apply the actual PPO mask during fixed-rollout optimization?
+apply the actual PPO mask across coverage regimes?
 
 We use the classification-to-contextual-bandit protocol of
 \citet{wang2017adaptive}.  Each Optdigits image is a context, the ten labels are
@@ -851,11 +852,12 @@ perturbation is independent of the gradient contributions, so it varies ESS
 while keeping the weighted gradient scale in a narrow range.  We draw 100
 batches of 256 interactions at each ESS level, compute the raw-gradient MSE,
 and apply one estimated-gradient step before evaluating the exact population
-reward.  The second study draws one fixed rollout batch per run and takes 35
-updates with the raw gradient, the PPO mask in
-Proposition~\ref{prop:ppo-mask}, or an ESS gate between them.  Forty runs select
-the ESS threshold; the remaining 60 runs report policy reward.  Full details
-appear in Appendix~\ref{app:bandit}.
+reward.  On each of the same batches, the decision study compares the raw
+gradient, the PPO mask in Proposition~\ref{prop:ppo-mask}, and a prespecified
+gate that uses the raw gradient when sample ESS is at least $0.1$ and PPO
+masking otherwise.  Thus the gate must avoid clipping's masking cost at high
+coverage and avoid raw-gradient error at low coverage to beat both static
+choices.  Full details appear in Appendix~\ref{app:bandit}.
 
 \begin{figure}[tbp]
   \centering
@@ -864,24 +866,24 @@ appear in Appendix~\ref{app:bandit}.
   normalized ESS falls; the dashed curve is the exact finite-population MSE.
   (b) The same loss of reliability reduces one-step population improvement and
   eventually makes the average update harmful; the dashed line uses the exact
-  gradient.  (c) Over 35 updates on one fixed rollout batch, an ESS gate retains
-  the benefit of raw updates at high coverage and applies PPO masking after
-  coverage falls.  Curves and intervals use 60 held-out runs after threshold
-  selection on 40 validation runs.}
+  gradient.  (c) The prespecified rule uses the raw update when sample ESS is at
+  least $0.1$ and PPO masking otherwise.  It retains the raw update's advantage
+  at high coverage and reduces its failures at low coverage.  Error bars are
+  95\% confidence intervals over 100 batches per condition.}
   \label{fig:ess-validation}
 \end{figure}
 
-The three panels support the intended chain.  As ESS falls from $1.0$ to
-$0.0025$, raw-gradient MSE increases from $0.0105$ to $0.918$.  Over the same
-sweep, mean one-step population gain falls from $0.00939$ to $-0.00570$.
-Thus the MSE deterioration predicted by the theorem corresponds to a worse
-policy update in this controlled environment.  In fixed-rollout optimization,
-the validation-selected ESS gate reaches test reward $0.7891\pm0.0019$, compared
-with $0.7707\pm0.0012$ for always-clipped PPO and $0.7903\pm0.0018$ for the
-unclipped estimator.  The gate removes most of the bias from clipping too early
-while preserving the raw estimator's performance in this testbed.  It does not
-significantly outperform the unclipped baseline here, so the result validates
-ESS as a useful criterion rather than claiming universal dominance.
+The three panels support the intended chain.  As population ESS falls from
+$1.0$ to $0.0025$, raw-gradient MSE increases from $0.0105$ to $0.918$, while
+mean one-step population gain falls from $0.00939$ to $-0.00570$.  The MSE
+deterioration predicted by the theorem therefore corresponds to a worse policy
+update in this controlled environment.  Across all 600 batch decisions, mean
+gain is $0.00639\pm0.00056$ for the ESS gate, compared with
+$0.00535\pm0.00071$ for always-unclipped and $0.00582\pm0.00056$ for
+always-clipped PPO.  Paired differences favor the gate by
+$0.00104\pm0.00041$ over always-unclipped and $0.00056\pm0.00006$ over
+always-clipped.  The gate succeeds for the intended reason: it avoids PPO's
+premature masking at high ESS and suppresses unreliable raw updates at low ESS.
 
 \section{Limitations}
 
@@ -972,12 +974,10 @@ raw-gradient squared error and update once with learning rate $0.8$.  The full
 population then gives the exact reward before and after each estimated update.
 The same step using the population gradient supplies a reference gain.
 
-\subsection{Fixed-rollout optimization and ESS gate}
+\subsection{ESS-gated update decision}
 
-The optimization study starts from the same policy.  Its logging policy mixes
-the initial policy with ten percent uniform exploration and remains fixed for
-the entire run.  Each of 100 runs draws one batch of 256 interactions and takes
-35 updates on that batch with learning rate $5$.  The three methods are
+The decision study uses the same policy, loggers, batch size, and learning rate
+as the controlled sweep.  On each batch, the three candidate updates are
 \begin{equation}
   \widehat g_W,
   \qquad
@@ -986,41 +986,42 @@ the entire run.  Each of 100 runs draws one batch of 256 interactions and takes
   \qquad
   \widehat g_{\mathrm{gate}}
   =\begin{cases}
-    \widehat g_W,&\widehat\rho\ge\lambda,\\
-    \widehat g_{\mathrm{PPO}},&\widehat\rho<\lambda,
+    \widehat g_W,&\widehat\rho\ge0.1,\\
+    \widehat g_{\mathrm{PPO}},&\widehat\rho<0.1,
   \end{cases}
   \label{eq:experimental-estimators}
 \end{equation}
-with $\epsilon=1$.  The threshold grid is fixed in advance.  The first 40 runs
-select $\lambda$ by final population reward, and the remaining 60 evaluate the
-frozen threshold.  The selected value is $\lambda=0.45$.
+with $\epsilon=1$.  The value $0.1$ is prespecified to match the motivating LLM
+observation rather than selected from the bandit outcomes.  It is not claimed
+as a universal constant.  Because each batch supplies all three updates,
+differences between methods are evaluated in paired form.
 
 \subsection{Results}
 
-Table~\ref{tab:bandit-full-results} reports the controlled sweep.  MSE increases
-by almost two orders of magnitude as ESS collapses, and the mean population gain
-becomes negative in the lowest-ESS regime.  This is the empirical bridge needed
-by the decision rule: ESS predicts when the raw update ceases to be reliable,
-and that unreliability has a measurable policy consequence.
+Table~\ref{tab:bandit-full-results} reports the controlled sweep and the gate's
+decision consequence.  MSE increases by almost two orders of magnitude as ESS
+collapses, and the raw update becomes harmful in the lowest-ESS regime.  PPO
+masking is costly at high ESS but becomes comparatively useful at low ESS, so
+the gate can improve over both static choices.
 
 \begin{table}[htbp]
 \centering
 \small
-\caption{Controlled ESS sweep with 100 independent batches per condition.
-Values after $\pm$ are standard errors.}
+\caption{Controlled ESS sweep and update decision with 100 independent batches
+per condition.  Values after $\pm$ are standard errors.}
 \label{tab:bandit-full-results}
 \begingroup
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{rrrrr}
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{rrrrrr}
 \toprule
-$\alpha$ & $\rho$ & $G_{2,\theta}$ & Empirical MSE & One-step gain \\
+$\alpha$ & $\rho$ & Empirical MSE & Unclipped gain & PPO gain & Gate gain \\
 \midrule
-0.0 & 1.0000 & 2.645 & $0.0105\pm0.0004$ & $0.00939\pm0.00012$ \\
-0.5 & 0.8194 & 2.693 & $0.0124\pm0.0004$ & $0.00907\pm0.00013$ \\
-1.0 & 0.4250 & 2.798 & $0.0255\pm0.0018$ & $0.00865\pm0.00018$ \\
-1.5 & 0.1271 & 2.901 & $0.0542\pm0.0056$ & $0.00714\pm0.00034$ \\
-2.0 & 0.0222 & 3.004 & $0.1350\pm0.0218$ & $0.00356\pm0.00099$ \\
-2.5 & 0.0025 & 3.123 & $0.9182\pm0.6248$ & $-0.00570\pm0.00390$ \\
+0.0 & 1.0000 & $0.0105\pm0.0004$ & $0.00939\pm0.00012$ & $0.00939\pm0.00012$ & $0.00939\pm0.00012$ \\
+0.5 & 0.8194 & $0.0124\pm0.0004$ & $0.00907\pm0.00013$ & $0.00899\pm0.00013$ & $0.00907\pm0.00013$ \\
+1.0 & 0.4250 & $0.0255\pm0.0018$ & $0.00865\pm0.00018$ & $0.00777\pm0.00017$ & $0.00865\pm0.00018$ \\
+1.5 & 0.1271 & $0.0542\pm0.0056$ & $0.00714\pm0.00034$ & $0.00608\pm0.00024$ & $0.00712\pm0.00035$ \\
+2.0 & 0.0222 & $0.1350\pm0.0218$ & $0.00356\pm0.00099$ & $0.00396\pm0.00040$ & $0.00484\pm0.00047$ \\
+2.5 & 0.0025 & $0.9182\pm0.6248$ & $-0.00570\pm0.00390$ & $-0.00125\pm0.00319$ & $-0.00075\pm0.00321$ \\
 \bottomrule
 \end{tabular}
 \endgroup

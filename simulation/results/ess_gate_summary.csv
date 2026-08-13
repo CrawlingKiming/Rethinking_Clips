@@ -1,0 +1,4 @@
+method,mean_one_step_gain,gain_se,ess_threshold,ppo_epsilon,coverage_conditions,repetitions_per_condition,difference_from_unclipped,difference_from_unclipped_se,difference_from_ppo,difference_from_ppo_se
+Unclipped,0.005349204287311361,0.0007056372353241048,nan,1.0,6,100,nan,nan,nan,nan
+PPO clipped,0.005823079284083549,0.0005577096760006799,nan,1.0,6,100,nan,nan,nan,nan
+ESS gated,0.006386256612993806,0.0005616184937929881,0.1,1.0,6,100,0.0010370523256824464,0.0004135282167565164,0.0005631773289102579,6.000467042735778e-05
