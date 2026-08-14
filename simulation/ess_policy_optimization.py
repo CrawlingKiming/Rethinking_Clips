@@ -1,25 +1,15 @@
-"""Validate the chain from ESS to gradient MSE to policy optimization.
+"""RLVR-style simulation of ESS-gated policy optimization.
 
-The environment uses the classification-to-contextual-bandit reduction from
-prior off-policy evaluation work.  Optdigits images are contexts, digit labels
-are actions, and a correct action receives reward one.  Because the population
-is finite and fully labeled, every policy value and gradient is enumerable.
+Optdigits images serve as prompts.  A policy emits an eight-token binary
+response, and a deterministic verifier returns one exactly when the response
+encodes the image label.  Every rollout is followed by sixteen sequential PPO
+minibatch updates.  The raw, PPO-masked, and ESS-gated methods share prompts,
+sampling uniforms, and minibatch orders within each replication.
 
-The script runs three connected experiments with at most 100 independent
-batches per condition:
-
-1. A controlled rollout-policy sweep keeps one current policy fixed and
-   perturbs its rollout policy independently of the gradient contributions.  This
-   isolates the ESS effect on raw-gradient MSE and one-step policy improvement.
-2. A prespecified ESS gate uses the unclipped update when sample ESS is at least
-   0.1 and the actual PPO advantage-sign gradient mask otherwise.  The gate is
-   compared with always-unclipped and always-clipped decisions across the same
-   coverage sweep.
-3. Sixteen-update fixed-rollout experiments cover both a fresh rollout, for
-   which the rollout and current policies initially coincide, and a stale
-   rollout with population ESS 0.0025.  The first checks that the gate preserves
-   unmasked learning under adequate coverage; the second checks whether masking
-   helps once the fixed batch has become unreliable.
+The leave-one-out group advantage is used because it has the same sign as the
+usual group-centered advantage while remaining an unbiased policy-gradient
+estimator.  This permits an exact comparison with the finite-population policy
+gradient at every diagnostic update.
 """
 
 from __future__ import annotations
@@ -27,778 +17,687 @@ from __future__ import annotations
 import argparse
 import csv
 import math
-from dataclasses import dataclass
+import urllib.request
+import zipfile
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
 
-from contextual_bandit_ess import Config as ClassifierConfig
-from contextual_bandit_ess import fit_softmax_classifier, load_optdigits, softmax
-
-
 @dataclass(frozen=True)
 class Config:
-    seed: int = 37
-    repetitions: int = 100
-    batch_size: int = 2048
-    classifier_steps: int = 400
-    base_policy_scale: float = 0.30
-    coverage_levels: tuple[float, ...] = (0.0, 0.5, 1.0, 1.5, 2.0, 2.5)
-    one_step_learning_rate: float = 5.0
+    seed: int = 73
+    replications: int = 100
+    diagnostic_replications: int = 20
+    rollout_steps: int = 8
+    prompts_per_rollout: int = 128
+    responses_per_prompt: int = 16
+    minibatches_per_rollout: int = 16
+    response_tokens: int = 16
+    classifier_steps: int = 500
+    classifier_learning_rate: float = 0.8
+    initialization_scale: float = 0.55
+    policy_learning_rate: float = 3.0
     ppo_epsilon: float = 0.2
     ess_threshold: float = 0.1
-    optimization_rollout_levels: tuple[float, ...] = (0.0, 2.5)
-    optimization_learning_rates: tuple[float, ...] = (2.0, 5.0)
-    optimization_steps: int = 16
 
 
-def policy_value(probabilities: np.ndarray, labels: np.ndarray) -> float:
-    return float(np.mean(probabilities[np.arange(len(labels)), labels]))
+METHODS = ("Raw", "PPO masked", "ESS gated")
+DATA_URL = (
+    "https://archive.ics.uci.edu/static/public/80/"
+    "optical+recognition+of+handwritten+digits.zip"
+)
 
 
-def make_rewards(labels: np.ndarray, actions: int) -> np.ndarray:
-    return np.eye(actions)[labels]
+def load_optdigits(data_dir: Path) -> tuple[np.ndarray, np.ndarray]:
+    archive = data_dir / "optdigits.zip"
+    extracted = data_dir / "optdigits"
+    training = extracted / "optdigits.tra"
+    test = extracted / "optdigits.tes"
+    if not training.exists() or not test.exists():
+        data_dir.mkdir(parents=True, exist_ok=True)
+        if not archive.exists():
+            urllib.request.urlretrieve(DATA_URL, archive)
+        extracted.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive) as handle:
+            handle.extractall(extracted)
+    arrays = [np.loadtxt(path, delimiter=",") for path in (training, test)]
+    combined = np.vstack(arrays)
+    features = combined[:, :-1] / 16.0
+    labels = combined[:, -1].astype(int)
+    features = np.column_stack([features, np.ones(features.shape[0])])
+    return features, labels
 
 
-def population_gradient_and_moments(
+def standard_error(values: np.ndarray) -> float:
+    if len(values) < 2:
+        return 0.0
+    return float(np.std(values, ddof=1) / math.sqrt(len(values)))
+
+
+def sigmoid(logits: np.ndarray) -> np.ndarray:
+    clipped = np.clip(logits, -30.0, 30.0)
+    return 1.0 / (1.0 + np.exp(-clipped))
+
+
+def digit_codes(labels: np.ndarray, response_tokens: int) -> np.ndarray:
+    """Return a redundant binary code for each digit label."""
+    if response_tokens % 4 != 0:
+        raise ValueError("response_tokens must be a multiple of four")
+    base = ((labels[:, None] >> np.arange(3, -1, -1)) & 1).astype(float)
+    return np.tile(base, (1, response_tokens // 4))
+
+
+def fit_initial_policy(
     features: np.ndarray,
-    labels: np.ndarray,
-    weights: np.ndarray,
-    behavior: np.ndarray,
-    baseline: np.ndarray,
-) -> dict[str, float | np.ndarray]:
-    probabilities = softmax(features @ weights.T)
-    samples, actions = probabilities.shape
-    rewards = make_rewards(labels, actions)
-    advantage = rewards - baseline[:, None]
-    ratios = probabilities / behavior
-    joint = behavior / samples
-
-    factors = joint * ratios * advantage
-    residual_factors = factors - np.sum(factors, axis=1, keepdims=True) * probabilities
-    gradient = residual_factors.T @ features
-
-    feature_norm_squared = np.sum(features**2, axis=1)
-    probability_norm_squared = np.sum(probabilities**2, axis=1, keepdims=True)
-    score_norm_squared = (
-        1.0 - 2.0 * probabilities + probability_norm_squared
-    ) * feature_norm_squared[:, None]
-    contribution_norm_squared = advantage**2 * score_norm_squared
-    weighted_second = float(
-        np.sum(joint * ratios**2 * contribution_norm_squared)
-    )
-    ratio_second = float(np.sum(joint * ratios**2))
-    rho = 1.0 / ratio_second
-    g2 = weighted_second / ratio_second
-    variance_trace = weighted_second - float(np.sum(gradient**2))
-    return {
-        "probabilities": probabilities,
-        "gradient": gradient,
-        "rho": rho,
-        "g2": g2,
-        "variance_trace": variance_trace,
-        "value": policy_value(probabilities, labels),
-    }
-
-
-def population_masked_moments(
-    features: np.ndarray,
-    labels: np.ndarray,
-    weights: np.ndarray,
-    behavior: np.ndarray,
-    baseline: np.ndarray,
-    true_gradient: np.ndarray,
-    epsilon: float,
-) -> dict[str, float | np.ndarray]:
-    """Enumerate the bias, variance, and MSE of the PPO-masked estimator."""
-    probabilities = softmax(features @ weights.T)
-    samples, actions = probabilities.shape
-    rewards = make_rewards(labels, actions)
-    advantage = rewards - baseline[:, None]
-    ratios = probabilities / behavior
-    mask = ((advantage >= 0.0) & (ratios <= 1.0 + epsilon)) | (
-        (advantage < 0.0) & (ratios >= 1.0 - epsilon)
-    )
-    coefficients = ratios * mask
-    joint = behavior / samples
-
-    factors = joint * coefficients * advantage
-    residual_factors = factors - np.sum(factors, axis=1, keepdims=True) * probabilities
-    mean_gradient = residual_factors.T @ features
-
-    feature_norm_squared = np.sum(features**2, axis=1)
-    probability_norm_squared = np.sum(probabilities**2, axis=1, keepdims=True)
-    score_norm_squared = (
-        1.0 - 2.0 * probabilities + probability_norm_squared
-    ) * feature_norm_squared[:, None]
-    contribution_norm_squared = advantage**2 * score_norm_squared
-    second_moment = float(
-        np.sum(joint * coefficients**2 * contribution_norm_squared)
-    )
-    variance_trace = second_moment - float(np.sum(mean_gradient**2))
-    squared_bias = float(np.sum((mean_gradient - true_gradient) ** 2))
-    return {
-        "gradient": mean_gradient,
-        "variance_trace": variance_trace,
-        "squared_bias": squared_bias,
-    }
-
-
-def sample_rollout_batch(
-    rng: np.random.Generator,
-    behavior: np.ndarray,
-    labels: np.ndarray,
-    batch_size: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    contexts = rng.integers(0, behavior.shape[0], size=batch_size)
-    uniforms = rng.random(batch_size)
-    cumulative = np.cumsum(behavior[contexts], axis=1)
-    actions = np.sum(uniforms[:, None] > cumulative, axis=1)
-    rewards = (actions == labels[contexts]).astype(float)
-    return contexts, actions, rewards
-
-
-def batch_gradient(
-    features: np.ndarray,
-    weights: np.ndarray,
-    behavior: np.ndarray,
-    baseline: np.ndarray,
-    batch: tuple[np.ndarray, np.ndarray, np.ndarray],
-    method: str,
-    epsilon: float,
-) -> tuple[np.ndarray, float]:
-    contexts, actions, rewards = batch
-    probabilities = softmax(features[contexts] @ weights.T)
-    row = np.arange(len(contexts))
-    ratios = probabilities[row, actions] / behavior[contexts, actions]
-    advantage = rewards - baseline[contexts]
-    residual = -probabilities
-    residual[row, actions] += 1.0
-    if method == "raw":
-        coefficients = ratios
-    elif method == "ppo":
-        mask = ((advantage >= 0.0) & (ratios <= 1.0 + epsilon)) | (
-            (advantage < 0.0) & (ratios >= 1.0 - epsilon)
-        )
-        coefficients = ratios * mask
-    else:
-        raise ValueError(f"Unknown method: {method}")
-
-    weighted_residual = residual * (coefficients * advantage)[:, None]
-    gradient = weighted_residual.T @ features[contexts] / len(contexts)
-    ess = float(np.sum(ratios) ** 2 / (len(ratios) * np.sum(ratios**2)))
-    return gradient, ess
-
-
-def controlled_rollout_policies(
-    target: np.ndarray,
-    levels: tuple[float, ...],
-    rng: np.random.Generator,
-) -> list[tuple[float, np.ndarray]]:
-    noise = rng.normal(size=target.shape)
-    noise -= np.mean(noise, axis=1, keepdims=True)
-    log_target = np.log(np.maximum(target, 1e-14))
-    return [(level, softmax(log_target + level * noise)) for level in levels]
-
-
-def coverage_experiment(
-    features: np.ndarray,
-    labels: np.ndarray,
-    weights: np.ndarray,
+    codes: np.ndarray,
     config: Config,
-) -> list[dict[str, float]]:
-    target = softmax(features @ weights.T)
-    baseline = target[np.arange(len(labels)), labels]
-    rollout_rng = np.random.default_rng(config.seed + 1)
-    batch_rng = np.random.default_rng(config.seed + 2)
-    rows: list[dict[str, float]] = []
-    for level, behavior in controlled_rollout_policies(
-        target, config.coverage_levels, rollout_rng
-    ):
-        population = population_gradient_and_moments(
-            features, labels, weights, behavior, baseline
-        )
-        true_gradient = np.asarray(population["gradient"])
-        masked_population = population_masked_moments(
-            features,
-            labels,
-            weights,
-            behavior,
-            baseline,
-            true_gradient,
-            config.ppo_epsilon,
-        )
-        exact_weights = weights + config.one_step_learning_rate * true_gradient
-        exact_value = policy_value(softmax(features @ exact_weights.T), labels)
-        gradient_errors: list[float] = []
-        ppo_gradient_errors: list[float] = []
-        gate_gradient_errors: list[float] = []
-        improvements: dict[str, list[float]] = {
-            "raw": [],
-            "ppo": [],
-            "gate": [],
-        }
-        alignments: list[float] = []
-        sample_effective_sizes: list[float] = []
-        gate_uses_raw: list[float] = []
-        for _ in range(config.repetitions):
-            batch = sample_rollout_batch(
-                batch_rng, behavior, labels, config.batch_size
-            )
-            estimate, sample_ess = batch_gradient(
-                features,
-                weights,
-                behavior,
-                baseline,
-                batch,
-                method="raw",
-                epsilon=config.ppo_epsilon,
-            )
-            ppo_estimate, _ = batch_gradient(
-                features,
-                weights,
-                behavior,
-                baseline,
-                batch,
-                method="ppo",
-                epsilon=config.ppo_epsilon,
-            )
-            gate_uses_unclipped = sample_ess >= config.ess_threshold
-            gated_estimate = estimate if gate_uses_unclipped else ppo_estimate
-            gradient_errors.append(float(np.sum((estimate - true_gradient) ** 2)))
-            ppo_gradient_errors.append(
-                float(np.sum((ppo_estimate - true_gradient) ** 2))
-            )
-            gate_gradient_errors.append(
-                float(np.sum((gated_estimate - true_gradient) ** 2))
-            )
-            for name, candidate in (
-                ("raw", estimate),
-                ("ppo", ppo_estimate),
-                ("gate", gated_estimate),
-            ):
-                updated = weights + config.one_step_learning_rate * candidate
-                updated_value = policy_value(softmax(features @ updated.T), labels)
-                improvements[name].append(
-                    updated_value - float(population["value"])
-                )
-            sample_effective_sizes.append(sample_ess)
-            gate_uses_raw.append(float(gate_uses_unclipped))
-            denominator = float(np.linalg.norm(estimate) * np.linalg.norm(true_gradient))
-            alignments.append(
-                float(np.sum(estimate * true_gradient) / denominator)
-                if denominator > 0.0
-                else 0.0
-            )
+) -> np.ndarray:
+    """Fit token heads by supervised logistic regression, then soften them."""
+    weights = np.zeros((codes.shape[1], features.shape[1]))
+    for _ in range(config.classifier_steps):
+        probabilities = sigmoid(features @ weights.T)
+        gradient = (probabilities - codes).T @ features / len(features)
+        weights -= config.classifier_learning_rate * gradient
+    return config.initialization_scale * weights
 
-        theory_mse = float(population["variance_trace"]) / config.batch_size
-        ppo_theory_mse = float(masked_population["squared_bias"]) + (
-            float(masked_population["variance_trace"]) / config.batch_size
+
+def population_value_and_gradient(
+    weights: np.ndarray,
+    features: np.ndarray,
+    codes: np.ndarray,
+) -> tuple[float, np.ndarray]:
+    """Compute exact reward and gradient over the finite prompt population."""
+    probabilities = sigmoid(features @ weights.T)
+    correct_token_probability = (
+        codes * probabilities + (1.0 - codes) * (1.0 - probabilities)
+    )
+    success_probability = np.prod(correct_token_probability, axis=1)
+    value = float(np.mean(success_probability))
+    residual = codes - probabilities
+    gradient = (
+        (success_probability[:, None] * residual).T @ features / len(features)
+    )
+    return value, gradient
+
+
+def sequence_log_probability(
+    actions: np.ndarray,
+    probabilities: np.ndarray,
+) -> np.ndarray:
+    probabilities = np.clip(probabilities, 1e-12, 1.0 - 1e-12)
+    return np.sum(
+        actions * np.log(probabilities)
+        + (1.0 - actions) * np.log(1.0 - probabilities),
+        axis=-1,
+    )
+
+
+def make_replication_randomness(
+    rng: np.random.Generator,
+    population_size: int,
+    config: Config,
+) -> list[dict[str, np.ndarray]]:
+    draws: list[dict[str, np.ndarray]] = []
+    for _ in range(config.rollout_steps):
+        prompts = rng.choice(
+            population_size,
+            size=config.prompts_per_rollout,
+            replace=False,
         )
-        gate_minus_raw = np.array(improvements["gate"]) - np.array(
-            improvements["raw"]
+        uniforms = rng.random(
+            (
+                config.prompts_per_rollout,
+                config.responses_per_prompt,
+                config.response_tokens,
+            )
         )
-        gate_minus_ppo = np.array(improvements["gate"]) - np.array(
-            improvements["ppo"]
-        )
-        rows.append(
+        prompt_order = rng.permutation(config.prompts_per_rollout)
+        draws.append(
             {
-                "rollout_perturbation": level,
-                "rho": float(population["rho"]),
-                "effective_count": config.batch_size * float(population["rho"]),
-                "g2": float(population["g2"]),
-                "theory_mse": theory_mse,
-                "ppo_theory_mse": ppo_theory_mse,
-                "ppo_squared_bias": float(masked_population["squared_bias"]),
-                "empirical_mse": float(np.mean(gradient_errors)),
-                "empirical_mse_se": float(
-                    np.std(gradient_errors, ddof=1)
-                    / math.sqrt(config.repetitions)
-                ),
-                "ppo_empirical_mse": float(np.mean(ppo_gradient_errors)),
-                "ppo_empirical_mse_se": float(
-                    np.std(ppo_gradient_errors, ddof=1)
-                    / math.sqrt(config.repetitions)
-                ),
-                "gate_empirical_mse": float(np.mean(gate_gradient_errors)),
-                "gate_empirical_mse_se": float(
-                    np.std(gate_gradient_errors, ddof=1)
-                    / math.sqrt(config.repetitions)
-                ),
-                "one_step_improvement": float(np.mean(improvements["raw"])),
-                "one_step_improvement_se": float(
-                    np.std(improvements["raw"], ddof=1)
-                    / math.sqrt(config.repetitions)
-                ),
-                "ppo_improvement": float(np.mean(improvements["ppo"])),
-                "ppo_improvement_se": float(
-                    np.std(improvements["ppo"], ddof=1)
-                    / math.sqrt(config.repetitions)
-                ),
-                "gate_improvement": float(np.mean(improvements["gate"])),
-                "gate_improvement_se": float(
-                    np.std(improvements["gate"], ddof=1)
-                    / math.sqrt(config.repetitions)
-                ),
-                "gate_minus_raw": float(np.mean(gate_minus_raw)),
-                "gate_minus_raw_se": float(
-                    np.std(gate_minus_raw, ddof=1)
-                    / math.sqrt(config.repetitions)
-                ),
-                "gate_minus_ppo": float(np.mean(gate_minus_ppo)),
-                "gate_minus_ppo_se": float(
-                    np.std(gate_minus_ppo, ddof=1)
-                    / math.sqrt(config.repetitions)
-                ),
-                "mean_sample_ess": float(np.mean(sample_effective_sizes)),
-                "gate_unclipped_fraction": float(np.mean(gate_uses_raw)),
-                "negative_update_rate": float(
-                    np.mean(np.array(improvements["raw"]) < 0.0)
-                ),
-                "gradient_alignment": float(np.mean(alignments)),
-                "exact_gradient_improvement": exact_value
-                - float(population["value"]),
-                "repetitions": config.repetitions,
-                "batch_size": config.batch_size,
+                "prompts": prompts,
+                "uniforms": uniforms,
+                "prompt_order": prompt_order,
             }
         )
-    return rows
+    return draws
 
 
-def optimize_fixed_rollout(
+def collect_rollout(
+    rollout_weights: np.ndarray,
     features: np.ndarray,
-    labels: np.ndarray,
-    initial_weights: np.ndarray,
-    behavior: np.ndarray,
-    baseline: np.ndarray,
-    batch: tuple[np.ndarray, np.ndarray, np.ndarray],
+    codes: np.ndarray,
+    random_draw: dict[str, np.ndarray],
+) -> dict[str, np.ndarray]:
+    prompt_indices = random_draw["prompts"]
+    prompt_features = features[prompt_indices]
+    prompt_codes = codes[prompt_indices]
+    rollout_probabilities = sigmoid(prompt_features @ rollout_weights.T)
+    actions = (
+        random_draw["uniforms"] < rollout_probabilities[:, None, :]
+    ).astype(float)
+    rewards = np.all(
+        actions == prompt_codes[:, None, :], axis=-1
+    ).astype(float)
+
+    reward_sum = np.sum(rewards, axis=1, keepdims=True)
+    advantages = rewards - (reward_sum - rewards) / (rewards.shape[1] - 1)
+    rollout_log_probabilities = sequence_log_probability(
+        actions,
+        rollout_probabilities[:, None, :],
+    )
+    return {
+        "prompt_indices": prompt_indices,
+        "features": prompt_features,
+        "codes": prompt_codes,
+        "actions": actions,
+        "rewards": rewards,
+        "advantages": advantages,
+        "rollout_log_probabilities": rollout_log_probabilities,
+        "prompt_order": random_draw["prompt_order"],
+    }
+
+
+def minibatch_gradients(
+    weights: np.ndarray,
+    rollout: dict[str, np.ndarray],
+    group_indices: np.ndarray,
     config: Config,
+) -> tuple[np.ndarray, np.ndarray, float, np.ndarray]:
+    batch_features = rollout["features"][group_indices]
+    actions = rollout["actions"][group_indices]
+    advantages = rollout["advantages"][group_indices]
+    rollout_log_probabilities = rollout["rollout_log_probabilities"][group_indices]
+
+    current_probabilities = sigmoid(batch_features @ weights.T)
+    current_log_probabilities = sequence_log_probability(
+        actions,
+        current_probabilities[:, None, :],
+    )
+    log_ratios = np.clip(
+        current_log_probabilities - rollout_log_probabilities,
+        -30.0,
+        30.0,
+    )
+    ratios = np.exp(log_ratios)
+
+    positive = advantages >= 0.0
+    ppo_mask = np.where(
+        positive,
+        ratios <= 1.0 + config.ppo_epsilon,
+        ratios >= 1.0 - config.ppo_epsilon,
+    )
+    residual = actions - current_probabilities[:, None, :]
+    raw_coefficients = ratios * advantages
+    masked_coefficients = raw_coefficients * ppo_mask
+    denominator = actions.shape[0] * actions.shape[1]
+    raw_gradient = np.einsum(
+        "bg,bgl,bd->ld",
+        raw_coefficients,
+        residual,
+        batch_features,
+        optimize=True,
+    ) / denominator
+    masked_gradient = np.einsum(
+        "bg,bgl,bd->ld",
+        masked_coefficients,
+        residual,
+        batch_features,
+        optimize=True,
+    ) / denominator
+
+    flat_ratios = ratios.ravel()
+    normalized_ess = float(
+        np.sum(flat_ratios) ** 2
+        / (len(flat_ratios) * np.sum(flat_ratios**2))
+    )
+    return raw_gradient, masked_gradient, normalized_ess, flat_ratios
+
+
+def simulate_method(
     method: str,
-    learning_rate: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    initial_weights: np.ndarray,
+    features: np.ndarray,
+    codes: np.ndarray,
+    random_draws: list[dict[str, np.ndarray]],
+    config: Config,
+    replication: int,
+    collect_diagnostics: bool,
+) -> tuple[np.ndarray, list[dict[str, float]], dict[str, float]]:
     weights = initial_weights.copy()
-    values = [policy_value(softmax(features @ weights.T), labels)]
-    effective_sizes: list[float] = []
-    raw_use: list[float] = []
-    for _ in range(config.optimization_steps):
-        raw_gradient, ess = batch_gradient(
-            features,
+    initial_value, _ = population_value_and_gradient(weights, features, codes)
+    values = [initial_value]
+    diagnostic_rows: list[dict[str, float]] = []
+    gate_raw_updates = 0
+    gate_masked_updates = 0
+    all_ess: list[float] = []
+
+    for rollout_index, random_draw in enumerate(random_draws, start=1):
+        rollout = collect_rollout(
             weights,
-            behavior,
-            baseline,
-            batch,
-            method="raw",
-            epsilon=config.ppo_epsilon,
-        )
-        ppo_gradient, _ = batch_gradient(
             features,
-            weights,
-            behavior,
-            baseline,
-            batch,
-            method="ppo",
-            epsilon=config.ppo_epsilon,
+            codes,
+            random_draw,
         )
-        if method == "Unclipped":
-            gradient = raw_gradient
-            use_raw = 1.0
-        elif method == "PPO masked":
-            gradient = ppo_gradient
-            use_raw = 0.0
-        elif method == "ESS gated":
-            use_raw = float(ess >= config.ess_threshold)
-            gradient = raw_gradient if use_raw else ppo_gradient
-        else:
-            raise ValueError(f"Unknown optimization method: {method}")
-        weights += learning_rate * gradient
-        values.append(policy_value(softmax(features @ weights.T), labels))
-        effective_sizes.append(ess)
-        raw_use.append(use_raw)
-    return np.array(values), np.array(effective_sizes), np.array(raw_use)
-
-
-def optimization_experiment(
-    features: np.ndarray,
-    labels: np.ndarray,
-    initial_weights: np.ndarray,
-    config: Config,
-    learning_rate: float,
-    rollout_level: float,
-) -> tuple[list[dict[str, float | str]], list[dict[str, float | str]]]:
-    target = softmax(features @ initial_weights.T)
-    baseline = target[np.arange(len(labels)), labels]
-    rollout_policies = dict(
-        controlled_rollout_policies(
-            target,
-            config.coverage_levels,
-            np.random.default_rng(config.seed + 1),
+        minibatches = np.split(
+            rollout["prompt_order"],
+            config.minibatches_per_rollout,
         )
-    )
-    behavior = rollout_policies[rollout_level]
-    population = population_gradient_and_moments(
-        features, labels, initial_weights, behavior, baseline
-    )
-    rng = np.random.default_rng(config.seed + 3)
-    methods = ("Unclipped", "PPO masked", "ESS gated")
-    paths: dict[str, list[np.ndarray]] = {method: [] for method in methods}
-    gate_effective_sizes: list[np.ndarray] = []
-    gate_raw_use: list[np.ndarray] = []
-    for _ in range(config.repetitions):
-        batch = sample_rollout_batch(rng, behavior, labels, config.batch_size)
-        for method in methods:
-            values, effective_sizes, raw_use = optimize_fixed_rollout(
-                features,
-                labels,
-                initial_weights,
-                behavior,
-                baseline,
-                batch,
-                config,
-                method,
-                learning_rate,
+        for minibatch_index, group_indices in enumerate(minibatches, start=1):
+            raw_gradient, masked_gradient, normalized_ess, ratios = (
+                minibatch_gradients(
+                    weights,
+                    rollout,
+                    group_indices,
+                    config,
+                )
             )
-            paths[method].append(values)
-            if method == "ESS gated":
-                gate_effective_sizes.append(effective_sizes)
-                gate_raw_use.append(raw_use)
+            all_ess.append(normalized_ess)
 
-    stacked = {method: np.stack(method_paths) for method, method_paths in paths.items()}
-    initial_value = float(next(iter(stacked.values()))[0, 0])
-    path_rows: list[dict[str, float | str]] = []
-    for method, method_paths in stacked.items():
-        gains = method_paths - method_paths[:, [0]]
-        for step in range(config.optimization_steps + 1):
-            path_rows.append(
-                {
-                    "method": method,
-                    "step": step,
-                    "mean_population_gain": float(np.mean(gains[:, step])),
-                    "population_gain_se": float(
-                        np.std(gains[:, step], ddof=1)
-                        / math.sqrt(config.repetitions)
-                    ),
-                    "mean_population_value": float(np.mean(method_paths[:, step])),
-                    "population_value_se": float(
-                        np.std(method_paths[:, step], ddof=1)
-                        / math.sqrt(config.repetitions)
-                    ),
-                    "mean_relative_improvement_pct": float(
-                        100.0 * np.mean(gains[:, step]) / initial_value
-                    ),
-                    "relative_improvement_pct_se": float(
-                        100.0
-                        * np.std(gains[:, step], ddof=1)
-                        / math.sqrt(config.repetitions)
-                        / initial_value
-                    ),
-                    "learning_rate": learning_rate,
-                    "rollout_perturbation": rollout_level,
-                    "population_ess": float(population["rho"]),
-                }
-            )
+            if collect_diagnostics:
+                value_before, true_gradient = population_value_and_gradient(
+                    weights,
+                    features,
+                    codes,
+                )
+                raw_value, _ = population_value_and_gradient(
+                    weights + config.policy_learning_rate * raw_gradient,
+                    features,
+                    codes,
+                )
+                oracle_value, _ = population_value_and_gradient(
+                    weights + config.policy_learning_rate * true_gradient,
+                    features,
+                    codes,
+                )
+                diagnostic_rows.append(
+                    {
+                        "replication": float(replication),
+                        "rollout_batch": float(rollout_index),
+                        "minibatch": float(minibatch_index),
+                        "normalized_ess": normalized_ess,
+                        "effective_sequences": normalized_ess * len(ratios),
+                        "mean_ratio": float(np.mean(ratios)),
+                        "max_ratio": float(np.max(ratios)),
+                        "raw_gradient_mse": float(
+                            np.sum((raw_gradient - true_gradient) ** 2)
+                        ),
+                        "raw_relative_gain_pct": float(
+                            100.0 * (raw_value - value_before) / value_before
+                        ),
+                        "oracle_relative_gain_pct": float(
+                            100.0 * (oracle_value - value_before) / value_before
+                        ),
+                    }
+                )
 
-    final_gains = {
-        method: method_paths[:, -1] - method_paths[:, 0]
-        for method, method_paths in stacked.items()
+            if method == "Raw":
+                selected_gradient = raw_gradient
+            elif method == "PPO masked":
+                selected_gradient = masked_gradient
+            elif normalized_ess >= config.ess_threshold:
+                selected_gradient = raw_gradient
+                gate_raw_updates += 1
+            else:
+                selected_gradient = masked_gradient
+                gate_masked_updates += 1
+            weights += config.policy_learning_rate * selected_gradient
+
+        value, _ = population_value_and_gradient(weights, features, codes)
+        values.append(value)
+
+    metadata = {
+        "initial_value": initial_value,
+        "gate_raw_updates": float(gate_raw_updates),
+        "gate_masked_updates": float(gate_masked_updates),
+        "mean_minibatch_ess": float(np.mean(all_ess)),
+        "minimum_minibatch_ess": float(np.min(all_ess)),
     }
-    gate_minus_raw = final_gains["ESS gated"] - final_gains["Unclipped"]
-    gate_minus_ppo = final_gains["ESS gated"] - final_gains["PPO masked"]
-    gate_ess = np.stack(gate_effective_sizes)
-    gate_raw = np.stack(gate_raw_use)
-    summary_rows: list[dict[str, float | str]] = []
-    for method in methods:
-        gains = final_gains[method]
-        summary_rows.append(
-            {
-                "method": method,
-                "final_population_gain": float(np.mean(gains)),
-                "final_population_gain_se": float(
-                    np.std(gains, ddof=1) / math.sqrt(config.repetitions)
-                ),
-                "final_relative_improvement_pct": float(
-                    100.0 * np.mean(gains) / initial_value
-                ),
-                "final_relative_improvement_pct_se": float(
-                    100.0
-                    * np.std(gains, ddof=1)
-                    / math.sqrt(config.repetitions)
-                    / initial_value
-                ),
-                "difference_from_unclipped": float(np.mean(gate_minus_raw))
-                if method == "ESS gated"
-                else math.nan,
-                "difference_from_unclipped_se": float(
-                    np.std(gate_minus_raw, ddof=1)
-                    / math.sqrt(config.repetitions)
-                )
-                if method == "ESS gated"
-                else math.nan,
-                "relative_difference_from_unclipped_pct": float(
-                    100.0 * np.mean(gate_minus_raw) / initial_value
-                )
-                if method == "ESS gated"
-                else math.nan,
-                "relative_difference_from_unclipped_pct_se": float(
-                    100.0
-                    * np.std(gate_minus_raw, ddof=1)
-                    / math.sqrt(config.repetitions)
-                    / initial_value
-                )
-                if method == "ESS gated"
-                else math.nan,
-                "difference_from_ppo": float(np.mean(gate_minus_ppo))
-                if method == "ESS gated"
-                else math.nan,
-                "difference_from_ppo_se": float(
-                    np.std(gate_minus_ppo, ddof=1)
-                    / math.sqrt(config.repetitions)
-                )
-                if method == "ESS gated"
-                else math.nan,
-                "relative_difference_from_ppo_pct": float(
-                    100.0 * np.mean(gate_minus_ppo) / initial_value
-                )
-                if method == "ESS gated"
-                else math.nan,
-                "relative_difference_from_ppo_pct_se": float(
-                    100.0
-                    * np.std(gate_minus_ppo, ddof=1)
-                    / math.sqrt(config.repetitions)
-                    / initial_value
-                )
-                if method == "ESS gated"
-                else math.nan,
-                "mean_gate_raw_updates": float(np.mean(np.sum(gate_raw, axis=1)))
-                if method == "ESS gated"
-                else math.nan,
-                "mean_gate_clipped_updates": float(
-                    config.optimization_steps - np.mean(np.sum(gate_raw, axis=1))
-                )
-                if method == "ESS gated"
-                else math.nan,
-                "mean_gate_ess": float(np.mean(gate_ess))
-                if method == "ESS gated"
-                else math.nan,
-                "rollout_perturbation": rollout_level,
-                "population_ess": float(population["rho"]),
-                "learning_rate": learning_rate,
-                "optimization_steps": config.optimization_steps,
-                "repetitions": config.repetitions,
-            }
-        )
-    return summary_rows, path_rows
+    return np.asarray(values), diagnostic_rows, metadata
 
 
-def write_csv(rows: list[dict[str, float | str]], output: Path) -> None:
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w", newline="", encoding="utf-8") as handle:
+def write_csv(path: Path, rows: list[dict[str, float | str]]) -> None:
+    if not rows:
+        raise ValueError(f"No rows available for {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
 
 
+def aggregate_paths(
+    values_by_method: dict[str, list[np.ndarray]],
+) -> list[dict[str, float | str]]:
+    rows: list[dict[str, float | str]] = []
+    for method in METHODS:
+        values = np.stack(values_by_method[method])
+        relative = 100.0 * (values - values[:, [0]]) / values[:, [0]]
+        for step in range(values.shape[1]):
+            rows.append(
+                {
+                    "method": method,
+                    "rollout_batch": float(step),
+                    "mean_population_reward": float(np.mean(values[:, step])),
+                    "population_reward_se": standard_error(values[:, step]),
+                    "mean_relative_improvement_pct": float(
+                        np.mean(relative[:, step])
+                    ),
+                    "relative_improvement_pct_se": standard_error(
+                        relative[:, step]
+                    ),
+                }
+            )
+    return rows
+
+
+def summarize_runs(
+    values_by_method: dict[str, list[np.ndarray]],
+    metadata_by_method: dict[str, list[dict[str, float]]],
+    config: Config,
+) -> list[dict[str, float | str]]:
+    final_values = {
+        method: np.asarray([path[-1] for path in values_by_method[method]])
+        for method in METHODS
+    }
+    initial_values = np.asarray([path[0] for path in values_by_method["Raw"]])
+    rows: list[dict[str, float | str]] = []
+    for method in METHODS:
+        relative = 100.0 * (
+            final_values[method] - initial_values
+        ) / initial_values
+        gate_minus_raw = final_values[method] - final_values["Raw"]
+        gate_minus_ppo = final_values[method] - final_values["PPO masked"]
+        metadata = metadata_by_method[method]
+        rows.append(
+            {
+                "method": method,
+                "final_population_reward": float(np.mean(final_values[method])),
+                "final_population_reward_se": standard_error(final_values[method]),
+                "final_relative_improvement_pct": float(np.mean(relative)),
+                "final_relative_improvement_pct_se": standard_error(relative),
+                "paired_difference_from_raw": float(np.mean(gate_minus_raw)),
+                "paired_difference_from_raw_se": standard_error(gate_minus_raw),
+                "paired_difference_from_ppo": float(np.mean(gate_minus_ppo)),
+                "paired_difference_from_ppo_se": standard_error(gate_minus_ppo),
+                "mean_gate_raw_updates": float(
+                    np.mean([row["gate_raw_updates"] for row in metadata])
+                ),
+                "mean_gate_masked_updates": float(
+                    np.mean([row["gate_masked_updates"] for row in metadata])
+                ),
+                "mean_minibatch_ess": float(
+                    np.mean([row["mean_minibatch_ess"] for row in metadata])
+                ),
+                "mean_minimum_minibatch_ess": float(
+                    np.mean([row["minimum_minibatch_ess"] for row in metadata])
+                ),
+                "replications": float(config.replications),
+                "rollout_batches": float(config.rollout_steps),
+                "minibatches_per_rollout": float(config.minibatches_per_rollout),
+                "prompts_per_rollout": float(config.prompts_per_rollout),
+                "responses_per_prompt": float(config.responses_per_prompt),
+                "response_tokens": float(config.response_tokens),
+                "policy_learning_rate": config.policy_learning_rate,
+                "ppo_epsilon": config.ppo_epsilon,
+                "ess_threshold": config.ess_threshold,
+            }
+        )
+    return rows
+
+
+def bin_diagnostics(
+    diagnostic_rows: list[dict[str, float | str]],
+) -> list[dict[str, float]]:
+    ess_values = np.asarray(
+        [float(row["normalized_ess"]) for row in diagnostic_rows]
+    )
+    boundaries = np.asarray([0.0, 0.03, 0.1, 0.2, 0.4, 0.6, 0.8, 1.000001])
+    output: list[dict[str, float]] = []
+    for index, (lower, upper) in enumerate(
+        zip(boundaries[:-1], boundaries[1:]), start=1
+    ):
+        chunk = np.flatnonzero((ess_values >= lower) & (ess_values < upper))
+        if len(chunk) == 0:
+            continue
+        ess = np.asarray(
+            [float(diagnostic_rows[i]["normalized_ess"]) for i in chunk]
+        )
+        mse = np.asarray(
+            [float(diagnostic_rows[i]["raw_gradient_mse"]) for i in chunk]
+        )
+        raw_gain = np.asarray(
+            [float(diagnostic_rows[i]["raw_relative_gain_pct"]) for i in chunk]
+        )
+        oracle_gain = np.asarray(
+            [float(diagnostic_rows[i]["oracle_relative_gain_pct"]) for i in chunk]
+        )
+        output.append(
+            {
+                "ess_bin": float(index),
+                "ess_bin_lower": float(lower),
+                "ess_bin_upper": float(upper),
+                "ess_min": float(np.min(ess)),
+                "ess_max": float(np.max(ess)),
+                "median_normalized_ess": float(np.median(ess)),
+                "mean_raw_gradient_mse": float(np.mean(mse)),
+                "raw_gradient_mse_se": standard_error(mse),
+                "mean_raw_relative_gain_pct": float(np.mean(raw_gain)),
+                "raw_relative_gain_pct_se": standard_error(raw_gain),
+                "mean_oracle_relative_gain_pct": float(np.mean(oracle_gain)),
+                "oracle_relative_gain_pct_se": standard_error(oracle_gain),
+                "observations": float(len(chunk)),
+            }
+        )
+    return output
+
+
 def make_figure(
-    coverage_rows: list[dict[str, float]],
-    output_stem: Path,
+    diagnostic_bins: list[dict[str, float | str]],
+    path_rows: list[dict[str, float | str]],
+    ess_threshold: float,
+    output_base: Path,
 ) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    output_stem.parent.mkdir(parents=True, exist_ok=True)
-    coverage = sorted(coverage_rows, key=lambda row: row["rho"])
-    rho = np.array([row["rho"] for row in coverage])
-    theory_mse = np.array([row["theory_mse"] for row in coverage])
-    ppo_theory_mse = np.array([row["ppo_theory_mse"] for row in coverage])
-    improvement = 1e3 * np.array(
-        [row["one_step_improvement"] for row in coverage]
+    plt.rcParams.update(
+        {
+            "font.family": "serif",
+            "font.size": 9,
+            "axes.titlesize": 10,
+            "axes.labelsize": 9,
+            "legend.fontsize": 8,
+        }
     )
-    improvement_se = np.array(
-        [row["one_step_improvement_se"] for row in coverage]
-    ) * 1e3
-    exact_improvement = 1e3 * np.array(
-        [row["exact_gradient_improvement"] for row in coverage]
-    )
-    figure, axes = plt.subplots(1, 3, figsize=(11.0, 3.15), constrained_layout=True)
-    axes[0].plot(
-        rho,
-        theory_mse,
-        color="#0072B2",
-        linestyle="--",
-        marker="o",
-        label="Raw, oracle",
-    )
-    axes[0].plot(
-        rho,
-        ppo_theory_mse,
-        color="#D55E00",
-        linestyle="-.",
-        marker="s",
-        label="PPO mask, oracle",
-    )
-    axes[0].axvline(0.1, color="#888888", linestyle=":", linewidth=0.9)
-    axes[0].set_yscale("log")
-    axes[0].set_title("(a) ESS predicts estimator error", fontsize=10)
-    axes[0].set_ylabel("Gradient MSE")
-    axes[0].legend(frameon=False, fontsize=7)
+    figure, axes = plt.subplots(1, 3, figsize=(10.2, 2.85))
 
+    x = np.asarray([float(row["median_normalized_ess"]) for row in diagnostic_bins])
+    mse = np.asarray([float(row["mean_raw_gradient_mse"]) for row in diagnostic_bins])
+    mse_se = np.asarray([float(row["raw_gradient_mse_se"]) for row in diagnostic_bins])
+    axes[0].errorbar(x, mse, yerr=mse_se, marker="o", color="#0072B2", capsize=2)
+    axes[0].axvline(ess_threshold, color="0.35", linestyle=":", linewidth=1)
+    axes[0].set_xscale("log")
+    axes[0].set_yscale("log")
+    axes[0].set_xlabel("Normalized sequence ESS")
+    axes[0].set_ylabel("Raw-gradient MSE")
+    axes[0].set_title("(a) ESS predicts gradient error")
+
+    raw_gain = np.asarray(
+        [float(row["mean_raw_relative_gain_pct"]) for row in diagnostic_bins]
+    )
+    raw_gain_se = np.asarray(
+        [float(row["raw_relative_gain_pct_se"]) for row in diagnostic_bins]
+    )
+    oracle_gain = np.asarray(
+        [float(row["mean_oracle_relative_gain_pct"]) for row in diagnostic_bins]
+    )
     axes[1].errorbar(
-        rho,
-        improvement,
-        yerr=1.96 * improvement_se,
+        x,
+        raw_gain,
+        yerr=raw_gain_se,
+        marker="o",
         color="#D55E00",
-        marker="s",
+        capsize=2,
         label="Raw estimate",
     )
-    axes[1].plot(
-        rho,
-        exact_improvement,
-        color="#222222",
-        linestyle="--",
-        label="Oracle gradient",
-    )
-    axes[1].axvline(0.1, color="#888888", linestyle=":", linewidth=0.9)
-    axes[1].axhline(0.0, color="#777777", linewidth=0.8)
-    axes[1].set_title("(b) Error reduces update quality", fontsize=10)
-    axes[1].set_ylabel("One-step reward gain ($\\times 10^{-3}$)")
-    axes[1].legend(frameon=False, fontsize=8)
+    axes[1].plot(x, oracle_gain, marker="s", color="#009E73", label="Exact gradient")
+    axes[1].axhline(0.0, color="0.55", linewidth=0.8)
+    axes[1].axvline(ess_threshold, color="0.35", linestyle=":", linewidth=1)
+    axes[1].set_xscale("log")
+    axes[1].set_xlabel("Normalized sequence ESS")
+    axes[1].set_ylabel("One-update reward change (%)")
+    axes[1].set_title("(b) Error changes update quality")
+    axes[1].legend(frameon=False)
 
-    decision_styles = {
-        "Raw": ("one_step_improvement", "one_step_improvement_se", "#0072B2", "--"),
-        "PPO mask": ("ppo_improvement", "ppo_improvement_se", "#D55E00", ":"),
-        "ESS gate": ("gate_improvement", "gate_improvement_se", "#009E73", "-"),
+    styles = {
+        "Raw": ("#D55E00", "--"),
+        "PPO masked": ("#0072B2", "-.") ,
+        "ESS gated": ("#009E73", "-"),
     }
-    for method, (mean_key, se_key, color, linestyle) in decision_styles.items():
-        means = 1e3 * np.array([row[mean_key] for row in coverage])
-        standard_errors = 1e3 * np.array([row[se_key] for row in coverage])
-        axes[2].errorbar(
-            rho,
-            means,
-            yerr=1.96 * standard_errors,
-            color=color,
-            linestyle=linestyle,
-            marker="o" if method == "ESS gate" else None,
-            label=method,
+    for method in METHODS:
+        rows = [row for row in path_rows if row["method"] == method]
+        steps = np.asarray([float(row["rollout_batch"]) for row in rows])
+        means = np.asarray(
+            [float(row["mean_relative_improvement_pct"]) for row in rows]
         )
-    axes[2].axvline(0.1, color="#888888", linestyle=":", linewidth=0.9)
-    axes[2].axhline(0.0, color="#777777", linewidth=0.8)
-    axes[2].set_title("(c) ESS selects the update", fontsize=10)
-    axes[2].set_xlabel("Normalized ESS, $\\rho$")
-    axes[2].set_ylabel("One-step reward gain ($\\times 10^{-3}$)")
-    axes[2].set_xscale("log")
-    axes[2].set_xlim(1e-3, 1.05)
-    axes[2].legend(frameon=False, fontsize=7)
+        errors = np.asarray(
+            [float(row["relative_improvement_pct_se"]) for row in rows]
+        )
+        color, linestyle = styles[method]
+        axes[2].plot(steps, means, color=color, linestyle=linestyle, label=method)
+        axes[2].fill_between(
+            steps,
+            means - 1.96 * errors,
+            means + 1.96 * errors,
+            color=color,
+            alpha=0.12,
+            linewidth=0,
+        )
+    axes[2].set_xlabel("Rollout batch")
+    axes[2].set_ylabel("Relative reward improvement (%)")
+    axes[2].set_title("(c) Full RLVR-style optimization")
+    axes[2].legend(frameon=False)
 
     for axis in axes:
-        axis.set_xlabel("Normalized ESS, $\\rho$")
-        axis.set_xscale("log")
-        axis.set_xlim(1e-3, 1.05)
-    for axis in axes:
-        axis.grid(True, color="#e6e6e6", linewidth=0.5)
-        axis.tick_params(labelsize=8)
-    figure.savefig(output_stem.with_suffix(".pdf"), bbox_inches="tight")
-    figure.savefig(output_stem.with_suffix(".png"), bbox_inches="tight", dpi=220)
+        axis.spines["top"].set_visible(False)
+        axis.spines["right"].set_visible(False)
+        axis.grid(alpha=0.15, linewidth=0.5)
+    figure.tight_layout(w_pad=1.2)
+    output_base.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output_base.with_suffix(".pdf"), bbox_inches="tight")
+    figure.savefig(output_base.with_suffix(".png"), dpi=300, bbox_inches="tight")
     plt.close(figure)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir", type=Path, default=Path("simulation/data"))
-    parser.add_argument("--output-dir", type=Path, default=Path("simulation/results"))
-    parser.add_argument("--figure-dir", type=Path, default=Path("figures"))
-    parser.add_argument("--repetitions", type=int, default=Config.repetitions)
-    parser.add_argument(
-        "--optimization-rollout-levels",
-        type=float,
-        nargs="+",
-        default=Config.optimization_rollout_levels,
-    )
-    parser.add_argument(
-        "--optimization-learning-rates",
-        type=float,
-        nargs="+",
-        default=Config.optimization_learning_rates,
-    )
-    parser.add_argument(
-        "--optimization-steps",
-        type=int,
-        default=Config.optimization_steps,
-    )
-    parser.add_argument("--skip-figure", action="store_true")
-    args = parser.parse_args()
-    if not 2 <= args.repetitions <= 100:
-        raise ValueError("repetitions must be between 2 and 100")
+def run(config: Config, skip_figure: bool = False) -> None:
+    if config.replications > 100:
+        raise ValueError("The simulation is limited to at most 100 replications")
+    if config.prompts_per_rollout % config.minibatches_per_rollout != 0:
+        raise ValueError("prompts_per_rollout must divide evenly into minibatches")
+    if config.responses_per_prompt < 2:
+        raise ValueError("responses_per_prompt must be at least two")
 
-    config = Config(
-        repetitions=args.repetitions,
-        optimization_rollout_levels=tuple(args.optimization_rollout_levels),
-        optimization_learning_rates=tuple(args.optimization_learning_rates),
-        optimization_steps=args.optimization_steps,
+    root = Path(__file__).resolve().parents[1]
+    features, labels = load_optdigits(root / "simulation" / "data")
+    codes = digit_codes(labels, config.response_tokens)
+    initial_weights = fit_initial_policy(features, codes, config)
+    initial_value, _ = population_value_and_gradient(
+        initial_weights,
+        features,
+        codes,
     )
-    features, labels = load_optdigits(args.data_dir)
-    classifier_config = ClassifierConfig(training_steps=config.classifier_steps)
-    fitted_weights = fit_softmax_classifier(features, labels, classifier_config)
-    initial_weights = config.base_policy_scale * fitted_weights
 
-    coverage_rows = coverage_experiment(features, labels, initial_weights, config)
-    optimization_summary: list[dict[str, float | str]] = []
-    optimization_paths: list[dict[str, float | str]] = []
-    for rollout_level in config.optimization_rollout_levels:
-        for learning_rate in config.optimization_learning_rates:
-            rate_summary, rate_paths = optimization_experiment(
-                features,
-                labels,
-                initial_weights,
-                config,
-                learning_rate,
-                rollout_level,
+    values_by_method: dict[str, list[np.ndarray]] = {
+        method: [] for method in METHODS
+    }
+    metadata_by_method: dict[str, list[dict[str, float]]] = {
+        method: [] for method in METHODS
+    }
+    diagnostics: list[dict[str, float | str]] = []
+
+    master_rng = np.random.default_rng(config.seed)
+    for replication in range(config.replications):
+        replication_seed = int(master_rng.integers(0, np.iinfo(np.int32).max))
+        random_draws = make_replication_randomness(
+            np.random.default_rng(replication_seed),
+            len(features),
+            config,
+        )
+        for method in METHODS:
+            collect_diagnostics = (
+                method == "ESS gated"
+                and replication < config.diagnostic_replications
             )
-            optimization_summary.extend(rate_summary)
-            optimization_paths.extend(rate_paths)
-    coverage_csv = args.output_dir / "ess_coverage_results.csv"
-    optimization_summary_csv = args.output_dir / "ess_optimization_summary.csv"
-    optimization_paths_csv = args.output_dir / "ess_optimization_paths.csv"
-    write_csv(coverage_rows, coverage_csv)
-    write_csv(optimization_summary, optimization_summary_csv)
-    write_csv(optimization_paths, optimization_paths_csv)
-    if not args.skip_figure:
+            values, diagnostic_rows, metadata = simulate_method(
+                method,
+                initial_weights,
+                features,
+                codes,
+                random_draws,
+                config,
+                replication,
+                collect_diagnostics,
+            )
+            values_by_method[method].append(values)
+            metadata_by_method[method].append(metadata)
+            diagnostics.extend(diagnostic_rows)
+
+    path_rows = aggregate_paths(values_by_method)
+    summary_rows = summarize_runs(values_by_method, metadata_by_method, config)
+    diagnostic_bins = bin_diagnostics(diagnostics)
+    results = root / "simulation" / "results"
+    write_csv(results / "rlvr_training_paths.csv", path_rows)
+    write_csv(results / "rlvr_summary.csv", summary_rows)
+    write_csv(results / "rlvr_minibatch_diagnostics.csv", diagnostics)
+    write_csv(results / "rlvr_diagnostic_bins.csv", diagnostic_bins)
+    if not skip_figure:
         make_figure(
-            coverage_rows,
-            args.figure_dir / "ess_policy_validation",
+            diagnostic_bins,
+            path_rows,
+            config.ess_threshold,
+            root / "figures" / "ess_policy_validation",
         )
 
-    rho_mse_correlation = float(
-        np.corrcoef(
-            [row["rho"] for row in coverage_rows],
-            np.log([row["empirical_mse"] for row in coverage_rows]),
-        )[0, 1]
-    )
-    mse_gain_correlation = float(
-        np.corrcoef(
-            np.log([row["empirical_mse"] for row in coverage_rows]),
-            [row["one_step_improvement"] for row in coverage_rows],
-        )[0, 1]
-    )
-    print(f"Wrote {coverage_csv}")
-    print(f"Wrote {optimization_summary_csv}")
-    print(f"Wrote {optimization_paths_csv}")
-    print(f"Prespecified ESS threshold: {config.ess_threshold:.2f}")
-    print(f"Correlation rho, log(MSE): {rho_mse_correlation:.4f}")
-    print(f"Correlation log(MSE), one-step gain: {mse_gain_correlation:.4f}")
-    for row in optimization_summary:
+    print(f"Initial exact population reward: {initial_value:.6f}")
+    for row in summary_rows:
         print(
-            f"{row['method']} (rollout perturbation "
-            f"{float(row['rollout_perturbation']):g}, step size "
-            f"{float(row['learning_rate']):g}): "
-            f"{int(row['optimization_steps'])}-update relative improvement "
-            f"{float(row['final_relative_improvement_pct']):.2f}% +/- "
-            f"{float(row['final_relative_improvement_pct_se']):.2f}% "
-            f"(absolute gain "
-            f"{float(row['final_population_gain']):.5f} +/- "
-            f"{float(row['final_population_gain_se']):.5f})"
+            f"{row['method']}: final reward "
+            f"{float(row['final_population_reward']):.6f}; relative improvement "
+            f"{float(row['final_relative_improvement_pct']):.2f}%"
         )
+    gate = next(row for row in summary_rows if row["method"] == "ESS gated")
+    print(
+        "ESS gate mean branch counts: "
+        f"raw={float(gate['mean_gate_raw_updates']):.2f}, "
+        f"masked={float(gate['mean_gate_masked_updates']):.2f}"
+    )
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--replications", type=int, default=100)
+    parser.add_argument("--diagnostic-replications", type=int, default=20)
+    parser.add_argument("--rollout-steps", type=int, default=8)
+    parser.add_argument("--policy-learning-rate", type=float, default=3.0)
+    parser.add_argument("--response-tokens", type=int, default=16)
+    parser.add_argument("--responses-per-prompt", type=int, default=16)
+    parser.add_argument("--skip-figure", action="store_true")
+    arguments = parser.parse_args()
+    run(
+        replace(
+            Config(),
+            replications=arguments.replications,
+            diagnostic_replications=min(
+                arguments.diagnostic_replications,
+                arguments.replications,
+            ),
+            rollout_steps=arguments.rollout_steps,
+            policy_learning_rate=arguments.policy_learning_rate,
+            response_tokens=arguments.response_tokens,
+            responses_per_prompt=arguments.responses_per_prompt,
+        ),
+        skip_figure=arguments.skip_figure,
+    )

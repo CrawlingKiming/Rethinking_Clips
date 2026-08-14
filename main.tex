@@ -587,8 +587,8 @@ derivative instead masks samples according to advantage sign.
 Away from the two clipping boundaries, define
 \begin{equation}
   M_\epsilon
-  :=\mathbb{1}\{A\ge0, W_\theta\le1+\epsilon\}
-   +\mathbb{1}\{A<0, W_\theta\ge1-\epsilon\}.
+  :=\mathbf{1}\{A\ge0, W_\theta\le1+\epsilon\}
+   +\mathbf{1}\{A<0, W_\theta\ge1-\epsilon\}.
   \label{eq:ppo-mask}
 \end{equation}
 Then
@@ -607,10 +607,10 @@ When $A\ge0$, multiplication by $A$ preserves order.  Hence
     \label{eq:ppo-positive-proof-1}\\
   \nabla_\theta\ell_\epsilon^{\mathrm{PPO}}
   &=A\nabla_\theta W_\theta
-    \mathbb{1}\{W_\theta<1+\epsilon\}
+    \mathbf{1}\{W_\theta<1+\epsilon\}
     \label{eq:ppo-positive-proof-2}\\
   &=AW_\theta S_\theta
-    \mathbb{1}\{W_\theta<1+\epsilon\}.
+    \mathbf{1}\{W_\theta<1+\epsilon\}.
     \label{eq:ppo-positive-proof-3}
 \end{align}
 The second line differentiates the active branch.  The third uses
@@ -623,10 +623,10 @@ When $A<0$, multiplication reverses order.  Therefore
     \label{eq:ppo-negative-proof-1}\\
   \nabla_\theta\ell_\epsilon^{\mathrm{PPO}}
   &=A\nabla_\theta W_\theta
-    \mathbb{1}\{W_\theta>1-\epsilon\}
+    \mathbf{1}\{W_\theta>1-\epsilon\}
     \label{eq:ppo-negative-proof-2}\\
   &=AW_\theta S_\theta
-    \mathbb{1}\{W_\theta>1-\epsilon\}.
+    \mathbf{1}\{W_\theta>1-\epsilon\}.
     \label{eq:ppo-negative-proof-3}
 \end{align}
 Combining the two cases and substituting $H_\theta=AS_\theta$ gives
@@ -875,80 +875,70 @@ controlled study below, we prespecify $0.1$ rather than choosing it from the
 bandit outcomes, then test the full chain from ESS to gradient error, policy
 improvement, and the gated update decision.
 
-\section{Simulation: oracle validation of the ESS mechanism}
+\section{Simulation: ESS in an RLVR optimization loop}
 \label{sec:simulation}
 
-The theory leads to three empirical questions.  Does ESS predict gradient
-error?  Does that error reduce the value of an update?  Can ESS therefore
-choose when the variance reduction from PPO masking is worth its bias?  These
-questions cannot be answered directly in an LLM because its population
-gradient is unknown.  We answer them in a finite oracle problem and reserve
-Section~\ref{sec:llm-experiments} for the test of practical transfer to RLVR.
+The theory makes a local claim about gradient reliability, but the proposed
+decision is made inside a multi-update RLVR loop.  We therefore need to test
+three links in the same experiment: whether ESS predicts gradient error,
+whether that error changes update quality, and whether the gate improves the
+resulting optimization path.  An LLM does not expose its population gradient,
+so we construct a finite verifier problem in which every link is measurable.
 
-\subsection{Oracle problem and comparisons}
+\subsection{Verifier problem and training loop}
 
-We convert handwritten-digit classification into policy optimization
-\citep{alpaydin1998optdigits,dudik2011doubly,wang2017adaptive}.  An image is a
-prompt, choosing one of ten labels is a complete response, and a correct choice
-receives reward one.  The rollout policy $Q$ generates the fixed batch, while
-$P_\theta$ is the policy updated from that batch.  Their action-probability
-ratio is therefore the analogue of an RLVR sequence ratio.  Unlike an LLM, the
-finite table permits exact enumeration of every response, so both the true
-gradient and its MSE are known.
+We turn Optdigits into a sequence-level RLVR task
+\citep{alpaydin1998optdigits,wang2017adaptive}.  An image is a prompt, the
+policy emits a 16-token binary response encoding its digit, and an exact-match
+verifier returns one only for the correct code.  The finite prompt population
+makes both the expected verifier reward and its gradient exactly computable.
+The multi-token response retains the main difficulty absent from a one-action
+bandit: its importance ratio is a product of token probabilities.
 
-We hold the current policy fixed and create six rollout policies with decreasing
-overlap.  The intervention changes ESS without using rewards or gradient
-information and keeps $G_{2,\theta}$ between $2.65$ and $3.12$.  For each
-condition, we draw 100 independent batches of 2,048 decisions.  The same batch
-is used to compare the raw estimator, the PPO advantage-sign mask with
-$\epsilon=0.2$, and a prespecified rule that uses the raw estimator when sample
-ESS is at least $0.1$ and the mask otherwise.  We measure gradient MSE and exact
-population reward after an update.  We also reuse a fixed batch for 16 updates
-to show how the rule behaves over an optimization trajectory.  Appendix
-\ref{app:bandit} specifies the data, policies, oracle calculation, randomization,
-and uncertainty estimates.
+Each run follows the RLVR procedure directly
+\citep{shao2024deepseekmath,yu2025dapo}.  We sample 128 prompts, generate 16
+responses per prompt, and compute a group-relative advantage.  We then divide
+the prompt groups into 16 PPO minibatches.  Before every minibatch update, we
+recompute the current sequence ratios and ESS.  The raw method always keeps the
+unmasked gradient, PPO always applies the advantage-sign mask with
+$\epsilon=0.2$, and the gate applies that mask only when ESS is below $0.1$.
+After all 16 minibatches, the updated policy generates a new rollout batch.
+We repeat this cycle eight times and compare 100 paired runs.  Appendix
+\ref{app:bandit} gives the full algorithm and the exact oracle calculation.
 
 \begin{figure}[tbp]
   \centering
   \includegraphics[width=\linewidth]{figures/ess_policy_validation.pdf}
-  \caption{Testing the ESS decision chain.  (a) Exact MSE for the raw and
-  PPO-masked gradients as rollout overlap varies.  (b) Exact population-reward
-  gain after one raw update, compared with the gain from the oracle gradient.
-  (c) The same one-step comparison for the raw, PPO-masked, and ESS-gated
-  updates.  Vertical dotted lines mark the prespecified ESS threshold $0.1$.
-  Error bars are 95\% confidence intervals over 100 paired replications.}
+  \caption{The ESS decision chain inside RLVR-style optimization.  (a) Raw
+  gradient error binned by the ESS observed before each minibatch update.
+  (b) Exact reward change from that raw update and from an update using the
+  exact population gradient.  Dotted lines mark the prespecified threshold
+  $0.1$; error bars in (a) and (b) are standard errors within each fixed ESS
+  bin.  (c) Relative population-reward improvement across new rollout batches;
+  bands are 95\% confidence intervals over 100 paired runs.}
   \label{fig:ess-validation}
 \end{figure}
 
 \subsection{Results}
 
-First, ESS predicts raw-gradient reliability.  As normalized ESS falls from
-$1$ to $0.0025$, the exact raw-gradient MSE increases from
-$1.29\times10^{-3}$ to $0.603$, a 469-fold increase.  Monte Carlo estimates
-track the oracle calculation until the most extreme condition, where rare
-high-ratio actions make a 100-batch mean unstable.  We therefore use exact MSE,
-not the realized Monte Carlo mean, for the primary comparison.  Panel (a) also
-exposes the bias--variance crossover: the raw estimator has lower exact MSE
-under good overlap, while PPO masking becomes preferable near the prespecified
-threshold as overlap deteriorates.
+First, ESS identifies unreliable minibatches.  Raw-gradient MSE is $0.0157$ in
+the bin above $0.8$, rises to $0.131$ between $0.03$ and $0.1$, and reaches
+$0.477$ below $0.03$.  The same minibatches reveal why this matters.  Exact
+gradient updates remain beneficial in every ESS bin, whereas raw updates lose
+$4.0\%$ reward on average between $0.03$ and $0.1$ and $13.3\%$ below $0.03$.
+Low ESS therefore predicts an estimation failure, not an unfavorable local
+objective.
 
-Second, the same change affects optimization.  The objective and oracle
-gradient are identical across all six conditions, so the oracle update gains
-$53.4\times10^{-3}$ reward throughout panel (b).  The raw estimate gains
-$50.8\times10^{-3}$ at ESS $1$, but loses $29.3\times10^{-3}$ at ESS $0.0025$.
-Coverage therefore changes the implemented update without changing the
-optimization target.
-
-Third, the estimator comparison is reflected in the update decision.  Above
-the threshold, the gate preserves the raw update and avoids unnecessary mask
-bias.  Below the threshold, it activates the PPO mask, which has lower oracle
-MSE in the controlled sweep.  Under equal weighting of the six prespecified
-conditions, the gate gains $30.7\times10^{-3}$ reward, compared with
-$27.3\times10^{-3}$ for raw updates and $22.1\times10^{-3}$ for always
-masking.  Appendix~\ref{app:bandit} reports every condition and the paired
-uncertainties, so this summary is not presented as a natural frequency
-distribution.  The oracle study tests the proposed mechanism; it does not
-establish how often low ESS occurs in language-model training.
+Second, the gate combines the two static methods' useful regimes.  After three
+rollout batches, its relative reward improvement is $109.5\%$, compared with
+$99.2\%$ for raw updates and $65.5\%$ for always masking.  After eight batches,
+the gate reaches $208.5\%$, compared with $195.1\%$ for raw updates and
+$208.3\%$ for always masking.  On average, only $5.17$ of 128 minibatch updates
+fall below the threshold.  These few switches preserve the raw method's early
+progress while recovering the masked method's final performance.  The study
+thus validates ESS as a decision statistic inside the intended optimization
+loop; it does not claim a statistically resolved final-reward advantage over
+always masking in this finite task.
 
 \section{Main experiments: ESS-gated RLVR}
 \label{sec:llm-experiments}
@@ -1049,40 +1039,42 @@ the LLM experiment, remains the paper's completed empirical evidence.
 \section{Simulation protocol and additional results}
 \label{app:bandit}
 
-\subsection{Correspondence to fixed-rollout RLVR}
+\subsection{Task and correspondence to RLVR}
 
-The simulation uses the classification-to-bandit reduction from
-\citet{dudik2011doubly,wang2017adaptive}.  Table~\ref{tab:rlvr-correspondence}
-states the correspondence to the fixed-rollout setting in
-Section~\ref{sec:setting}.  Throughout the simulation, $Q$ denotes the rollout
-policy that generated the fixed batch.
+The simulator combines the classification-to-bandit construction of
+\citet{wang2017adaptive} with the grouped rollout and minibatch structure used
+in RLVR \citep{shao2024deepseekmath,yu2025dapo}.  Table
+\ref{tab:rlvr-correspondence} records the correspondence.  It is not a language
+model: token heads are conditionally independent so that the population
+gradient remains exact.  It is nevertheless a sequence policy, and its ratio
+is the same product over response-token ratios that enters an RLVR update.
 
 \begin{table}[htbp]
 \centering
 \small
-\caption{Exact correspondence between the RLVR notation and the oracle bandit.}
+\caption{Correspondence between RLVR and the finite verifier task.}
 \label{tab:rlvr-correspondence}
 \begin{tabular}{lll}
 \toprule
 RLVR object & Bandit object & Realization \\
 \midrule
 Prompt $X$ & Context $x$ & Optdigits feature vector \\
-Complete response $Y$ & Action $A$ & One of ten digit labels \\
-Verifier reward $R$ & Bandit reward & $\mathbb{1}\{A=y(x)\}$ \\
-Rollout policy $Q$ & Action-sampling policy & Policy that generated the batch \\
-Current policy $P_\theta$ & Target policy & Policy updated from the batch \\
-Sequence ratio & Action ratio & $P_\theta(A\mid x)/Q(A\mid x)$ \\
-Fixed rollout & Bandit batch & 2,048 context-action-reward tuples \\
+Complete response $Y$ & Sequence $A_{1:16}$ & 16-token binary digit code \\
+Verifier reward $R$ & Exact-match reward & $\mathbf{1}\{A_{1:16}=c(y)\}$ \\
+Rollout policy $Q$ & Old policy & Policy that generated the responses \\
+Current policy $P_\theta$ & Updated policy & Policy used for the minibatch update \\
+Sequence ratio & Importance ratio & $P_\theta(A_{1:16}\mid x)/Q(A_{1:16}\mid x)$ \\
+Rollout batch & Grouped responses & 128 prompts, 16 responses per prompt \\
+PPO epoch & Minibatch sequence & 16 sequential updates, then a new rollout \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-One interaction first samples a context uniformly, then samples one action from
-$Q(\cdot\mid x)$, and finally reveals only the reward of that action.  The
-learner therefore receives $(x,A,Q(A\mid x),R(x,A))$, exactly the information
-used by an off-policy update.  The simulator retains the class label only to
-compute oracle counterfactual quantities.  This separation is essential: the
-estimators use bandit feedback, while evaluation can enumerate all actions.
+The learner uses only sampled responses, their rollout log probabilities, and
+their verifier rewards.  Labels are retained outside the learner to evaluate
+the exact finite-population objective and gradient.  This separation makes the
+training feedback identical in form to RLVR while preserving an oracle for the
+quantities that an LLM cannot reveal.
 
 \subsection{Finite population and initial policy}
 
@@ -1095,310 +1087,254 @@ gives a finite population $\{(x_j,y_j)\}_{j=1}^{M}$ with $M=5{,}620$ and
 $x_j\in\mathbb{R}^{65}$.  The original split is not used because the estimand
 is finite-population policy optimization, not classification generalization.
 
-The policy is a ten-class linear softmax,
-\begin{equation}
-  P_\theta(a\mid x)
-  =\frac{\exp(\theta_a^\top x)}
-  {\sum_{c=0}^{9}\exp(\theta_c^\top x)},
-  \qquad \theta\in\mathbb{R}^{10\times65}.
+Let $c(y)\in\{0,1\}^{16}$ be four repetitions of the four-bit binary
+representation of digit $y$.  Repetition creates a nontrivial sequence ratio
+without changing the semantic task.  The policy has 16 Bernoulli token heads,
+\begin{align}
+  p_{\theta,\ell}(x)&=\sigma(\theta_\ell^\top x),\nonumber\\
+  P_\theta(a_{1:16}\mid x)
+  &=\prod_{\ell=1}^{16}
+    p_{\theta,\ell}(x)^{a_\ell}
+    \{1-p_{\theta,\ell}(x)\}^{1-a_\ell},
+  \qquad \theta\in\mathbb{R}^{16\times65}.
   \label{eq:optdigits-policy}
-\end{equation}
-Its initialization is deterministic.  Starting from zero weights, we perform
-400 full-batch gradient-descent steps on multiclass cross-entropy using all
-5,620 examples, step size $0.8$, and no regularization.  We then set
-$\theta_0=0.3\theta_{\mathrm{fit}}$ to obtain a nondegenerate stochastic
-policy.  There is no minibatching, early stopping, or train-test selection in
-this initialization.
+\end{align}
+The verifier reward is
+$R(x_j,a_{1:16})=\mathbf{1}\{a_{1:16}=c(y_j)\}$.
 
-The population objective and reward are
+Initialization is deterministic.  Starting from zero, we fit all token heads
+for 500 full-population logistic-regression steps with step size $0.8$ and no
+regularization, then multiply the fitted weights by $0.55$.  This softening
+keeps the initial policy stochastic and gives initial exact reward
+$V(\theta_0)=0.095766$.  No data split, minibatching, early stopping, or model
+selection is used in this initialization.
+
+For compactness, define
 \begin{equation}
-  V(\theta)=\frac1M\sum_{j=1}^{M}P_\theta(y_j\mid x_j),
-  \qquad R_{j,a}=\mathbb{1}\{a=y_j\}.
+  q_j(\theta)
+  :=P_\theta(c(y_j)\mid x_j)
+  =\prod_{\ell=1}^{16}
+  \left[c_{j\ell}p_{j\ell}
+  +(1-c_{j\ell})(1-p_{j\ell})\right],
+  \label{eq:correct-sequence-probability}
+\end{equation}
+where $c_{j\ell}=c(y_j)_\ell$ and
+$p_{j\ell}=p_{\theta,\ell}(x_j)$.  The finite-population objective is
+\begin{equation}
+  V(\theta)=\frac1M\sum_{j=1}^{M}q_j(\theta).
   \label{eq:optdigits-value}
 \end{equation}
-We fix $b_j=P_{\theta_0}(y_j\mid x_j)$ and set
-$A_{j,a}=R_{j,a}-b_j$, so $|A_{j,a}|\le1$.  The baseline remains fixed during
-multi-update optimization.  This choice does not alter the population gradient
-because an action-independent baseline has zero expected score.  For the
-softmax policy,
-\begin{equation}
-  S_\theta(x_j,a)
-  =\{e_a-P_\theta(\cdot\mid x_j)\}x_j^\top,
-  \qquad H_\theta(x_j,a)=A_{j,a}S_\theta(x_j,a).
-  \label{eq:optdigits-score}
-\end{equation}
 
-\subsection{Oracle gradient and oracle MSE}
+\subsection{Exact gradient and group-relative advantage}
 
-For any rollout policy $Q$, sample
-$J\sim\operatorname{Uniform}\{1,\ldots,M\}$ and then
-$A\sim Q(\cdot\mid x_J)$.  The importance ratio is
+The exact gradient follows by differentiating
+Equation~\eqref{eq:correct-sequence-probability}.  For token head $\ell$,
 \begin{equation}
-  W_\theta(x_j,a)=\frac{P_\theta(a\mid x_j)}{Q(a\mid x_j)}.
-  \label{eq:optdigits-weight}
+  \nabla_{\theta_\ell}V(\theta)
+  =\frac1M\sum_{j=1}^{M}
+    q_j(\theta)\{c_{j\ell}-p_{j\ell}\}x_j.
+  \label{eq:optdigits-gradient}
 \end{equation}
-The \emph{oracle gradient} is not estimated from a larger batch.  It is the
-exact sum over all $M\times10=56{,}200$ context-action pairs:
+Thus the oracle is a closed-form sum over all 5,620 prompts, not an estimate
+from a larger rollout.  The squared Frobenius error of a minibatch gradient is
+\begin{equation}
+  E_t=\|\widehat g_t-\nabla V(\theta_t)\|_F^2,
+  \label{eq:optdigits-gradient-error}
+\end{equation}
+which sums error across all 1,040 policy parameters.
+
+For prompt $i$, let $R_{ig}$ be the verifier reward of response
+$g\in\{1,\ldots,G\}$.  We use the leave-one-out group advantage
+\begin{equation}
+  A_{ig}=R_{ig}-\frac1{G-1}\sum_{h\ne g}R_{ih}
+  =\frac{G}{G-1}(R_{ig}-\bar R_i).
+  \label{eq:loo-group-advantage}
+\end{equation}
+It has the same sign as the group-centered advantage used in GRPO
+\citep{shao2024deepseekmath}.  We omit the optional group standard-deviation
+scaling because the oracle comparison requires one fixed gradient target.
+This choice is theoretically convenient: conditional on response $g$, the
+leave-one-out baseline depends only on the other responses, so
 \begin{align}
-  g(\theta)
-  &=\frac1M\sum_{j=1}^{M}\sum_{a=0}^{9}
-    P_\theta(a\mid x_j)H_\theta(x_j,a),
-    \label{eq:optdigits-gradient}\\
-  \rho_\theta^{-1}
-  &=\frac1M\sum_{j=1}^{M}\sum_{a=0}^{9}
-    Q(a\mid x_j)W_\theta(x_j,a)^2,
-    \label{eq:optdigits-rho}\\
-  G_{2,\theta}
-  &=\rho_\theta\frac1M\sum_{j=1}^{M}\sum_{a=0}^{9}
-    Q(a\mid x_j)W_\theta(x_j,a)^2
-    \|H_\theta(x_j,a)\|_F^2.
-    \label{eq:optdigits-g2}
+  \E[A_{ig}\nabla_\theta\log P_\theta(A_{ig}\mid x_i)]
+  &=\E[R_{ig}\nabla_\theta\log P_\theta(A_{ig}\mid x_i)]\nonumber\\
+  &\quad-
+  \E\left[\frac1{G-1}\sum_{h\ne g}R_{ih}\right]
+  \E[\nabla_\theta\log P_\theta(A_{ig}\mid x_i)]\nonumber\\
+  &=\nabla_\theta\E[R_{ig}\mid x_i].
+  \label{eq:loo-unbiased-proof}
 \end{align}
-The program constructs each $10\times65$ score matrix, multiplies it by
-$P_\theta(a\mid x_j)A_{j,a}/M$, and sums.  No sampled action appears in this
-calculation.  Substitution into Theorem~\ref{thm:raw-mse} gives the oracle MSE,
-\begin{equation}
-  \operatorname{MSE}(\widehat g_W)
-  =\frac1N\left\{
-    \frac{G_{2,\theta}}{\rho_\theta}-\|g(\theta)\|_F^2
-  \right\}.
-  \label{eq:optdigits-exact-mse}
-\end{equation}
+The second term vanishes by the zero-mean score identity.  If every response
+in a group has the same reward, all its advantages are zero.
 
-The PPO mask is evaluated against the same target gradient.  Let $M_{j,a}$
-denote the deterministic advantage-sign mask in
-Proposition~\ref{prop:ppo-mask}, and define
-$g_M(\theta)=\E_Q[W_\theta M H_\theta]$.  Exact enumeration gives
-\begin{equation}
-  \operatorname{MSE}(\widehat g_M)
-  =\|g_M(\theta)-g(\theta)\|_F^2
-  +\frac1N\left\{
-    \E_Q[\|W_\theta M H_\theta\|_F^2]
-    -\|g_M(\theta)\|_F^2
-  \right\}.
-  \label{eq:optdigits-masked-mse}
-\end{equation}
-The first term is squared mask bias and the second is sampling variance.  Panel
-(a) therefore compares both estimators by exact MSE, rather than treating
-variance reduction alone as evidence that masking is preferable.
+\subsection{Rollout and minibatch procedure}
 
-For Monte Carlo replication $r$, the rollout batch
-$\mathcal{B}_r=\{(J_i,A_i,R_i)\}_{i=1}^{N}$ contains $N=2{,}048$ contexts sampled
-with replacement and one action per context.  The raw estimate and sample ESS
-are
-\begin{align}
-  \widehat g_r
-  &=\frac1N\sum_{i=1}^{N}W_iH_i,
-    \label{eq:optdigits-sample-gradient}\\
-  \widehat\rho_r
-  &=\frac{(\sum_{i=1}^{N}W_i)^2}
-    {N\sum_{i=1}^{N}W_i^2}.
-    \label{eq:optdigits-sample-ess}
-\end{align}
-Across $R=100$ independent batches, the empirical MSE is
-\begin{equation}
-  \widehat{\operatorname{MSE}}
-  =\frac1R\sum_{r=1}^{R}
-  \|\widehat g_r-g(\theta_0)\|_F^2.
-  \label{eq:optdigits-empirical-mse}
-\end{equation}
-The Frobenius norm sums error across all 650 policy parameters; it is not a
-per-coordinate MSE or a root MSE.  Under severe mismatch, rare high-ratio
-actions dominate \eqref{eq:optdigits-exact-mse} but may be absent from 100
-batches; when one appears, it can instead dominate the mean.  The realized
-Monte Carlo estimate may therefore lie far from the oracle MSE even though it
-is unbiased across repeated Monte Carlo experiments.
-
-\subsection{Controlled rollout-policy overlap}
-
-The coverage sweep holds $P_{\theta_0}$, $V$, and $g(\theta_0)$ fixed and varies
-only the rollout policy.  With seed 38, draw one
-$Z\in\mathbb{R}^{M\times10}$ with independent standard-normal entries and
-center each row.  Define
-\begin{equation}
-  Q_\alpha(a\mid x_j)
-  =\operatorname{softmax}_a
-  \left\{\log P_{\theta_0}(a\mid x_j)+\alpha Z_{j,a}\right\},
-  \qquad \alpha\in\{0,0.5,1,1.5,2,2.5\}.
-  \label{eq:rollout-perturbation}
-\end{equation}
-The same $Z$ is used for all six conditions.  At $\alpha=0$, the rollout and
-current policies coincide.  Increasing $\alpha$ reduces their overlap without
-using rewards, advantages, or scores to choose the direction.  This is a
-controlled intervention for isolating coverage, not a generative model of an
-LLM optimization path.  In the realized sweep, $G_{2,\theta_0}$ stays between
-$2.65$ and $3.12$, while $\rho_{\theta_0}$ ranges from $1$ to $0.002531$.
-
-With seed 39, we generate 100 independent batches for each $\alpha$.  A batch
-is shared across the raw, PPO-masked, and gated methods, so all method
-comparisons are paired.  The PPO estimator uses the advantage-sign mask from
-Proposition~\ref{prop:ppo-mask} with $\epsilon=0.2$:
-\begin{equation}
-  \widehat g_{\mathrm{PPO}}
-  =\frac1N\sum_{i=1}^{N}W_iM_{0.2,i}H_i,
-  \qquad
-  \widehat g_{\mathrm{gate}}
-  =\begin{cases}
-    \widehat g_r,&\widehat\rho_r\ge0.1,\\
-    \widehat g_{\mathrm{PPO}},&\widehat\rho_r<0.1.
-  \end{cases}
-  \label{eq:experimental-estimators}
-\end{equation}
-Thus a nonnegative-advantage contribution is retained when $W_i\le1.2$, and a
-negative-advantage contribution is retained when $W_i\ge0.8$.  Retained ratios
-are not numerically truncated.  The threshold $0.1$ is transferred from the
-motivating LLM rule and is not tuned on the bandit outcomes.
-
-For the one-step experiment, each method applies
-$\theta_1=\theta_0+5\widehat g$ and is evaluated by exact enumeration of
-$V(\theta_1)-V(\theta_0)$.  Replacing $\widehat g$ with the oracle gradient
-gives the reference curve in Figure~\ref{fig:ess-validation}(b).
-
-\subsection{Fresh and stale fixed-rollout optimization}
-
-The multi-update experiment separates two states of a fixed-rollout epoch.  The
-fresh condition uses $Q_0=P_{\theta_0}$, so population ESS equals one before
-the first update.  The stale condition uses $Q_{2.5}$, whose initial population
-ESS is $0.002531$.  The latter is a conditional stress test of a batch that has
-already lost coverage; it is not presented as a simulation of how quickly an
-LLM reaches that state.
-
-For each condition, seed 40 generates 100 rollout batches of 2,048 interactions.
-All methods start from $\theta^{(0)}=\theta_0$ and reuse the same batch for 16
-updates.  At update $t=0,\ldots,15$, each method performs the following steps:
+Each replication begins at the same $\theta_0$ and performs eight rollout
+batches.  For rollout batch $r$, the simulator executes the following steps.
 \begin{enumerate}
-  \item recompute $P_{\theta^{(t)}}$, all ratios
-  $P_{\theta^{(t)}}(A_i\mid x_{J_i})/Q_\alpha(A_i\mid x_{J_i})$, and sample ESS;
-  \item compute raw and PPO-masked gradients using the current score and fixed
-  baseline $b_j$;
-  \item select the estimator prescribed by the method;
-  \item update $\theta^{(t+1)}=\theta^{(t)}+\eta\widehat g^{(t)}$;
-  \item enumerate $V(\theta^{(t+1)})$ over all 5,620 contexts.
+  \item Set the rollout policy $Q_r=P_{\theta_{r,0}}$ and sample 128 distinct
+  prompts uniformly from the finite population.
+  \item For each prompt, sample $G=16$ complete responses from $Q_r$, compute
+  the binary verifier rewards, and compute Equation
+  \eqref{eq:loo-group-advantage} once.
+  \item Randomly permute the 128 prompt groups and partition them into 16
+  minibatches.  Each minibatch contains eight intact groups, hence $N=128$
+  complete responses.
+  \item For minibatch $t=1,\ldots,16$, compute the current sequence ratio
+  \begin{equation}
+    W_{ig,t}
+    =\frac{P_{\theta_{r,t-1}}(A_{ig}\mid x_i)}
+    {Q_r(A_{ig}\mid x_i)}
+    =\prod_{\ell=1}^{16}
+    \frac{P_{\theta_{r,t-1}}(A_{ig\ell}\mid x_i)}
+    {Q_r(A_{ig\ell}\mid x_i)},
+    \label{eq:simulation-sequence-ratio}
+  \end{equation}
+  then compute raw ESS, choose the method-specific gradient, and update
+  $\theta_{r,t}=\theta_{r,t-1}+3\widehat g_{r,t}$.
+  \item After the sixteenth minibatch, set
+  $\theta_{r+1,0}=\theta_{r,16}$ and generate a new rollout batch from that
+  updated policy.
 \end{enumerate}
-Contexts, actions, rewards, rollout probabilities, and the baseline remain
-fixed within an epoch.  Current probabilities, ratios, scores, ESS, and the
-gate decision are recomputed after every update.  We use step sizes
-$\eta\in\{2,5\}$ for every method without method-specific tuning.  The same
-random-number streams are reused across step sizes, and methods are paired on
-the identical batch within each condition.
+Every sampled response enters exactly one minibatch update.  Advantages and
+rollout log probabilities are fixed within a rollout batch, while current
+probabilities, ratios, scores, ESS, and the gate decision are recomputed before
+each update.  This is the same operational order as grouped RLVR: generate from
+the old policy, make sequential PPO minibatch updates, then collect new data.
 
-The initial value is $V(\theta_0)=0.42154$.  At checkpoint $t$, we report
+\subsection{Estimators, gate, and diagnostics}
+
+Let
+$S_{ig,t}=\nabla_\theta\log P_{\theta_{r,t-1}}(A_{ig}\mid x_i)$.
+For each minibatch, the raw and PPO-masked gradients are
+\begin{align}
+  \widehat g_{\mathrm{raw},t}
+  &=\frac1N\sum_{i,g}W_{ig,t}A_{ig}S_{ig,t},
+    \label{eq:simulation-raw-gradient}\\
+  \widehat g_{\mathrm{PPO},t}
+  &=\frac1N\sum_{i,g}W_{ig,t}M_{ig,t}A_{ig}S_{ig,t},
+    \label{eq:simulation-ppo-gradient}
+\end{align}
+where $M_{ig,t}$ is the advantage-sign mask in
+Proposition~\ref{prop:ppo-mask} with $\epsilon=0.2$.  This is gradient masking,
+not numerical ratio truncation.  The third method uses
 \begin{equation}
-  \Delta_t^{\mathrm{rel}}
-  =100\frac{V(\theta^{(t)})-V(\theta^{(0)})}
-  {V(\theta^{(0)})}.
+  \widehat g_{\mathrm{gate},t}
+  =\begin{cases}
+    \widehat g_{\mathrm{raw},t},&\widehat\rho_t\ge0.1,\\
+    \widehat g_{\mathrm{PPO},t},&\widehat\rho_t<0.1,
+  \end{cases}
+  \qquad
+  \widehat\rho_t
+  =\frac{(\sum_{i,g}W_{ig,t})^2}
+  {N\sum_{i,g}W_{ig,t}^2}.
+  \label{eq:simulation-gate}
+\end{equation}
+The threshold is fixed before the runs and is not selected from these results.
+
+All three methods use identical initial weights and are paired on prompt draws,
+response-sampling uniforms, and group permutations.  Policies diverge after
+their updates, but applying the same uniforms to their respective token
+probabilities remains a valid coupled draw.  The master seed is 73.  There are
+100 independent replications, each with $8\times16=128$ updates.
+
+Figure~\ref{fig:ess-validation}(a,b) uses every minibatch from the first 20
+ESS-gated replications, for 2,560 diagnostic observations.  At the pre-update
+policy, we compute Equation~\eqref{eq:optdigits-gradient} and record
+$\|\widehat g_{\mathrm{raw},t}-\nabla V(\theta_t)\|_F^2$.  We also evaluate two
+hypothetical one-step policies, one using the raw estimate and one using the
+exact gradient, without altering the training trajectory.  ESS is grouped into
+the fixed intervals $[0,0.03)$, $[0.03,0.1)$, $[0.1,0.2)$, $[0.2,0.4)$,
+$[0.4,0.6)$, $[0.6,0.8)$, and $[0.8,1]$.  Panel (c) uses all 100 replications
+and reports
+\begin{equation}
+  \Delta_r^{\mathrm{rel}}
+  =100\frac{V(\theta_{r,0})-V(\theta_{0,0})}
+  {V(\theta_{0,0})}.
   \label{eq:relative-improvement}
 \end{equation}
-Tables report means and standard errors $s/\sqrt{100}$.  Figure error bars are
-means plus or minus $1.96s/\sqrt{100}$.  Paired differences are computed within
-each rollout before their standard errors are calculated.
 
 \subsection{Reproducibility}
 
 The implementation is
 \texttt{simulation/ess\_policy\_optimization.py}.  Its default command
-downloads the official UCI archive, regenerates the three CSV files in
-\texttt{simulation/results}, and writes Figure~\ref{fig:ess-validation} in PDF
-and PNG formats.  The run uses Python 3.12.13, NumPy 2.3.5, and Matplotlib
-3.11.1 in double precision on CPU; no GPU is used.  The initial classifier is
-deterministic.  Seeds 38, 39, and 40 determine the rollout perturbation,
-coverage batches, and fixed-rollout batches, respectively.  All methods share
-the same batch size and step size within a comparison, and the ESS threshold
-remains $0.1$ throughout.
+downloads the official UCI archive when necessary and writes four CSV files:
+the aggregated training paths, final summary, all minibatch diagnostics, and
+fixed-bin diagnostic summary.  It also writes Figure
+\ref{fig:ess-validation} in PDF and PNG formats.  The run uses double-precision
+NumPy on CPU.  Matplotlib only renders saved results; no GPU or learned
+simulation component is used.  The complete default command is
+\texttt{python simulation/ess\_policy\_optimization.py --replications 100}.
 
 \subsection{Results}
 
 \paragraph{Gradient reliability.}
-Table~\ref{tab:bandit-mse-results} separates the exact target from its Monte
-Carlo diagnostic.  The exact raw MSE rises by a factor of 469 as ESS decreases,
-while $G_{2,\theta}$ changes by less than 18\%.  The PPO mask first has lower
-exact MSE at $\rho=0.127$, where its variance reduction offsets its squared
-bias.  At $\rho=0.00253$, the empirical raw MSE is $9.44\pm9.18$, compared with
-the oracle value $0.603$.  The large standard error confirms that 100 batches
-cannot reliably estimate this rare-event expectation, which is why the exact
-calculation is the primary result.
+Table~\ref{tab:rlvr-diagnostics} reports all fixed ESS bins.  Raw-gradient MSE
+increases monotonically as ESS moves from the highest bin to the lowest.  The
+mean raw update is beneficial for ESS above $0.2$, approximately neutral
+between $0.1$ and $0.2$, and harmful below $0.1$.  The exact-gradient update is
+beneficial in every bin.  The sign change therefore comes from gradient error,
+not from the local population objective becoming unrewarding.
 
 \begin{table}[htbp]
 \centering
 \small
-\caption{Exact and Monte Carlo gradient MSE across the controlled overlap
-sweep.  Monte Carlo values are mean $\pm$ standard error over 100 batches.}
-\label{tab:bandit-mse-results}
-\begin{tabular}{rrrrrr}
+\caption{Minibatch diagnostics from the first 20 replications.  MSE and
+one-update relative reward changes are means $\pm$ standard errors within each
+fixed ESS bin.}
+\label{tab:rlvr-diagnostics}
+\begin{tabular}{lrrrr}
 \toprule
-$\alpha$ & $\rho$ & $G_{2,\theta}$ & Raw, exact & PPO mask, exact & Raw, Monte Carlo \\
+ESS interval & Count & Raw-gradient MSE & Raw change (\%) & Exact change (\%) \\
 \midrule
-0.0 & 1.0000 & 2.645 & $1.29{\times}10^{-3}$ & $1.29{\times}10^{-3}$ & $(1.26\pm0.05){\times}10^{-3}$ \\
-0.5 & 0.8194 & 2.693 & $1.60{\times}10^{-3}$ & $2.30{\times}10^{-3}$ & $(1.58\pm0.05){\times}10^{-3}$ \\
-1.0 & 0.4250 & 2.798 & $3.21{\times}10^{-3}$ & $4.38{\times}10^{-3}$ & $(3.03\pm0.13){\times}10^{-3}$ \\
-1.5 & 0.1271 & 2.901 & $1.11{\times}10^{-2}$ & $1.09{\times}10^{-2}$ & $(0.88\pm0.05){\times}10^{-2}$ \\
-2.0 & 0.0222 & 3.004 & $6.61{\times}10^{-2}$ & $5.57{\times}10^{-2}$ & $(3.49\pm0.58){\times}10^{-2}$ \\
-2.5 & 0.0025 & 3.123 & $0.603$ & $0.513$ & $9.44\pm9.18$ \\
+$[0,0.03)$ & 26 & $0.477\pm0.207$ & $-13.29\pm5.82$ & $6.29\pm1.10$ \\
+$[0.03,0.1)$ & 76 & $0.131\pm0.034$ & $-3.99\pm1.75$ & $7.03\pm0.70$ \\
+$[0.1,0.2)$ & 137 & $0.054\pm0.008$ & $-0.10\pm0.91$ & $5.94\pm0.48$ \\
+$[0.2,0.4)$ & 443 & $0.028\pm0.002$ & $1.19\pm0.22$ & $4.26\pm0.15$ \\
+$[0.4,0.6)$ & 585 & $0.022\pm0.001$ & $1.42\pm0.19$ & $3.57\pm0.10$ \\
+$[0.6,0.8)$ & 661 & $0.020\pm0.001$ & $1.27\pm0.10$ & $2.99\pm0.07$ \\
+$[0.8,1]$ & 632 & $0.016\pm0.001$ & $2.95\pm0.69$ & $3.49\pm0.12$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\paragraph{One-step policy improvement.}
-Table~\ref{tab:bandit-decision-results} evaluates each estimated gradient by
-exact population reward.  The gate uses raw updates in every high-overlap batch,
-then changes branches as realized sample ESS falls.  At $\rho=0.0222$, this
-batch-specific decision gains $13.05\times10^{-3}$ reward, compared with
-$7.87\times10^{-3}$ for raw updates and $9.35\times10^{-3}$ for always masking.
-At the most extreme condition, masking limits the loss but does not make the
-mean update beneficial.  Under equal weighting of the six fixed conditions,
-the gate exceeds raw updates by $(3.40\pm1.42)\times10^{-3}$ and always masking
-by $(8.55\pm0.18)\times10^{-3}$.  These standard errors use paired method
-differences within condition and treat the six conditions as fixed.
+\paragraph{Optimization path.}
+Table~\ref{tab:rlvr-path} reports the complete trajectory.  Raw updates provide
+fast initial progress but have much larger between-run uncertainty.  PPO
+masking is stable but slow through the first half of training.  The gate follows
+the raw trajectory when ratios are reliable and changes only $5.17$ of 128
+updates on average.  It is ahead of both static methods from rollout batch 3
+through batch 7 and reaches the PPO endpoint at batch 8.
 
 \begin{table}[htbp]
 \centering
 \small
-\caption{Exact population-reward gain after one update of step size 5.  Gains
-are in units of $10^{-3}$; values are mean $\pm$ standard error over 100 paired
-batches.  The final column is the fraction of batches assigned a raw update.}
-\label{tab:bandit-decision-results}
-\begin{tabular}{rrrrrr}
+\caption{Relative population-reward improvement after each new rollout batch,
+reported as mean $\pm$ standard error over 100 paired replications.}
+\label{tab:rlvr-path}
+\begin{tabular}{rrrr}
 \toprule
-$\alpha$ & $\rho$ & Raw gain & PPO-mask gain & ESS-gate gain & Gate raw fraction \\
+Rollout batch & Raw (\%) & PPO mask (\%) & ESS gate (\%) \\
 \midrule
-0.0 & 1.0000 & $50.83\pm0.15$ & $50.83\pm0.15$ & $50.83\pm0.15$ & 1.00 \\
-0.5 & 0.8194 & $50.19\pm0.16$ & $36.41\pm0.16$ & $50.19\pm0.16$ & 1.00 \\
-1.0 & 0.4250 & $47.10\pm0.36$ & $28.87\pm0.28$ & $47.10\pm0.36$ & 1.00 \\
-1.5 & 0.1271 & $36.88\pm0.86$ & $20.82\pm0.64$ & $35.76\pm1.07$ & 0.94 \\
-2.0 & 0.0222 & $7.87\pm4.82$ & $9.35\pm2.21$ & $13.05\pm2.45$ & 0.25 \\
-2.5 & 0.0025 & $-29.28\pm8.95$ & $-13.60\pm5.86$ & $-12.96\pm5.91$ & 0.03 \\
+0 & $0.00\pm0.00$ & $0.00\pm0.00$ & $0.00\pm0.00$ \\
+1 & $46.37\pm2.81$ & $17.94\pm0.40$ & $45.71\pm2.55$ \\
+2 & $81.08\pm4.37$ & $39.95\pm0.65$ & $81.72\pm4.27$ \\
+3 & $99.17\pm7.24$ & $65.55\pm0.88$ & $109.55\pm5.51$ \\
+4 & $129.00\pm7.23$ & $93.88\pm1.18$ & $132.01\pm7.15$ \\
+5 & $136.45\pm9.00$ & $124.21\pm1.35$ & $145.78\pm9.39$ \\
+6 & $170.32\pm9.37$ & $153.98\pm1.45$ & $174.98\pm9.59$ \\
+7 & $189.22\pm9.64$ & $182.20\pm1.46$ & $198.22\pm9.52$ \\
+8 & $195.11\pm11.39$ & $208.25\pm1.51$ & $208.51\pm10.26$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\paragraph{Fixed-rollout trajectories.}
-The additional 16-update study in Table~\ref{tab:bandit-epoch-results} separates
-what the one-step mechanism does prove from what it does not.  On fresh batches,
-the gate keeps all 16 raw updates and exactly matches the raw optimizer.  In the
-stale stress condition, it activates the mask and improves on always masking,
-but raw updates attain higher final reward.  Initial gradient MSE therefore
-predicts local update reliability, not the ordering of nonlinear 16-step
-trajectories.  The latter also depends on accumulated mask bias and changes in
-the policy geometry.
-
-\begin{table}[htbp]
-\centering
-\small
-\caption{Relative population-reward improvement after 16 updates on a fixed
-batch.  Values are percentages, reported as mean $\pm$ standard error over 100
-paired batches.}
-\label{tab:bandit-epoch-results}
-\begin{tabular}{lrrrrr}
-\toprule
-Initial rollout & Step size & Raw & PPO mask & ESS gate & Gate raw updates \\
-\midrule
-Fresh, $\rho=1$ & 2 & $50.55\pm0.07$ & $29.30\pm0.06$ & $50.55\pm0.07$ & 16.00 \\
-Fresh, $\rho=1$ & 5 & $79.16\pm0.07$ & $46.32\pm0.16$ & $79.16\pm0.07$ & 16.00 \\
-Stale, $\rho=0.0025$ & 2 & $38.55\pm0.56$ & $18.86\pm0.31$ & $20.82\pm0.56$ & 1.46 \\
-Stale, $\rho=0.0025$ & 5 & $62.19\pm1.00$ & $36.62\pm0.56$ & $38.39\pm0.70$ & 0.86 \\
-\bottomrule
-\end{tabular}
-\end{table}
+The corresponding final exact rewards are $0.2826\pm0.0109$ for raw,
+$0.2952\pm0.0014$ for PPO masking, and $0.2954\pm0.0098$ for the gate.  Paired
+gate differences are $0.0128\pm0.0099$ relative to raw and
+$0.0002\pm0.0100$ relative to PPO.  Hence the simulation supports the proposed
+mechanism and the speed--stability tradeoff, but not a statistically resolved
+claim that the gate has higher final reward than always masking.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
