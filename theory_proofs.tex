@@ -1,0 +1,319 @@
+% Line-by-line proofs deferred from the main theoretical development.
+
+\subsection{Proof of Theorem~\ref{thm:raw-mse}}
+
+\begin{proof}
+Let $Z_i=W_{\theta,i}H_{\theta,i}$ and let $g=g(\theta)$.  Unbiasedness follows
+line by line from identical sampling:
+\begin{align}
+  \E[\widehat g_W]
+  &=\E\left[\frac1N\sum_{i=1}^N Z_i\right]
+    \label{eq:unbiased-proof-1}\\
+  &=\frac1N\sum_{i=1}^N\E[Z_i]
+    \label{eq:unbiased-proof-2}\\
+  &=\E_Q[W_\theta H_\theta]
+    \label{eq:unbiased-proof-3}\\
+  &=g.
+    \label{eq:unbiased-proof-4}
+\end{align}
+For the MSE, center each contribution before expanding the squared norm:
+\begin{align}
+  \E\|\widehat g_W-g\|_2^2
+  &=\E\left\|
+    \frac1N\sum_{i=1}^N(Z_i-g)
+    \right\|_2^2
+    \label{eq:raw-proof-1}\\
+  &=\frac1{N^2}\sum_{i=1}^N\E\|Z_i-g\|_2^2
+    +\frac1{N^2}\sum_{i\ne j}
+      \E[(Z_i-g)^\top(Z_j-g)]
+    \label{eq:raw-proof-2}\\
+  &=\frac1N\E\|Z_1-g\|_2^2
+    \label{eq:raw-proof-3}\\
+  &=\frac1N\left\{
+    \E\|Z_1\|_2^2-2g^\top\E[Z_1]+\|g\|_2^2
+    \right\}
+    \label{eq:raw-proof-4}\\
+  &=\frac1N\left\{
+    \E_Q[W_\theta^2\|H_\theta\|_2^2]-\|g\|_2^2
+    \right\}
+    \label{eq:raw-proof-5}\\
+  &=\frac1N\left(
+    \frac{G_{2,\theta}}{\rho_\theta}-\|g\|_2^2
+    \right)
+    \label{eq:raw-proof-6}\\
+  &\le\frac{G_{2,\theta}}{N\rho_\theta}.
+    \label{eq:raw-proof-7}
+\end{align}
+Equation~\eqref{eq:unbiased-proof-1} substitutes the estimator definition.
+Equation~\eqref{eq:unbiased-proof-2} uses linearity of expectation, and
+\eqref{eq:unbiased-proof-3} uses identical sampling.  The last line substitutes
+\eqref{eq:true-gradient}.  For the MSE, \eqref{eq:raw-proof-1} uses
+$\widehat g_W-g=N^{-1}\sum_i(Z_i-g)$.  Equation~\eqref{eq:raw-proof-2} expands
+the squared norm.  Independence and $\E[Z_i-g]=0$ make every cross term vanish;
+identical sampling then gives \eqref{eq:raw-proof-3}.  Equation
+\eqref{eq:raw-proof-4} expands the remaining squared norm.  Finally,
+\eqref{eq:raw-proof-5} substitutes $\E[Z_1]=g$ and
+$\|Z_1\|_2^2=W_\theta^2\|H_\theta\|_2^2$.  Equation
+\eqref{eq:raw-proof-6} uses \eqref{eq:gradient-scale} and
+\eqref{eq:population-ess}.  Equation~\eqref{eq:raw-proof-7} drops the
+nonpositive term $-\|g\|_2^2/N$.
+\end{proof}
+
+\subsection{Proof of Theorem~\ref{thm:mse-improvement}}
+
+\begin{proof}
+Apply \eqref{eq:smooth-policy-improvement} with
+$d=\eta\widehat g$ and take expectation:
+\begin{align}
+  &\E\!\left[J(\theta+\eta\widehat g)-J(\theta)\right]
+    \label{eq:mse-improvement-proof-1}\\
+  &\quad\ge
+    \eta\E[g^\top\widehat g]
+    -\frac{L\eta^2}{2}\E\|\widehat g\|_2^2
+    \label{eq:mse-improvement-proof-2}\\
+  &\quad\ge
+    \eta\E[g^\top\widehat g]
+    -\frac{\eta}{2}\E\|\widehat g\|_2^2
+    \label{eq:mse-improvement-proof-3}\\
+  &\quad=
+    \frac{\eta}{2}\E\!\left[
+      2g^\top\widehat g-\|\widehat g\|_2^2
+    \right]
+    \label{eq:mse-improvement-proof-4}\\
+  &\quad=
+    \frac{\eta}{2}\E\!\left[
+      \|g\|_2^2-\|\widehat g-g\|_2^2
+    \right]
+    \label{eq:mse-improvement-proof-5}\\
+  &\quad=
+    \frac{\eta}{2}
+    \left\{\|g\|_2^2-\E\|\widehat g-g\|_2^2\right\}.
+    \label{eq:mse-improvement-proof-6}
+\end{align}
+Equation~\eqref{eq:mse-improvement-proof-2} uses the cited smoothness bound.
+Equation~\eqref{eq:mse-improvement-proof-3} uses $L\eta\le1$ and the
+nonnegativity of $\|\widehat g\|_2^2$.  Equation
+\eqref{eq:mse-improvement-proof-4} collects the two terms under one
+expectation.  Equation~\eqref{eq:mse-improvement-proof-5} uses
+$2g^\top\widehat g-\|\widehat g\|_2^2
+=\|g\|_2^2-\|\widehat g-g\|_2^2$.  The final line moves the deterministic
+quantity $\|g\|_2^2$ outside the expectation.  If the MSE is below
+$\|g\|_2^2$, the right side is positive.
+\end{proof}
+
+\subsection{Proof of Corollary~\ref{cor:ess-improvement}}
+
+\begin{proof}
+Substitute the exact MSE from \eqref{eq:ess-factorization} into
+\eqref{eq:mse-improvement}:
+\begin{align}
+  &\E\!\left[J(\theta+\eta\widehat g_W)-J(\theta)\right]
+    \label{eq:ess-improvement-proof-1}\\
+  &\quad\ge\frac{\eta}{2}\left[
+    \|g\|_2^2
+    -\frac1N\left(
+      \frac{G_{2,\theta}}{\rho_\theta}-\|g\|_2^2
+    \right)
+  \right]
+    \label{eq:ess-improvement-proof-2}\\
+  &\quad=\frac{\eta}{2}\left\{
+    \left(1+\frac1N\right)\|g\|_2^2
+    -\frac{G_{2,\theta}}{N\rho_\theta}
+  \right\}.
+    \label{eq:ess-improvement-proof-3}
+\end{align}
+Equation~\eqref{eq:ess-improvement-proof-2} applies
+Theorem~\ref{thm:mse-improvement}; Equation
+\eqref{eq:ess-improvement-proof-3} collects the two gradient-norm terms.  Its
+right side is positive exactly when
+$G_{2,\theta}<(N+1)\rho_\theta\|g\|_2^2$.
+\end{proof}
+
+\subsection{Proof of Proposition~\ref{prop:g2-bound}}
+
+\begin{proof}
+Since $H_\theta=A S_\theta$, substitute its squared norm into
+\eqref{eq:gradient-scale} and apply one bound per line:
+\begin{align}
+  G_{2,\theta}
+  &=\frac{\E_Q[W_\theta^2 A^2\|S_\theta\|_2^2]}
+          {\E_Q[W_\theta^2]}
+    \label{eq:g2-proof-1}\\
+  &\le B_A^2
+    \frac{\E_Q[W_\theta^2\|S_\theta\|_2^2]}
+         {\E_Q[W_\theta^2]}
+    \label{eq:g2-proof-2}\\
+  &\le B_A^2B_S^2.
+    \label{eq:g2-proof-3}
+\end{align}
+Equation~\eqref{eq:g2-proof-2} uses $A^2\le B_A^2$.  Equation
+\eqref{eq:g2-proof-3} uses $\|S_\theta\|_2^2\le B_S^2$ under the same
+nonnegative weight $W_\theta^2$, then cancels $\E_Q[W_\theta^2]$.
+\end{proof}
+
+\subsection{Proof of Proposition~\ref{prop:grpo-bound}}
+
+\begin{proof}
+The centered deviations satisfy $d_i=-\sum_{j\ne i}d_j$.  Therefore,
+\begin{align}
+  d_i^2
+  &=\left(\sum_{j\ne i}d_j\right)^2
+    \label{eq:grpo-proof-1}\\
+  &\le (K-1)\sum_{j\ne i}d_j^2
+    \label{eq:grpo-proof-2}\\
+  &=(K-1)\left(\sum_{j=1}^K d_j^2-d_i^2\right).
+    \label{eq:grpo-proof-3}
+\end{align}
+Equation~\eqref{eq:grpo-proof-1} uses the zero-sum identity for centered
+deviations.  Equation~\eqref{eq:grpo-proof-2} is Cauchy--Schwarz, and
+\eqref{eq:grpo-proof-3} restores the omitted term.  Rearranging gives
+\begin{align}
+  Kd_i^2
+  &\le (K-1)\sum_{j=1}^K d_j^2
+    \label{eq:grpo-proof-4}\\
+  \frac{d_i^2}{v}
+  &\le K-1,
+    \label{eq:grpo-proof-5}
+\end{align}
+where the second line uses $Kv=\sum_jd_j^2$.  Taking square roots proves the
+claim.  Adding a positive stabilizer to the denominator can only decrease the
+magnitude.
+\end{proof}
+
+\subsection{Proof of Proposition~\ref{prop:ppo-mask}}
+
+\begin{proof}
+When $A\ge0$, multiplication by $A$ preserves order.  Hence
+\begin{align}
+  \ell_\epsilon^{\mathrm{PPO}}
+  &=A\min\{W_\theta,1+\epsilon\}
+    \label{eq:ppo-positive-proof-1}\\
+  \nabla_\theta\ell_\epsilon^{\mathrm{PPO}}
+  &=A\nabla_\theta W_\theta
+    \mathbf{1}\{W_\theta<1+\epsilon\}
+    \label{eq:ppo-positive-proof-2}\\
+  &=AW_\theta S_\theta
+    \mathbf{1}\{W_\theta<1+\epsilon\}.
+    \label{eq:ppo-positive-proof-3}
+\end{align}
+The second line differentiates the active branch.  The third uses
+$\nabla_\theta W_\theta=W_\theta S_\theta$.
+
+When $A<0$, multiplication reverses order.  Therefore
+\begin{align}
+  \ell_\epsilon^{\mathrm{PPO}}
+  &=A\max\{W_\theta,1-\epsilon\}
+    \label{eq:ppo-negative-proof-1}\\
+  \nabla_\theta\ell_\epsilon^{\mathrm{PPO}}
+  &=A\nabla_\theta W_\theta
+    \mathbf{1}\{W_\theta>1-\epsilon\}
+    \label{eq:ppo-negative-proof-2}\\
+  &=AW_\theta S_\theta
+    \mathbf{1}\{W_\theta>1-\epsilon\}.
+    \label{eq:ppo-negative-proof-3}
+\end{align}
+Combining the two cases and substituting $H_\theta=AS_\theta$ gives
+\eqref{eq:ppo-gradient}.  When $A=0$, the gradient is zero.  At the two
+boundaries, any fixed valid subgradient convention preserves the distinction.
+\end{proof}
+
+\subsection{Proof of Theorem~\ref{thm:crossover}}
+
+\begin{proof}
+Write $\mu_C:=\E[\widehat g_C]$.  Its displacement from the target is
+\begin{align}
+  \mu_C-g
+  &=\E_Q[C_\theta H_\theta]-\E_Q[W_\theta H_\theta]
+    \label{eq:modified-bias-proof-1}\\
+  &=\E_Q[(C_\theta-W_\theta)H_\theta]
+    \label{eq:modified-bias-proof-2}\\
+  &=b_C.
+    \label{eq:modified-bias-proof-3}
+\end{align}
+Centering the modified estimator at $\mu_C$ now yields
+\begin{align}
+  \E\|\widehat g_C-g\|_2^2
+  &=\E\|\widehat g_C-\mu_C+b_C\|_2^2
+    \label{eq:modified-risk-proof-1}\\
+  &=\E\|\widehat g_C-\mu_C\|_2^2
+    +2b_C^\top\E[\widehat g_C-\mu_C]
+    +\|b_C\|_2^2
+    \label{eq:modified-risk-proof-2}\\
+  &=\E\|\widehat g_C-\mu_C\|_2^2+\|b_C\|_2^2
+    \label{eq:modified-risk-proof-3}\\
+  &=\frac1N\operatorname{tr}(\Sigma_C)+\|b_C\|_2^2.
+    \label{eq:modified-risk-proof-4}
+\end{align}
+Equations~\eqref{eq:modified-bias-proof-1}--\eqref{eq:modified-bias-proof-3}
+substitute $g=\E_Q[W_\theta H_\theta]$, use linearity, and invoke the definition
+of $b_C$, respectively.  Equation~\eqref{eq:modified-risk-proof-1} adds and
+subtracts $\mu_C$.  Equation~\eqref{eq:modified-risk-proof-2} expands the
+squared norm.  Equation~\eqref{eq:modified-risk-proof-3} uses
+$\E[\widehat g_C-\mu_C]=0$.  Equation~\eqref{eq:modified-risk-proof-4} uses
+independence of the $N$ sampled responses, exactly as in
+\eqref{eq:raw-proof-2}--\eqref{eq:raw-proof-3}.  The raw estimator is unbiased by
+Theorem~\ref{thm:raw-mse}, so the same covariance calculation gives
+\begin{equation}
+  \E\|\widehat g_W-g\|_2^2
+  =\frac1N\operatorname{tr}(\Sigma_W).
+  \label{eq:raw-risk-crossover-proof}
+\end{equation}
+Subtracting the two risks gives
+\begin{align}
+  &\operatorname{MSE}(\widehat g_C)
+    -\operatorname{MSE}(\widehat g_W)
+    \label{eq:crossover-proof-1}\\
+  &\quad=\|b_C\|_2^2
+    -\frac1N\left\{
+      \operatorname{tr}(\Sigma_W)-\operatorname{tr}(\Sigma_C)
+    \right\}.
+    \label{eq:crossover-proof-2}
+\end{align}
+The left side is negative exactly when the covariance reduction exceeds
+$N\|b_C\|_2^2$, which is \eqref{eq:crossover}.
+\end{proof}
+
+\subsection{Proof of Corollary~\ref{cor:upper-truncation}}
+
+\begin{proof}
+The coefficient difference is $C_c^{\mathrm{tr}}-W_\theta=-T_c$.  Substitution into
+\eqref{eq:bias-covariance} gives
+\begin{align}
+  b_c
+  &=\E_Q[(C_c^{\mathrm{tr}}-W_\theta)H_\theta]
+    \label{eq:cap-proof-1}\\
+  &=-\E_Q[T_cH_\theta].
+    \label{eq:cap-proof-2}
+\end{align}
+The triangle inequality and the bound on $H_\theta$ then give
+\begin{align}
+  \|b_c\|_2
+  &\le\E_Q[T_c\|H_\theta\|_2]
+    \label{eq:cap-proof-3}\\
+  &\le H_{\max}\E_Q[T_c]
+    \label{eq:cap-proof-4}\\
+  &=H_{\max}\tau_c.
+    \label{eq:cap-proof-5}
+\end{align}
+For the covariance term, use the trace identity and remove its nonnegative
+mean-squared term:
+\begin{align}
+  \operatorname{tr}\{\Cov_Q(C_c^{\mathrm{tr}}H_\theta)\}
+  &=\E_Q[(C_c^{\mathrm{tr}})^2\|H_\theta\|_2^2]
+    -\|\E_Q[C_c^{\mathrm{tr}}H_\theta]\|_2^2
+    \label{eq:cap-proof-6}\\
+  &\le H_{\max}^2\E_Q[(C_c^{\mathrm{tr}})^2]
+    \label{eq:cap-proof-7}\\
+  &\le cH_{\max}^2\E_Q[W_\theta]
+    \label{eq:cap-proof-8}\\
+  &=cH_{\max}^2.
+    \label{eq:cap-proof-9}
+\end{align}
+Equation~\eqref{eq:cap-proof-7} uses the bound on $H_\theta$.
+Equation~\eqref{eq:cap-proof-8} uses $(C_c^{\mathrm{tr}})^2\le cW_\theta$,
+which holds both
+when $W_\theta\le c$ and when $W_\theta>c$.  The final line uses
+$\E_Q[W_\theta]=1$.  Combining \eqref{eq:two-risks},
+\eqref{eq:cap-proof-5}, and \eqref{eq:cap-proof-9} proves
+\eqref{eq:cap-mse-bound}.
+\end{proof}

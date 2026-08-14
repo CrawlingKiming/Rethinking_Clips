@@ -55,23 +55,27 @@ size as a practical criterion for deciding when to clip.
 
 \section{Introduction}
 
-Clipping is the default safeguard for policy optimization on fixed rollout
-data.  In RLVR, a model generates an expensive batch of responses and then
-takes several updates on that batch.  As the updated policy moves away from the
-rollout policy, likelihood ratios drift away from one, and PPO suppresses the
-samples that cross its clipping boundary
-\citep{schulman2017ppo,shao2024deepseekmath}.  This mechanism is commonly
-interpreted as a prerequisite for stable training.
+Policy optimization on fixed rollout data faces a basic mismatch: the policy
+being updated is no longer the policy that generated the data.  PPO addresses
+this mismatch with a clipped surrogate that suppresses selected samples once
+their likelihood ratios cross a prescribed boundary \citep{schulman2017ppo}.
+The same mechanism is now standard in reinforcement learning with verifiable
+rewards (RLVR), where an expensive rollout batch is followed by several policy
+updates \citep{shao2024deepseekmath}.  Because the mismatch grows during these
+updates, clipping is often treated as a necessary condition for stable
+training.
 
-RLVR practice does not fully support that interpretation.  PPO can mask
-low-probability tokens that carry useful new behavior, slowing early learning
-and contributing to entropy collapse \citep{yu2025dapo,park2025clipping}.
-Recent methods consequently relax the upper clipping boundary or retain
-gradients beyond it; CISPO, for example, caps importance weights without
-zeroing the corresponding gradients \citep{minimax2025m1}.  Such permissive
-updates can learn faster, but they may later deteriorate when only a few
-responses dominate the update.  The evidence therefore points to a change of
-regime: clipping can be wasteful early and useful later.
+RLVR practice reveals that this view is incomplete.  Clipping can remove
+gradients from low-probability tokens that carry useful new behavior, slowing
+early learning and contributing to entropy collapse
+\citep{yu2025dapo,park2025clipping}.  More permissive objectives can avoid this
+loss and improve reward faster, yet they may fail later in training; the
+motivating CISPO trajectory in Figure~\ref{fig:llm-motivation} exhibits this
+pattern \citep{minimax2025m1}.  These observations do not rank clipping and
+permissive optimization globally.  They indicate that the preferable update
+changes as a rollout batch becomes less representative of the current policy.
+The central question is therefore not whether to clip, but when clipping
+becomes necessary.
 
 \begin{figure}[H]
   \centering
@@ -80,52 +84,73 @@ regime: clipping can be wasteful early and useful later.
   Insert the supplied training curves showing efficient early learning without
   PPO masking, followed by the late CISPO collapse.  Overlay sequence ESS on
   the same update axis and mark the proposed threshold at $0.1$.}}
-  \caption{Empirical motivation.  A permissive update can improve reward faster
-  while the rollout batch remains representative, yet the same update can fail
-  after its effective support collapses.  The final figure will report the
-  model, benchmark, seeds, confidence intervals, and the onset of the ESS
-  decline.}
+  \caption{Empirical motivation.  A permissive update improves reward rapidly
+  while the rollout batch remains representative, then fails after effective
+  support deteriorates.  The final figure will report the model, benchmark,
+  seeds, confidence intervals, and the onset of the ESS decline.}
   \label{fig:llm-motivation}
 \end{figure}
 
-The central problem is to locate this regime change.  A token ratio describes
-one sampled token, and an update count records how often a batch has been used.
-Neither determines whether the batch still provides broad support for the
-current gradient.  Divergence-based constraints measure policy change more
-carefully \citep{qi2026dppo}, and recent adaptive methods monitor the
-concentration of importance weights
-\citep{zheng2025m2po,huang2026vcpo,fakoor2026p3o}.  What remains missing is a
-direct connection between that concentration and the quality of the policy
-update.
+Common diagnostics do not locate this change of regime.  A clipping threshold
+specifies how to modify an individual sample, an update count records how long
+the batch has been optimized, and a divergence summarizes how far the policy
+has moved \citep{qi2026dppo}.  None of these quantities directly measures
+whether the fixed batch still supports an accurate gradient for the current
+policy.  That question depends on the concentration of the sequence importance
+weights across the entire batch.
 
-Sequence effective sample size (ESS) provides this connection.  ESS is high
-when many responses support the update and low when the importance weight is
-concentrated on a few responses.  We argue that this distinction governs the
-reliability of the permissive gradient.  With high ESS, clipping pays bias to
-solve a variance problem that is not yet severe.  As ESS falls, gradient error
-increases, and clipping can become the better statistical decision.
+Sequence effective sample size (ESS) measures this concentration.  ESS is high
+when support is distributed across many responses and low when only a few
+responses carry most of the importance weight.  Our central thesis is that the
+absence of clipping is not inherently unstable.  A permissive update remains
+statistically reliable while its rollout batch provides sufficient effective
+support.  Clipping becomes useful after that support deteriorates, when the
+variance it removes can justify the bias it introduces.
 
-Our analysis develops this argument in the order needed to make a clipping
-decision.  We first express the exact error of the permissive gradient in terms
-of ESS and the scale of its gradient contributions.  We then show how this
-error enters a one-step policy-improvement guarantee.  Finally, we derive the
-gradient of the PPO objective and show that clipping acts as an
-advantage-dependent mask, not as global ratio truncation.  The resulting
-bias--variance comparison yields the rule suggested by
-Figure~\ref{fig:llm-motivation}: use the permissive update while ESS is high, and
-activate a safeguard when ESS falls.
+Establishing this thesis requires a bridge from coverage to optimization.  We
+derive the exact mean-squared error of the permissive gradient and separate its
+dependence on sequence ESS from the scale of the associated gradient
+contributions.  We then show that gradient error enters a one-step
+policy-improvement guarantee.  Finally, we differentiate the PPO surrogate to
+show that clipping is an advantage-dependent gradient mask, not global ratio
+truncation, and derive the exact bias--variance condition under which a modified
+gradient is preferable.  These results motivate a simple decision rule: retain
+the permissive gradient while ESS is high and activate a safeguard when ESS
+falls.
 
-We isolate the proposed mechanism before testing it in a language model.  Our
-finite sequence-verifier task follows the rollout and minibatch order of RLVR
-while making the population gradient and reward exactly observable.  In 100
-paired runs, ESS predicts when the permissive gradient becomes inaccurate and
-when its updates become harmful.  A prespecified $0.1$ gate also reaches a fixed
-reward target with 25\% fewer verifier responses than the always-permissive
-update and 40\% fewer than always applying the PPO mask.  The main LLM study in
-Section~\ref{sec:llm-experiments} asks whether this same criterion transfers to
-conventional PPO clipping, Clip-Higher, and DPPO.
+We test every link in an exactly evaluable verifier problem before transferring
+the rule to language-model training.  The controlled task follows the rollout
+and minibatch order of RLVR while exposing the population gradient and reward.
+Across 100 paired runs, ESS predicts both gradient error and the sign of the
+resulting reward change.  A prespecified $0.1$ gate reaches a fixed reward target
+with 25\% fewer verifier responses than always using the permissive gradient and
+40\% fewer than always applying the PPO mask.  Section~\ref{sec:llm-experiments}
+specifies the matched LLM experiment needed to test whether the same regime
+change appears under PPO, Clip-Higher, and DPPO safeguards.
 
-\paragraph{Contributions.}
+\subsection{Related perspectives}
+
+\paragraph{Clipping in RLVR.}
+PPO introduced clipping as a local policy-update mechanism
+\citep{schulman2017ppo}, and GRPO carried this surrogate into RLVR
+\citep{shao2024deepseekmath}.  Recent methods expose the cost of applying the
+same constraint throughout training.  DAPO relaxes the upper boundary,
+Clip-Low changes entropy behavior, CISPO retains gradients beyond the PPO
+boundary, and DPPO replaces ratio clipping with a divergence-based constraint
+\citep{yu2025dapo,park2025clipping,minimax2025m1,qi2026dppo}.  These methods
+change the intervention; our question is when an intervention is statistically
+warranted.
+
+\paragraph{Reliability under policy mismatch.}
+Importance-sampling analyses use second moments and ESS to quantify coverage
+\citep{metelli2018pois,metelli2020is}.  Recent LLM methods likewise adapt to
+weight concentration, ESS, or sequence-level mismatch
+\citep{zheng2025m2po,shen2026vespo,huang2026vcpo,fakoor2026p3o}.  Our analysis
+adds the missing optimization link: it connects sequence ESS to gradient MSE,
+then connects that MSE to policy improvement and the clipping crossover.
+
+\subsection{Contributions}
+
 \begin{enumerate}
 \item We derive an exact connection between sequence ESS and the mean-squared
 error of a fixed-rollout policy-gradient estimator.
@@ -135,22 +160,24 @@ clipping as a conditional bias--variance decision.
 a matched LLM evaluation across PPO, Clip-Higher, and DPPO safeguards.
 \end{enumerate}
 
-The rest of the paper follows this decision path.  Section~\ref{sec:setting}
-defines the fixed-rollout gradient and sequence ESS.  Section~\ref{sec:theory}
-connects ESS to gradient reliability, policy improvement, and the cost of
-clipping.  Section~\ref{sec:simulation} tests these links under an exact oracle,
-and Section~\ref{sec:llm-experiments} carries the resulting rule to RLVR.
+The next section states the fixed-rollout problem in which this reliability
+question can be analyzed exactly.
 
-\section{Preliminaries}
+\section{Preliminaries: fixed-rollout policy optimization}
 \label{sec:setting}
 
-\subsection{Fixed-rollout policy gradient}
+RLVR alternates between data collection and optimization.  A rollout policy
+generates a batch of complete responses, and a changing current policy is then
+updated on that fixed batch.  We analyze one such optimization phase and keep
+the rollout policy explicit throughout.
 
-We begin by separating the population update from its finite-sample estimate.
-Let $X\sim\nu$ be a prompt, let $Y$ be a complete response drawn from the
-rollout policy $Q$, and let $R=R(X,Y)$ be a terminal verifier reward.  The
-current policy is $P_\theta$, with $P_\theta\ll Q$, so its expectation can be
-written under the rollout distribution using the sequence likelihood ratio
+\subsection{Population target and sampled update}
+
+Let $X\sim\nu$ be a prompt, let $Q(\cdot\mid X)$ be the rollout policy, and let
+$R(X,Y)$ be the terminal verifier reward of a complete response.  During the
+optimization phase, the policy of interest is $P_\theta$, with objective
+$J(\theta):=\E_{P_\theta}[R]$.  Assuming $P_\theta\ll Q$, this target can be
+evaluated from rollout data using the sequence likelihood ratio
 \begin{equation}
   W_\theta(X,Y)
   :=\frac{P_\theta(Y\mid X)}{Q(Y\mid X)},
@@ -159,16 +186,17 @@ written under the rollout distribution using the sequence likelihood ratio
   \label{eq:weight}
 \end{equation}
 
-Let $b(X)$ be a detached prompt-only baseline and set $A=R-b(X)$.  Define the
-score and the corresponding sequence contribution by
+The policy gradient separates the response-level learning signal from the
+distribution mismatch.  Let $b(X)$ be a detached prompt-only baseline, set
+$A=R-b(X)$, and define the current-policy score and gradient contribution by
 \begin{equation}
   S_\theta:=\nabla_\theta\log P_\theta(Y\mid X),
   \qquad
   H_\theta:=A S_\theta.
   \label{eq:score}
 \end{equation}
-For $J(\theta):=\E_{P_\theta}[R]$, assume that differentiation and expectation
-can be interchanged.  The population gradient follows one identity per line:
+Assuming that differentiation and expectation can be interchanged, the target
+gradient is
 \begin{align}
   g(\theta):=\nabla J(\theta)
   &=\E_{P_\theta}[R S_\theta]
@@ -184,21 +212,24 @@ The first line is the score-function identity.  The second uses
 $\E_{P_\theta}[b(X)S_\theta\mid X]
 =b(X)\nabla_\theta\sum_yP_\theta(y\mid X)=0$.  The third substitutes
 \eqref{eq:score}, and the fourth changes measure from $P_\theta$ to $Q$.
-Given $N$ independent responses from $Q$, the unclipped estimator is
+Given $N$ independent prompt-response pairs from the rollout distribution, the
+permissive importance-weighted estimator is
 \begin{equation}
   \widehat g_W(\theta)
   :=\frac1N\sum_{i=1}^N W_{\theta,i}H_{\theta,i}.
   \label{eq:raw-estimator}
 \end{equation}
-Equation~\eqref{eq:true-gradient} identifies the population gradient, and
-Equation~\eqref{eq:raw-estimator} gives an unbiased estimator of it.  Neither
-identity ensures that a finite rollout batch estimates this target accurately.
-That accuracy depends on how well the rollout policy covers the current policy.
+Equation~\eqref{eq:true-gradient} identifies the desired update, whereas
+Equation~\eqref{eq:raw-estimator} describes what the fixed batch can estimate.
+The estimator is unbiased at fixed $\theta$, but its accuracy can deteriorate as
+$P_\theta$ moves into responses that are poorly represented under $Q$.  We next
+quantify this loss of coverage.
 
-\subsection{Sequence coverage}
+\subsection{Effective support of the rollout distribution}
 
-The second moment of the sequence ratio measures this coverage.  Assuming
-$\E_Q[W_\theta^2]<\infty$, define normalized sequence ESS by
+Sequence ESS summarizes how much support the rollout distribution provides for
+the current policy.  Assuming $\E_Q[W_\theta^2]<\infty$, define the normalized
+population ESS by
 \begin{equation}
   \rho_\theta:=\frac{1}{\E_Q[W_\theta^2]}
   =\exp\{-D_2(P_\theta\|Q)\}.
@@ -215,39 +246,48 @@ Because $\E_Q[W_\theta]=1$, its relation to ratio dispersion is exact:
     \label{eq:weight-variance}
 \end{align}
 The first line expands the square, the second uses $\E_Q[W_\theta]=1$, and the
-third uses \eqref{eq:population-ess}.  Thus $N\rho_\theta$ is the population
-effective sequence count, consistent with the second-moment coverage principle
-used in importance-sampling policy optimization
-\citep{metelli2018pois,metelli2020is}.  ESS alone, however, only describes the
-ratios.  To judge a policy update, we must connect this scalar coverage measure
-to the error of the vector gradient estimator.
+third uses Equation~\eqref{eq:population-ess}.  Hence $N\rho_\theta$ is the
+population effective sequence count, consistent with the second-moment
+coverage principle used in importance-sampling policy optimization
+\citep{metelli2018pois,metelli2020is}.  When $\rho_\theta$ is near one, the batch
+retains nearly all of its nominal support.  When it approaches zero, a batch of
+$N$ responses behaves as if it contained far fewer effective observations.
+
+ESS measures ratio concentration, not the size of the gradient contributions
+attached to those ratios.  The theoretical analysis begins by separating these
+two quantities and then asks whether their joint effect is large enough to
+change the preferred policy update.
 
 \section{Theoretical analysis}
 \label{sec:theory}
 
-We now develop the three links required for an ESS-guided clipping rule.  The
-first link connects coverage to gradient error.  The second connects gradient
-error to policy improvement.  The third compares the error of permissive and
-clipped estimators.  Together, these results turn ESS from a descriptive
-statistic into a criterion for choosing the update.
+Section~\ref{sec:setting} reduced fixed-rollout optimization to a sampled
+importance-weighted gradient and a measure of its effective support.  This
+section determines when that gradient is reliable, why its error affects policy
+improvement, and when clipping can reduce that error.  The argument follows one
+causal chain: poor coverage raises gradient error, gradient error weakens the
+policy update, and clipping becomes preferable only when its variance reduction
+repays its bias.  This chain gives ESS an operational role rather than treating
+it as another diagnostic of policy drift.  All proofs are given line by line in
+Appendix~\ref{app:proofs} so that the main argument remains visible.
 
-\subsection{ESS and finite-sample reliability}
+\subsection{When the permissive gradient is reliable}
 \label{sec:raw}
 
-An unbiased estimator can still be unreliable when a few responses dominate
-its finite-sample average.  ESS captures this concentration, but it cannot
-capture whether the dominant responses also carry large gradient
-contributions.  We separate these effects by defining
+The permissive estimator targets the desired on-policy gradient without bias,
+but unbiasedness alone does not make a fixed batch reliable.  A small number of
+large ratios can dominate the average.  ESS measures this loss of coverage, but
+the resulting error also depends on the size of the associated gradient
+contributions.  We isolate that second factor through
 \begin{equation}
   G_{2,\theta}
   :=\frac{\E_Q[W_\theta^2\|H_\theta\|_2^2]}
           {\E_Q[W_\theta^2]}.
   \label{eq:gradient-scale}
 \end{equation}
-The weighted scale $G_{2,\theta}$ records the size of gradient contributions in
-the part of the response distribution emphasized by squared importance
-weights.  Once this scale is separated from coverage, gradient error admits an
-exact factorization.
+The quantity $G_{2,\theta}$ is the squared gradient scale under the part of the
+rollout distribution emphasized by large ratios.  Separating this scale from
+coverage yields the paper's reliability bridge.
 
 \begin{theorem}[ESS reliability bridge]
 \label{thm:raw-mse}
@@ -268,74 +308,18 @@ $\widehat g_W$ is unbiased and
 \end{align}
 \end{theorem}
 
-\begin{proof}
-Let $Z_i=W_{\theta,i}H_{\theta,i}$ and let $g=g(\theta)$.  Unbiasedness follows
-line by line from identical sampling:
-\begin{align}
-  \E[\widehat g_W]
-  &=\E\left[\frac1N\sum_{i=1}^N Z_i\right]
-    \label{eq:unbiased-proof-1}\\
-  &=\frac1N\sum_{i=1}^N\E[Z_i]
-    \label{eq:unbiased-proof-2}\\
-  &=\E_Q[W_\theta H_\theta]
-    \label{eq:unbiased-proof-3}\\
-  &=g.
-    \label{eq:unbiased-proof-4}
-\end{align}
-For the MSE, center each contribution before expanding the squared norm:
-\begin{align}
-  \E\|\widehat g_W-g\|_2^2
-  &=\E\left\|
-    \frac1N\sum_{i=1}^N(Z_i-g)
-    \right\|_2^2
-    \label{eq:raw-proof-1}\\
-  &=\frac1{N^2}\sum_{i=1}^N\E\|Z_i-g\|_2^2
-    +\frac1{N^2}\sum_{i\ne j}
-      \E[(Z_i-g)^\top(Z_j-g)]
-    \label{eq:raw-proof-2}\\
-  &=\frac1N\E\|Z_1-g\|_2^2
-    \label{eq:raw-proof-3}\\
-  &=\frac1N\left\{
-    \E\|Z_1\|_2^2-2g^\top\E[Z_1]+\|g\|_2^2
-    \right\}
-    \label{eq:raw-proof-4}\\
-  &=\frac1N\left\{
-    \E_Q[W_\theta^2\|H_\theta\|_2^2]-\|g\|_2^2
-    \right\}
-    \label{eq:raw-proof-5}\\
-  &=\frac1N\left(
-    \frac{G_{2,\theta}}{\rho_\theta}-\|g\|_2^2
-    \right)
-    \label{eq:raw-proof-6}\\
-  &\le\frac{G_{2,\theta}}{N\rho_\theta}.
-    \label{eq:raw-proof-7}
-\end{align}
-Equation~\eqref{eq:unbiased-proof-1} substitutes the estimator definition.
-Equation~\eqref{eq:unbiased-proof-2} uses linearity of expectation, and
-\eqref{eq:unbiased-proof-3} uses identical sampling.  The last line substitutes
-\eqref{eq:true-gradient}.  For the MSE, \eqref{eq:raw-proof-1} uses
-$\widehat g_W-g=N^{-1}\sum_i(Z_i-g)$.  Equation~\eqref{eq:raw-proof-2} expands
-the squared norm.  Independence and $\E[Z_i-g]=0$ make every cross term vanish;
-identical sampling then gives \eqref{eq:raw-proof-3}.  Equation
-\eqref{eq:raw-proof-4} expands the remaining squared norm.  Finally,
-\eqref{eq:raw-proof-5} substitutes $\E[Z_1]=g$ and
-$\|Z_1\|_2^2=W_\theta^2\|H_\theta\|_2^2$.  Equation
-\eqref{eq:raw-proof-6} uses \eqref{eq:gradient-scale} and
-\eqref{eq:population-ess}.  Equation~\eqref{eq:raw-proof-7} drops the
-nonpositive term $-\|g\|_2^2/N$.
-\end{proof}
+The factorization has a direct interpretation.  At fixed $G_{2,\theta}$, the permissive-gradient
+error scales inversely with the effective sequence count $N\rho_\theta$.
+Neither the number of optimization steps nor parameter distance is fundamental
+in this statement.  They matter when they concentrate the ratios or enlarge the
+weighted gradient scale.  The next question is whether this statistical error
+has an optimization consequence.
 
-Theorem~\ref{thm:raw-mse} gives the first link.  At a fixed weighted gradient
-scale, the error grows as the effective sequence count $N\rho_\theta$ shrinks.
-Policy drift and update count matter only insofar as they reduce this support or
-increase the weighted scale.  To make this observation useful for policy
-optimization, we next show how gradient error changes the improvement delivered
-by an update.
-
-\subsection{Gradient MSE and policy improvement}
+\subsection{Why gradient error matters for policy improvement}
 \label{sec:mse-improvement}
 
-Smoothness supplies the required optimization link.  Theorem~7 of
+Smoothness turns gradient reliability into a policy-improvement statement.
+Theorem~7 of
 \citet{papini2022smoothing} shows that an $L$-smooth policy objective satisfies
 the following lower bound for any feasible parameter step $d$:
 \begin{equation}
@@ -343,13 +327,13 @@ the following lower bound for any feasible parameter step $d$:
   \ge g(\theta)^\top d-\frac{L}{2}\|d\|_2^2.
   \label{eq:smooth-policy-improvement}
 \end{equation}
-The bound exposes the relevant trade-off: a candidate direction must align with
-the true gradient without taking an excessively large step.  The next result
-rewrites these two requirements as a single gradient-MSE term and therefore
-applies equally to unbiased, clipped, and truncated estimators.  Related
-analyses use smoothness and gradient second moments for policy-gradient
-convergence \citep{yuan2022general}, gradient MSE for off-policy efficiency
-\citep{kallus2020efficient}, and joint bias--variance control for biased
+The linear term rewards alignment with the true gradient, while the quadratic
+term penalizes an inaccurate or excessively large step.  The following result
+combines both effects into gradient MSE.  It therefore compares permissive,
+clipped, and truncated estimators on the same optimization scale.  Related
+analyses use gradient second moments for policy-gradient convergence
+\citep{yuan2022general}, gradient MSE for off-policy efficiency
+\citep{kallus2020efficient}, and joint bias and variance control for biased
 gradients \citep{driggs2022biased}.
 
 \begin{theorem}[Gradient MSE controls certified policy improvement]
@@ -368,52 +352,12 @@ Consequently, $\E\|\widehat g-g\|_2^2<\|g\|_2^2$ is sufficient for positive
 expected policy improvement.
 \end{theorem}
 
-\begin{proof}
-Apply \eqref{eq:smooth-policy-improvement} with
-$d=\eta\widehat g$ and take expectation:
-\begin{align}
-  &\E\!\left[J(\theta+\eta\widehat g)-J(\theta)\right]
-    \label{eq:mse-improvement-proof-1}\\
-  &\quad\ge
-    \eta\E[g^\top\widehat g]
-    -\frac{L\eta^2}{2}\E\|\widehat g\|_2^2
-    \label{eq:mse-improvement-proof-2}\\
-  &\quad\ge
-    \eta\E[g^\top\widehat g]
-    -\frac{\eta}{2}\E\|\widehat g\|_2^2
-    \label{eq:mse-improvement-proof-3}\\
-  &\quad=
-    \frac{\eta}{2}\E\!\left[
-      2g^\top\widehat g-\|\widehat g\|_2^2
-    \right]
-    \label{eq:mse-improvement-proof-4}\\
-  &\quad=
-    \frac{\eta}{2}\E\!\left[
-      \|g\|_2^2-\|\widehat g-g\|_2^2
-    \right]
-    \label{eq:mse-improvement-proof-5}\\
-  &\quad=
-    \frac{\eta}{2}
-    \left\{\|g\|_2^2-\E\|\widehat g-g\|_2^2\right\}.
-    \label{eq:mse-improvement-proof-6}
-\end{align}
-Equation~\eqref{eq:mse-improvement-proof-2} uses the cited smoothness bound.
-Equation~\eqref{eq:mse-improvement-proof-3} uses $L\eta\le1$ and the
-nonnegativity of $\|\widehat g\|_2^2$.  Equation
-\eqref{eq:mse-improvement-proof-4} collects the two terms under one
-expectation.  Equation~\eqref{eq:mse-improvement-proof-5} uses
-$2g^\top\widehat g-\|\widehat g\|_2^2
-=\|g\|_2^2-\|\widehat g-g\|_2^2$.  The final line moves the deterministic
-quantity $\|g\|_2^2$ outside the expectation.  If the MSE is below
-$\|g\|_2^2$, the right side is positive.
-\end{proof}
-
-Theorem~\ref{thm:mse-improvement} gives the second link.  For two estimators
-used with the same learning rate, reducing MSE by $\delta$ raises the certified
-improvement lower bound by $\eta\delta/2$.  This comparison orders the
-guarantees, not every realized step, because the smoothness bound need not be
-tight.  Substituting the ESS factorization now yields a certificate stated
-directly in terms of sequence coverage.
+For two estimators used with the same learning rate, an MSE reduction of
+$\delta$ improves the
+certified lower bound by $\eta\delta/2$.  The statement compares guarantees,
+not every realized step, because the smoothness inequality need not be tight.
+Substituting the ESS factorization yields the promised consequence of effective
+coverage.
 
 \begin{corollary}[ESS certificate for an unclipped update]
 \label{cor:ess-improvement}
@@ -435,44 +379,19 @@ In particular,
 is sufficient for positive expected policy improvement.
 \end{corollary}
 
-\begin{proof}
-Substitute the exact MSE from \eqref{eq:ess-factorization} into
-\eqref{eq:mse-improvement}:
-\begin{align}
-  &\E\!\left[J(\theta+\eta\widehat g_W)-J(\theta)\right]
-    \label{eq:ess-improvement-proof-1}\\
-  &\quad\ge\frac{\eta}{2}\left[
-    \|g\|_2^2
-    -\frac1N\left(
-      \frac{G_{2,\theta}}{\rho_\theta}-\|g\|_2^2
-    \right)
-  \right]
-    \label{eq:ess-improvement-proof-2}\\
-  &\quad=\frac{\eta}{2}\left\{
-    \left(1+\frac1N\right)\|g\|_2^2
-    -\frac{G_{2,\theta}}{N\rho_\theta}
-  \right\}.
-    \label{eq:ess-improvement-proof-3}
-\end{align}
-Equation~\eqref{eq:ess-improvement-proof-2} applies
-Theorem~\ref{thm:mse-improvement}; Equation
-\eqref{eq:ess-improvement-proof-3} collects the two gradient-norm terms.  Its
-right side is positive exactly when
-$G_{2,\theta}<(N+1)\rho_\theta\|g\|_2^2$.
-\end{proof}
+The corollary supplies the missing optimization meaning of ESS: at fixed signal
+and weighted gradient scale,
+higher ESS gives a stronger one-step improvement certificate.  It does not
+produce a universal numerical threshold, because reliability also depends on
+$G_{2,\theta}$ and the gradient signal.  To understand when ESS can nevertheless
+be informative in RLVR, we next examine the remaining scale term.
 
-Corollary~\ref{cor:ess-improvement} connects sequence coverage to a concrete
-optimization consequence.  At fixed gradient signal and weighted gradient
-scale, higher ESS strengthens the one-step improvement certificate.  It does
-not imply a universal ESS threshold, because the boundary also depends on the
-gradient signal and $G_{2,\theta}$.  We therefore examine when this remaining
-scale can be controlled in RLVR.
+\subsection{Why RLVR makes the scale term manageable}
 
-\subsection{Controlling the weighted gradient scale in RLVR}
-
-The weighted gradient scale combines the advantage and the policy score.  RLVR
-provides useful control of the advantage, but this control is sufficient only
-when the score is also bounded.
+The weighted gradient scale combines two factors: the advantage and the policy
+score.  RLVR naturally controls the first factor because verifier rewards are
+bounded and group-normalized advantages have finite range.  A score bound or an
+empirical scale estimate is still required for the second factor.
 
 \begin{proposition}[A sufficient bound on $G_{2,\theta}$]
 \label{prop:g2-bound}
@@ -482,26 +401,6 @@ If $|A|\le B_A$ and $\|S_\theta\|_2\le B_S$ almost surely under $Q$, then
   \label{eq:g2-bound}
 \end{equation}
 \end{proposition}
-
-\begin{proof}
-Since $H_\theta=A S_\theta$, substitute its squared norm into
-\eqref{eq:gradient-scale} and apply one bound per line:
-\begin{align}
-  G_{2,\theta}
-  &=\frac{\E_Q[W_\theta^2 A^2\|S_\theta\|_2^2]}
-          {\E_Q[W_\theta^2]}
-    \label{eq:g2-proof-1}\\
-  &\le B_A^2
-    \frac{\E_Q[W_\theta^2\|S_\theta\|_2^2]}
-         {\E_Q[W_\theta^2]}
-    \label{eq:g2-proof-2}\\
-  &\le B_A^2B_S^2.
-    \label{eq:g2-proof-3}
-\end{align}
-Equation~\eqref{eq:g2-proof-2} uses $A^2\le B_A^2$.  Equation
-\eqref{eq:g2-proof-3} uses $\|S_\theta\|_2^2\le B_S^2$ under the same
-nonnegative weight $W_\theta^2$, then cancels $\E_Q[W_\theta^2]$.
-\end{proof}
 
 Common RLVR constructions make the advantage factor small.  If the verifier
 reward is binary and a prompt-only baseline satisfies $b(X)\in[0,1]$, then
@@ -515,33 +414,6 @@ variance is nonzero.
 Let $d_i=r_i-\bar r$, let $v=K^{-1}\sum_{j=1}^K d_j^2>0$, and let
 $A_i=d_i/\sqrt v$.  Then $|A_i|\le\sqrt{K-1}$ for every $i$.
 \end{proposition}
-
-\begin{proof}
-The centered deviations satisfy $d_i=-\sum_{j\ne i}d_j$.  Therefore,
-\begin{align}
-  d_i^2
-  &=\left(\sum_{j\ne i}d_j\right)^2
-    \label{eq:grpo-proof-1}\\
-  &\le (K-1)\sum_{j\ne i}d_j^2
-    \label{eq:grpo-proof-2}\\
-  &=(K-1)\left(\sum_{j=1}^K d_j^2-d_i^2\right).
-    \label{eq:grpo-proof-3}
-\end{align}
-Equation~\eqref{eq:grpo-proof-1} uses the zero-sum identity for centered
-deviations.  Equation~\eqref{eq:grpo-proof-2} is Cauchy--Schwarz, and
-\eqref{eq:grpo-proof-3} restores the omitted term.  Rearranging gives
-\begin{align}
-  Kd_i^2
-  &\le (K-1)\sum_{j=1}^K d_j^2
-    \label{eq:grpo-proof-4}\\
-  \frac{d_i^2}{v}
-  &\le K-1,
-    \label{eq:grpo-proof-5}
-\end{align}
-where the second line uses $Kv=\sum_jd_j^2$.  Taking square roots proves the
-claim.  Adding a positive stabilizer to the denominator can only decrease the
-magnitude.
-\end{proof}
 
 These results clarify both the value and the limit of advantage normalization.
 It controls one factor in $G_{2,\theta}$, while the score still requires either a
@@ -558,18 +430,20 @@ optimization, $\theta$ depends on the fixed rollout data.  Extending
 stability or complexity control.
 \end{remark}
 
-We have now characterized when the permissive gradient is reliable and why that
-reliability matters.  The remaining question is whether clipping offers a
-better estimator after reliability deteriorates.  Answering it requires first
-identifying the gradient that PPO clipping actually produces.
+The analysis has now linked effective coverage to gradient error and gradient
+error to policy improvement.  This link explains why a permissive update can
+work while support remains broad.  It does not yet show that clipping is the
+right response when support deteriorates.  That comparison requires the exact
+gradient induced by the clipped objective.
 
-\subsection{Clipping trades bias for variance}
+\subsection{What clipping changes}
 \label{sec:clipping}
 
-Low ESS identifies pressure to intervene, not proof that a particular
-intervention is better.  PPO masking can reduce variance, but it also changes
-the target gradient.  We derive this change explicitly because PPO clipping is
-often confused with applying a global cap to the importance ratio.
+Low ESS indicates that an intervention may be useful, but it does not establish
+that a particular intervention is better.  PPO clipping can remove unstable
+sample contributions, yet it changes the target gradient at the same time.  We
+derive that change explicitly because clipping is often confused with globally
+truncating the importance ratio.
 
 \subsubsection{PPO clipping as an advantage-sign gradient mask}
 
@@ -602,48 +476,14 @@ Then
 \end{equation}
 \end{proposition}
 
-\begin{proof}
-When $A\ge0$, multiplication by $A$ preserves order.  Hence
-\begin{align}
-  \ell_\epsilon^{\mathrm{PPO}}
-  &=A\min\{W_\theta,1+\epsilon\}
-    \label{eq:ppo-positive-proof-1}\\
-  \nabla_\theta\ell_\epsilon^{\mathrm{PPO}}
-  &=A\nabla_\theta W_\theta
-    \mathbf{1}\{W_\theta<1+\epsilon\}
-    \label{eq:ppo-positive-proof-2}\\
-  &=AW_\theta S_\theta
-    \mathbf{1}\{W_\theta<1+\epsilon\}.
-    \label{eq:ppo-positive-proof-3}
-\end{align}
-The second line differentiates the active branch.  The third uses
-$\nabla_\theta W_\theta=W_\theta S_\theta$.
-
-When $A<0$, multiplication reverses order.  Therefore
-\begin{align}
-  \ell_\epsilon^{\mathrm{PPO}}
-  &=A\max\{W_\theta,1-\epsilon\}
-    \label{eq:ppo-negative-proof-1}\\
-  \nabla_\theta\ell_\epsilon^{\mathrm{PPO}}
-  &=A\nabla_\theta W_\theta
-    \mathbf{1}\{W_\theta>1-\epsilon\}
-    \label{eq:ppo-negative-proof-2}\\
-  &=AW_\theta S_\theta
-    \mathbf{1}\{W_\theta>1-\epsilon\}.
-    \label{eq:ppo-negative-proof-3}
-\end{align}
-Combining the two cases and substituting $H_\theta=AS_\theta$ gives
-\eqref{eq:ppo-gradient}.  When $A=0$, the gradient is zero.  At the two
-boundaries, any fixed valid subgradient convention preserves the distinction.
-\end{proof}
-
 PPO therefore removes an upper-ratio gradient only for nonnegative advantages
 and a lower-ratio gradient only for negative advantages.  In particular, a
 large ratio with negative advantage remains active.  PPO clipping is a
 directional mask, not a global bound on importance coefficients.
 
-The mask becomes useful only if the variance it removes is worth the bias it
-adds.  To state this comparison once for PPO and other interventions, let
+This distinction reveals the relevant trade-off.  The mask is useful only when
+the variance it removes is worth the bias it introduces.  To express that
+comparison once for PPO and other interventions, let
 $C_\theta$ be any scalar coefficient for which $C_\theta H_\theta$ has a finite
 second moment.  Define
 \begin{equation}
@@ -687,61 +527,10 @@ Therefore,
 \end{equation}
 \end{theorem}
 
-\begin{proof}
-Write $\mu_C:=\E[\widehat g_C]$.  Its displacement from the target is
-\begin{align}
-  \mu_C-g
-  &=\E_Q[C_\theta H_\theta]-\E_Q[W_\theta H_\theta]
-    \label{eq:modified-bias-proof-1}\\
-  &=\E_Q[(C_\theta-W_\theta)H_\theta]
-    \label{eq:modified-bias-proof-2}\\
-  &=b_C.
-    \label{eq:modified-bias-proof-3}
-\end{align}
-Centering the modified estimator at $\mu_C$ now yields
-\begin{align}
-  \E\|\widehat g_C-g\|_2^2
-  &=\E\|\widehat g_C-\mu_C+b_C\|_2^2
-    \label{eq:modified-risk-proof-1}\\
-  &=\E\|\widehat g_C-\mu_C\|_2^2
-    +2b_C^\top\E[\widehat g_C-\mu_C]
-    +\|b_C\|_2^2
-    \label{eq:modified-risk-proof-2}\\
-  &=\E\|\widehat g_C-\mu_C\|_2^2+\|b_C\|_2^2
-    \label{eq:modified-risk-proof-3}\\
-  &=\frac1N\operatorname{tr}(\Sigma_C)+\|b_C\|_2^2.
-    \label{eq:modified-risk-proof-4}
-\end{align}
-Equations~\eqref{eq:modified-bias-proof-1}--\eqref{eq:modified-bias-proof-3}
-substitute $g=\E_Q[W_\theta H_\theta]$, use linearity, and invoke the definition
-of $b_C$, respectively.  Equation~\eqref{eq:modified-risk-proof-1} adds and
-subtracts $\mu_C$.  Equation~\eqref{eq:modified-risk-proof-2} expands the
-squared norm.  Equation~\eqref{eq:modified-risk-proof-3} uses
-$\E[\widehat g_C-\mu_C]=0$.  Equation~\eqref{eq:modified-risk-proof-4} uses
-independence of the $N$ sampled responses, exactly as in
-\eqref{eq:raw-proof-2}--\eqref{eq:raw-proof-3}.  The raw estimator is unbiased by
-Theorem~\ref{thm:raw-mse}, so the same covariance calculation gives
-\begin{equation}
-  \E\|\widehat g_W-g\|_2^2
-  =\frac1N\operatorname{tr}(\Sigma_W).
-  \label{eq:raw-risk-crossover-proof}
-\end{equation}
-Subtracting the two risks gives
-\begin{align}
-  &\operatorname{MSE}(\widehat g_C)
-    -\operatorname{MSE}(\widehat g_W)
-    \label{eq:crossover-proof-1}\\
-  &\quad=\|b_C\|_2^2
-    -\frac1N\left\{
-      \operatorname{tr}(\Sigma_W)-\operatorname{tr}(\Sigma_C)
-    \right\}.
-    \label{eq:crossover-proof-2}
-\end{align}
-The left side is negative exactly when the covariance reduction exceeds
-$N\|b_C\|_2^2$, which is \eqref{eq:crossover}.
-\end{proof}
-
-For PPO, the coefficient is $C_\theta^{\mathrm{PPO}}=W_\theta M_\epsilon$.
+The crossover condition states the entire reason to clip: the removed
+covariance must exceed the squared bias of
+the modified gradient, scaled by batch size.  For PPO, the coefficient is
+$C_\theta^{\mathrm{PPO}}=W_\theta M_\epsilon$.
 Its exact bias is
 \begin{align}
   b_\epsilon^{\mathrm{PPO}}
@@ -750,7 +539,7 @@ Its exact bias is
   &=-\E_Q[W_\theta(1-M_\epsilon)H_\theta].
     \label{eq:ppo-bias-2}
 \end{align}
-For PPO, Theorem~\ref{thm:crossover} compares the covariance removed by its
+Theorem~\ref{thm:crossover} therefore compares the covariance removed by PPO's
 sign-specific mask with the squared bias of the masked gradient.  Combining the theorem with
 Theorem~\ref{thm:mse-improvement}, the difference between the modified and raw
 MSE-based improvement certificates is
@@ -762,7 +551,7 @@ MSE-based improvement certificates is
   \label{eq:improvement-crossover}
 \end{equation}
 Thus Equation~\eqref{eq:crossover} determines which estimator has the stronger
-one-step certificate, not only which estimator has lower gradient risk.
+one-step certificate, not merely which estimator has lower gradient risk.
 
 \subsubsection{Ratio truncation bias trade-off}
 
@@ -794,65 +583,23 @@ $\widehat g_c=N^{-1}\sum_i C_{c,i}^{\mathrm{tr}}H_{\theta,i}$ satisfies
 \end{align}
 \end{corollary}
 
-\begin{proof}
-The coefficient difference is $C_c^{\mathrm{tr}}-W_\theta=-T_c$.  Substitution into
-\eqref{eq:bias-covariance} gives
-\begin{align}
-  b_c
-  &=\E_Q[(C_c^{\mathrm{tr}}-W_\theta)H_\theta]
-    \label{eq:cap-proof-1}\\
-  &=-\E_Q[T_cH_\theta].
-    \label{eq:cap-proof-2}
-\end{align}
-The triangle inequality and the bound on $H_\theta$ then give
-\begin{align}
-  \|b_c\|_2
-  &\le\E_Q[T_c\|H_\theta\|_2]
-    \label{eq:cap-proof-3}\\
-  &\le H_{\max}\E_Q[T_c]
-    \label{eq:cap-proof-4}\\
-  &=H_{\max}\tau_c.
-    \label{eq:cap-proof-5}
-\end{align}
-For the covariance term, use the trace identity and remove its nonnegative
-mean-squared term:
-\begin{align}
-  \operatorname{tr}\{\Cov_Q(C_c^{\mathrm{tr}}H_\theta)\}
-  &=\E_Q[(C_c^{\mathrm{tr}})^2\|H_\theta\|_2^2]
-    -\|\E_Q[C_c^{\mathrm{tr}}H_\theta]\|_2^2
-    \label{eq:cap-proof-6}\\
-  &\le H_{\max}^2\E_Q[(C_c^{\mathrm{tr}})^2]
-    \label{eq:cap-proof-7}\\
-  &\le cH_{\max}^2\E_Q[W_\theta]
-    \label{eq:cap-proof-8}\\
-  &=cH_{\max}^2.
-    \label{eq:cap-proof-9}
-\end{align}
-Equation~\eqref{eq:cap-proof-7} uses the bound on $H_\theta$.
-Equation~\eqref{eq:cap-proof-8} uses $(C_c^{\mathrm{tr}})^2\le cW_\theta$,
-which holds both
-when $W_\theta\le c$ and when $W_\theta>c$.  The final line uses
-$\E_Q[W_\theta]=1$.  Combining \eqref{eq:two-risks},
-\eqref{eq:cap-proof-5}, and \eqref{eq:cap-proof-9} proves
-\eqref{eq:cap-mse-bound}.
-\end{proof}
-
-The bound isolates the appeal of upper truncation.  It replaces the raw
+The result isolates the appeal of upper truncation.  It replaces the raw
 second-moment term by $c/N$, while the introduced bias remains small when the
 tail excess $\tau_c$ is small.  The cap is therefore a tunable estimator
-parameter, not part of the paper's central claim.  Truncated importance ratios also appear in ACER with
+parameter, not part of the paper's central claim.  Truncated importance ratios
+also appear in ACER with
 bias correction \citep{wang2017acer} and in the V-trace correction used by
 IMPALA \citep{espeholt2018impala}; recent LLM methods likewise control extreme
 weight moments \citep{zheng2025m2po,fakoor2026p3o}.  These precedents motivate
 truncation as a separate importance-sampling device.  They do not make it
 equivalent to PPO clipping.
 
-The analysis now gives the intended decision logic.  When $G_{2,\theta}$ is
-controlled, high ESS certifies a small permissive-gradient MSE and a stronger
-policy-improvement bound.  As ESS falls, this error increases, and an
-intervention becomes preferable exactly when its variance reduction exceeds
-its squared-bias cost.  Turning this population comparison into a training rule
-requires a sample analogue of ESS.
+The theory now yields a complete decision logic.  When $G_{2,\theta}$ is
+controlled, high ESS certifies a reliable permissive gradient and a stronger
+policy-improvement bound.  As ESS falls, permissive-gradient error grows.
+Clipping becomes preferable only after the variance it removes exceeds the bias
+it introduces.  The final step is to turn this population comparison into an
+observable training rule.
 
 \subsection{The ESS-guided decision rule}
 \label{sec:practice}
@@ -863,21 +610,24 @@ Population ESS is unavailable during training, but its plug-in estimate is
   :=\frac{(\sum_{i=1}^N W_i)^2}{N\sum_{i=1}^N W_i^2}.
   \label{eq:sample-ess}
 \end{equation}
-The estimate must be computed from raw sequence ratios before any clipping or
-truncation.  The proposed gate uses the permissive gradient above a threshold
-and the PPO-masked gradient below it.
+The estimate is computed from raw sequence ratios before any clipping or
+truncation.  The proposed gate uses the permissive gradient when support remains
+adequate and the PPO-masked gradient when support falls below a threshold.
 
 The population theory motivates this rule but does not determine its threshold.
 Sample ESS can miss unobserved tail mass, the same batch usually determines both
 the gate and the gradient, and a token-local LLM surrogate is not algebraically
 identical to Equation~\eqref{eq:raw-estimator}.  The boundary also depends on
 gradient scale and signal.  We therefore treat the threshold as a testable
-application-level choice rather than as a theorem.  Recent LLM RL methods
+application-level choice rather than a theorem.  Recent LLM RL methods
 already adapt updates using ESS, weight moments, or sequence reshaping
 \cite{zheng2025m2po,shen2026vespo,huang2026vcpo,fakoor2026p3o}; our question is
 whether an ESS boundary locates the gradient-MSE crossover that makes such an
 intervention useful.  In the controlled study below, we fix the threshold at
-$0.1$ before observing the results and test every link from ESS to optimization.
+$0.1$ before observing the results.  Section~\ref{sec:simulation} then tests the
+two empirical implications of the theory: low ESS should predict gradient
+failure, and intervening only in that regime should improve the optimization
+trajectory.
 
 \section{Controlled simulation: ESS in an RLVR optimization loop}
 \label{sec:simulation}
@@ -1420,6 +1170,15 @@ and $0.0002\pm0.0100$ relative to PPO.  These endpoints do not establish a
 statistically resolved final-reward advantage over always masking.  They instead
 show that the gate recovers the masked endpoint after following the more
 efficient permissive trajectory through the reliable regime.
+
+\clearpage
+\section{Proofs for the theoretical results}
+\label{app:proofs}
+
+This appendix gives every algebraic step omitted from the main theoretical
+development.  The order follows Section~\ref{sec:theory}.
+
+\input{theory_proofs}
 
 \bibliographystyle{plainnat}
 \bibliography{references}
