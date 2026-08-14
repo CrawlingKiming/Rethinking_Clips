@@ -914,8 +914,9 @@ We repeat this cycle eight times and compare 100 paired runs.  Appendix
   (b) Exact reward change from that raw update and from an update using the
   exact population gradient.  Dotted lines mark the prespecified threshold
   $0.1$; error bars in (a) and (b) are standard errors within each fixed ESS
-  bin.  (c) Relative population-reward improvement across new rollout batches;
-  bands are 95\% confidence intervals over 100 paired runs.}
+  bin.  (c) Relative population-reward improvement against cumulative verifier
+  responses; labels mark the first evaluated checkpoint above 100\%
+  improvement, and bands are 95\% confidence intervals over 100 paired runs.}
   \label{fig:ess-validation}
 \end{figure}
 
@@ -929,16 +930,18 @@ $4.0\%$ reward on average between $0.03$ and $0.1$ and $13.3\%$ below $0.03$.
 Low ESS therefore predicts an estimation failure, not an unfavorable local
 objective.
 
-Second, the gate combines the two static methods' useful regimes.  After three
-rollout batches, its relative reward improvement is $109.5\%$, compared with
-$99.2\%$ for raw updates and $65.5\%$ for always masking.  After eight batches,
-the gate reaches $208.5\%$, compared with $195.1\%$ for raw updates and
-$208.3\%$ for always masking.  On average, only $5.17$ of 128 minibatch updates
-fall below the threshold.  These few switches preserve the raw method's early
-progress while recovering the masked method's final performance.  The study
-thus validates ESS as a decision statistic inside the intended optimization
-loop; it does not claim a statistically resolved final-reward advantage over
-always masking in this finite task.
+Second, the gate combines the two static methods' useful regimes.  It doubles
+the initial reward after 6,144 verifier responses, compared with 8,192 for raw
+updates and 10,240 for always masking.  The gate therefore reduces the response
+budget to this target by 25\% relative to raw updates and by 40\% relative to
+PPO masking.  After the full 16,384 responses, it reaches $208.5\%$ relative
+improvement, compared with $195.1\%$ for raw updates and $208.3\%$ for always
+masking.  On average, only $5.17$ of 128 minibatch updates fall below the
+threshold.  These few switches preserve the raw method's early progress while
+recovering the masked method's final performance.  The study thus validates
+ESS as a sample-efficiency criterion inside the intended optimization loop; it
+does not claim a statistically resolved final-reward advantage over always
+masking in this finite task.
 
 \section{Main experiments: ESS-gated RLVR}
 \label{sec:llm-experiments}
@@ -1202,6 +1205,14 @@ probabilities, ratios, scores, ESS, and the gate decision are recomputed before
 each update.  This is the same operational order as grouped RLVR: generate from
 the old policy, make sequential PPO minibatch updates, then collect new data.
 
+The observed within-rollout drift also explains why we retain 16 updates.  In
+the diagnostic trajectories, no update at minibatch positions 1 through 4 has
+ESS below $0.1$.  At positions 5 through 8, the low-ESS frequency is at most
+5\%, while it reaches 10\% at position 16.  Shortening the sequence to four or
+eight updates would therefore suppress the regime in which the gate is meant
+to act, making it nearly identical to the raw method rather than providing a
+stronger test.
+
 \subsection{Estimators, gate, and diagnostics}
 
 Let
@@ -1304,7 +1315,10 @@ fast initial progress but have much larger between-run uncertainty.  PPO
 masking is stable but slow through the first half of training.  The gate follows
 the raw trajectory when ratios are reliable and changes only $5.17$ of 128
 updates on average.  It is ahead of both static methods from rollout batch 3
-through batch 7 and reaches the PPO endpoint at batch 8.
+through batch 7 and reaches the PPO endpoint at batch 8.  Since every rollout
+contains 2,048 complete responses, the first checkpoint above 100\% relative
+improvement requires 6,144 responses for the gate, 8,192 for raw updates, and
+10,240 for PPO masking.
 
 \begin{table}[htbp]
 \centering

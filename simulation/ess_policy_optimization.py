@@ -497,6 +497,7 @@ def make_figure(
     path_rows: list[dict[str, float | str]],
     ess_threshold: float,
     output_base: Path,
+    responses_per_rollout: int = 2048,
 ) -> None:
     import matplotlib
 
@@ -560,6 +561,7 @@ def make_figure(
     for method in METHODS:
         rows = [row for row in path_rows if row["method"] == method]
         steps = np.asarray([float(row["rollout_batch"]) for row in rows])
+        responses = steps * responses_per_rollout / 1000.0
         means = np.asarray(
             [float(row["mean_relative_improvement_pct"]) for row in rows]
         )
@@ -567,18 +569,52 @@ def make_figure(
             [float(row["relative_improvement_pct_se"]) for row in rows]
         )
         color, linestyle = styles[method]
-        axes[2].plot(steps, means, color=color, linestyle=linestyle, label=method)
+        axes[2].plot(
+            responses,
+            means,
+            color=color,
+            linestyle=linestyle,
+            label=method,
+        )
         axes[2].fill_between(
-            steps,
+            responses,
             means - 1.96 * errors,
             means + 1.96 * errors,
             color=color,
             alpha=0.12,
             linewidth=0,
         )
-    axes[2].set_xlabel("Rollout batch")
+        target_indices = np.flatnonzero(means >= 100.0)
+        if len(target_indices):
+            target_index = int(target_indices[0])
+            axes[2].scatter(
+                responses[target_index],
+                means[target_index],
+                s=28,
+                color=color,
+                edgecolor="white",
+                linewidth=0.7,
+                zorder=5,
+            )
+            vertical_offset = {
+                "Raw": 9,
+                "PPO masked": -15,
+                "ESS gated": 9,
+            }[method]
+            axes[2].annotate(
+                f"{responses[target_index]:.1f}k",
+                (responses[target_index], means[target_index]),
+                xytext=(0, vertical_offset),
+                textcoords="offset points",
+                ha="center",
+                va="bottom" if vertical_offset > 0 else "top",
+                color=color,
+                fontsize=7.5,
+            )
+    axes[2].axhline(100.0, color="0.45", linestyle=":", linewidth=0.9)
+    axes[2].set_xlabel("Verifier responses processed (thousands)")
     axes[2].set_ylabel("Relative reward improvement (%)")
-    axes[2].set_title("(c) Full RLVR-style optimization")
+    axes[2].set_title("(c) ESS gate improves sample efficiency")
     axes[2].legend(frameon=False)
 
     for axis in axes:
@@ -659,6 +695,7 @@ def run(config: Config, skip_figure: bool = False) -> None:
             path_rows,
             config.ess_threshold,
             root / "figures" / "ess_policy_validation",
+            config.prompts_per_rollout * config.responses_per_prompt,
         )
 
     print(f"Initial exact population reward: {initial_value:.6f}")

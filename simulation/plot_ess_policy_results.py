@@ -35,4 +35,5 @@ if __name__ == "__main__":
         read_rows(results / "rlvr_training_paths.csv"),
         0.1,
         Path("figures/ess_policy_validation"),
+        2048,
     )

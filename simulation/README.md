@@ -49,7 +49,10 @@ Outputs:
 `rlvr_minibatch_diagnostics.csv` contains every diagnostic minibatch from the
 first 20 replications, including ESS, exact squared gradient error, and exact
 one-update reward changes.  `rlvr_training_paths.csv` contains the aggregated
-population reward after every new rollout batch.
+population reward after every new rollout batch.  Panel (c) converts those
+checkpoints to the cumulative number of verifier responses, with 2,048 complete
+responses per rollout batch, and marks the first checkpoint that doubles the
+initial population reward.
 
 References:
 
