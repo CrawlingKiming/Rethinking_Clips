@@ -503,28 +503,72 @@ def make_figure(
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.ticker import LogLocator, NullFormatter
 
     plt.rcParams.update(
         {
             "font.family": "serif",
-            "font.size": 9,
-            "axes.titlesize": 10,
-            "axes.labelsize": 9,
-            "legend.fontsize": 8,
+            "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+            "font.size": 7.5,
+            "axes.titlesize": 8.5,
+            "axes.titleweight": "bold",
+            "axes.labelsize": 8,
+            "xtick.labelsize": 7,
+            "ytick.labelsize": 7,
+            "legend.fontsize": 7,
+            "legend.frameon": False,
+            "axes.linewidth": 0.7,
+            "lines.linewidth": 1.5,
+            "lines.markersize": 4.0,
+            "xtick.major.width": 0.7,
+            "ytick.major.width": 0.7,
+            "xtick.minor.width": 0.5,
+            "ytick.minor.width": 0.5,
+            "axes.grid": True,
+            "grid.alpha": 0.16,
+            "grid.linewidth": 0.45,
+            "grid.linestyle": "-",
+            "figure.dpi": 150,
+            "savefig.dpi": 300,
+            "savefig.bbox": "tight",
+            "savefig.pad_inches": 0.03,
         }
     )
-    figure, axes = plt.subplots(1, 3, figsize=(10.2, 2.85))
+
+    # Render at the paper's final 6.5-inch text width so font sizes are not
+    # silently reduced when LaTeX scales the figure to \linewidth.
+    figure, axes = plt.subplots(1, 3, figsize=(6.5, 2.18))
+    blue = "#0072B2"
+    vermillion = "#D55E00"
+    green = "#009E73"
+    gray = "#6F6F6F"
+    light_gray = "#9A9A9A"
 
     x = np.asarray([float(row["median_normalized_ess"]) for row in diagnostic_bins])
     mse = np.asarray([float(row["mean_raw_gradient_mse"]) for row in diagnostic_bins])
     mse_se = np.asarray([float(row["raw_gradient_mse_se"]) for row in diagnostic_bins])
-    axes[0].errorbar(x, mse, yerr=mse_se, marker="o", color="#0072B2", capsize=2)
-    axes[0].axvline(ess_threshold, color="0.35", linestyle=":", linewidth=1)
+    axes[0].errorbar(
+        x,
+        mse,
+        yerr=mse_se,
+        marker="o",
+        color=blue,
+        capsize=1.8,
+        elinewidth=0.9,
+        markeredgecolor="white",
+        markeredgewidth=0.45,
+        zorder=3,
+    )
+    axes[0].axvline(ess_threshold, color=light_gray, linestyle=":", linewidth=0.9)
     axes[0].set_xscale("log")
     axes[0].set_yscale("log")
-    axes[0].set_xlabel("Normalized sequence ESS")
-    axes[0].set_ylabel("Raw-gradient MSE")
-    axes[0].set_title("(a) ESS predicts gradient error")
+    axes[0].set_xlim(0.0065, 1.05)
+    axes[0].xaxis.set_major_locator(LogLocator(base=10, numticks=3))
+    axes[0].xaxis.set_minor_formatter(NullFormatter())
+    axes[0].yaxis.set_minor_formatter(NullFormatter())
+    axes[0].set_xlabel("Normalized ESS")
+    axes[0].set_ylabel("Gradient MSE")
+    axes[0].set_title("(a) Gradient estimation error", loc="left", pad=5)
 
     raw_gain = np.asarray(
         [float(row["mean_raw_relative_gain_pct"]) for row in diagnostic_bins]
@@ -535,28 +579,56 @@ def make_figure(
     oracle_gain = np.asarray(
         [float(row["mean_oracle_relative_gain_pct"]) for row in diagnostic_bins]
     )
+    oracle_gain_se = np.asarray(
+        [float(row["oracle_relative_gain_pct_se"]) for row in diagnostic_bins]
+    )
     axes[1].errorbar(
         x,
         raw_gain,
         yerr=raw_gain_se,
         marker="o",
-        color="#D55E00",
-        capsize=2,
-        label="Raw estimate",
+        color=blue,
+        capsize=1.8,
+        elinewidth=0.9,
+        markeredgecolor="white",
+        markeredgewidth=0.45,
+        label="Permissive",
+        zorder=3,
     )
-    axes[1].plot(x, oracle_gain, marker="s", color="#009E73", label="Exact gradient")
-    axes[1].axhline(0.0, color="0.55", linewidth=0.8)
-    axes[1].axvline(ess_threshold, color="0.35", linestyle=":", linewidth=1)
+    axes[1].errorbar(
+        x,
+        oracle_gain,
+        yerr=oracle_gain_se,
+        marker="s",
+        linestyle="--",
+        color=green,
+        capsize=1.8,
+        elinewidth=0.9,
+        markeredgecolor="white",
+        markeredgewidth=0.45,
+        label="Oracle",
+        zorder=2,
+    )
+    axes[1].axhline(0.0, color=light_gray, linewidth=0.7)
+    axes[1].axvline(ess_threshold, color=light_gray, linestyle=":", linewidth=0.9)
     axes[1].set_xscale("log")
-    axes[1].set_xlabel("Normalized sequence ESS")
-    axes[1].set_ylabel("One-update reward change (%)")
-    axes[1].set_title("(b) Error changes update quality")
-    axes[1].legend(frameon=False)
+    axes[1].set_xlim(0.0065, 1.05)
+    axes[1].xaxis.set_major_locator(LogLocator(base=10, numticks=3))
+    axes[1].xaxis.set_minor_formatter(NullFormatter())
+    axes[1].set_xlabel("Normalized ESS")
+    axes[1].set_ylabel("Reward change (%)")
+    axes[1].set_title("(b) One-step policy improvement", loc="left", pad=5)
+    axes[1].legend(loc="lower right", handlelength=1.8, borderaxespad=0.2)
 
     styles = {
-        "Raw": ("#D55E00", "--"),
-        "PPO masked": ("#0072B2", "-.") ,
-        "ESS gated": ("#009E73", "-"),
+        "Raw": (blue, "--", "s", 1.35),
+        "PPO masked": (gray, "-.", "^", 1.35),
+        "ESS gated": (vermillion, "-", "o", 2.0),
+    }
+    display_names = {
+        "Raw": "Permissive",
+        "PPO masked": "PPO masked",
+        "ESS gated": "ESS gate",
     }
     for method in METHODS:
         rows = [row for row in path_rows if row["method"] == method]
@@ -568,21 +640,28 @@ def make_figure(
         errors = np.asarray(
             [float(row["relative_improvement_pct_se"]) for row in rows]
         )
-        color, linestyle = styles[method]
+        color, linestyle, marker, linewidth = styles[method]
         axes[2].plot(
             responses,
             means,
             color=color,
             linestyle=linestyle,
-            label=method,
+            marker=marker,
+            markeredgecolor="white",
+            markeredgewidth=0.4,
+            linewidth=linewidth,
+            markersize=3.5 if method != "ESS gated" else 4.2,
+            label=display_names[method],
+            zorder=4 if method == "ESS gated" else 3,
         )
         axes[2].fill_between(
             responses,
             means - 1.96 * errors,
             means + 1.96 * errors,
             color=color,
-            alpha=0.12,
+            alpha=0.12 if method == "ESS gated" else 0.07,
             linewidth=0,
+            zorder=1,
         )
         target_indices = np.flatnonzero(means >= 100.0)
         if len(target_indices):
@@ -590,16 +669,16 @@ def make_figure(
             axes[2].scatter(
                 responses[target_index],
                 means[target_index],
-                s=28,
+                s=24,
                 color=color,
                 edgecolor="white",
-                linewidth=0.7,
+                linewidth=0.55,
                 zorder=5,
             )
             vertical_offset = {
-                "Raw": 9,
-                "PPO masked": -15,
-                "ESS gated": 9,
+                "Raw": 8,
+                "PPO masked": -11,
+                "ESS gated": 8,
             }[method]
             axes[2].annotate(
                 f"{responses[target_index]:.1f}k",
@@ -609,22 +688,26 @@ def make_figure(
                 ha="center",
                 va="bottom" if vertical_offset > 0 else "top",
                 color=color,
-                fontsize=7.5,
+                fontsize=7,
             )
-    axes[2].axhline(100.0, color="0.45", linestyle=":", linewidth=0.9)
-    axes[2].set_xlabel("Verifier responses processed (thousands)")
-    axes[2].set_ylabel("Relative reward improvement (%)")
-    axes[2].set_title("(c) ESS gate improves sample efficiency")
-    axes[2].legend(frameon=False)
+    axes[2].axhline(100.0, color=light_gray, linestyle=":", linewidth=0.9)
+    axes[2].set_xticks([0, 4, 8, 12, 16])
+    axes[2].set_xlim(-0.6, 16.9)
+    axes[2].set_xlabel(r"Verifier responses ($\times 10^3$)")
+    axes[2].set_ylabel("Reward improvement (%)")
+    axes[2].set_title("(c) Optimization trajectory", loc="left", pad=5)
+    axes[2].legend(loc="upper left", handlelength=2.0, borderaxespad=0.2)
 
     for axis in axes:
         axis.spines["top"].set_visible(False)
         axis.spines["right"].set_visible(False)
-        axis.grid(alpha=0.15, linewidth=0.5)
-    figure.tight_layout(w_pad=1.2)
+        axis.grid(axis="y")
+        axis.grid(axis="x", visible=False)
+        axis.tick_params(axis="both", which="major", pad=2)
+    figure.subplots_adjust(left=0.074, right=0.995, bottom=0.205, top=0.89, wspace=0.52)
     output_base.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output_base.with_suffix(".pdf"), bbox_inches="tight")
-    figure.savefig(output_base.with_suffix(".png"), dpi=300, bbox_inches="tight")
+    figure.savefig(output_base.with_suffix(".pdf"))
+    figure.savefig(output_base.with_suffix(".png"), dpi=300)
     plt.close(figure)
 
 

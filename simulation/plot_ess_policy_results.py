@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from ess_policy_optimization import bin_diagnostics, make_figure, write_csv
+from ess_policy_optimization import make_figure
 
 
 def read_rows(path: Path) -> list[dict[str, float | str]]:
@@ -25,15 +25,13 @@ def read_rows(path: Path) -> list[dict[str, float | str]]:
 
 
 if __name__ == "__main__":
-    results = Path("simulation/results")
-    diagnostic_bins = bin_diagnostics(
-        read_rows(results / "rlvr_minibatch_diagnostics.csv")
-    )
-    write_csv(results / "rlvr_diagnostic_bins.csv", diagnostic_bins)
+    root = Path(__file__).resolve().parents[1]
+    results = root / "simulation" / "results"
+    diagnostic_bins = read_rows(results / "rlvr_diagnostic_bins.csv")
     make_figure(
         diagnostic_bins,
         read_rows(results / "rlvr_training_paths.csv"),
         0.1,
-        Path("figures/ess_policy_validation"),
+        root / "figures" / "ess_policy_validation",
         2048,
     )
