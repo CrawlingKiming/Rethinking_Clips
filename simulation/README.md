@@ -1,8 +1,9 @@
-# RLVR-style ESS simulation
+# Contextual-bandit ESS policy optimization
 
-This experiment tests ESS inside the optimization procedure used in RLVR.  It
-does not create an artificial rollout policy or sweep an external mismatch
-variable.
+This contextual-bandit experiment tests whether ESS can support the estimator
+decision predicted by the theory and then improve policy optimization.  It uses
+the rollout and minibatch procedure of RLVR without creating an artificial
+rollout policy or sweeping an external mismatch variable.
 
 An Optdigits image is a prompt.  The policy emits a 16-token binary response
 that encodes the digit, and an exact-match verifier returns reward one only for

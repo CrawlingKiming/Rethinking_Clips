@@ -43,9 +43,9 @@ ask when clipping becomes useful.  We show that the answer depends jointly on
 the concentration of the importance weights and the number of samples being
 averaged.  We connect this effective support to gradient error and policy
 improvement, then derive when clipping's variance reduction repays its bias.
-An exactly evaluable verifier task recovers the predicted change of regime.  A
-calibrated ESS rule reduces held-out gradient risk relative to either static
-choice and, under repeated optimization, preserves early progress while
+An exactly evaluable contextual-bandit testbed recovers the predicted change of
+regime.  A calibrated ESS rule reduces held-out gradient risk relative to either
+static choice and, under repeated optimization, preserves early progress while
 reaching a better final policy.  A separate fixed-threshold test yields a
 sample-efficiency gain without treating that threshold as universal.  These
 results identify ESS as a reliability coordinate for deciding when to clip.
@@ -119,8 +119,9 @@ estimator size is fixed, ESS can locate the reliability regime in which a
 safeguard becomes worthwhile.
 
 We test every link in an exactly evaluable verifier problem before transferring
-the rule to language-model training.  The controlled task follows the rollout
-and minibatch order of RLVR while exposing the population gradient and reward.
+the rule to language-model training.  The contextual-bandit study follows the
+rollout and minibatch order of RLVR while exposing the population gradient and
+reward.
 Across 100 paired runs, ESS predicts both gradient error and the sign of the
 resulting reward change.  Paired redraws at frozen policy states recover the
 predicted estimator crossover: PPO masking has lower MSE when effective support
@@ -166,9 +167,9 @@ and the mean-squared error of a fixed-rollout policy-gradient estimator.
 \item We connect gradient error to certified policy improvement and show that
 batch size shifts the bias--variance crossover between permissive and clipped
 gradients.
-\item We recover the predicted crossover in an RLVR-style verifier task and
-show that a calibration-selected ESS gate can outperform both static updates
-under repeated optimization.
+\item We recover the predicted crossover in a contextual-bandit verifier task
+with RLVR-style updates and show that a calibration-selected ESS gate can
+outperform both static updates under repeated optimization.
 \end{enumerate}
 
 The next section states the fixed-rollout problem in which this reliability
@@ -671,69 +672,68 @@ prespecified application heuristic, not as a theoretical constant.  Recent LLM
 RL methods likewise adapt updates using ESS, weight moments, or sequence
 reshaping \cite{zheng2025m2po,shen2026vespo,huang2026vcpo,fakoor2026p3o}.
 
-Section~\ref{sec:simulation} separates the theoretical and operational tests.
-First, frozen-policy redraws vary estimator size and ask whether ESS locates the
-raw-versus-PPO MSE crossover predicted by
-Corollary~\ref{cor:batch-crossover}.  A disjoint calibration split then turns
-the crossover formula into an ESS decision boundary and tests it on independent
-redraws.  Finally, RLVR optimization loops ask whether the calibrated rule and
-the fixed $0.1$ heuristic improve training.  This order separates the mechanism,
-the decision rule, and its optimization consequence.
+Section~\ref{sec:simulation} tests whether these theoretical quantities support
+an actual update decision.  A contextual bandit exposes the population gradient
+needed to validate the MSE analysis, while an RLVR-style optimization loop tests
+whether the resulting ESS gate improves policy learning.  This controlled bridge
+must succeed before the rule is transferred to language-model training.
 
-\section{Controlled simulation: ESS in an RLVR optimization loop}
+\section{Contextual-bandit validation of the ESS decision rule}
 \label{sec:simulation}
 
-The theory predicts a specific failure sequence.  As a rollout batch becomes
-less representative of the current policy, ESS should fall, the permissive
-gradient should become inaccurate, and its policy update should become less
-effective.  An LLM experiment cannot test this mechanism directly because its
-population gradient is unknown.  We therefore construct a finite verifier task
-that preserves the data flow of RLVR while making both the gradient and the
-population reward exactly computable.
+The purpose of this study is to validate the paper's decision logic, not to
+benchmark contextual-bandit performance.  It asks three questions in the order
+required by the theory.  First, does ESS predict the error and policy consequence
+of a permissive gradient?  Second, after estimator size is fixed, does ESS locate
+the raw-versus-PPO MSE crossover?  Third, can a boundary fitted without test
+outcomes select updates that improve policy optimization?  Answering all three
+turns ESS from a descriptive statistic into a candidate training rule.
 
-\subsection{Experimental design}
+\subsection{Why a contextual-bandit testbed?}
 
-We convert Optdigits classification into a sequence-level verifier problem
-\citep{alpaydin1998optdigits,wang2017adaptive}.  Each digit image serves as a
-prompt.  The policy answers with a 16-token binary encoding of the digit, and
-the verifier returns one only when the complete code is correct.  This task is
-not intended to reproduce language generation.  Its purpose is to retain the
-sequence-level importance ratio used in RLVR while providing an exact oracle
-over the finite prompt population.
+An LLM experiment cannot answer the first two questions directly because its
+population gradient and reward are unknown.  We therefore use the standard
+classification-to-contextual-bandit reduction
+\citep{wang2017adaptive}.  An Optdigits image is the context, the policy action
+is a 16-token binary encoding of its digit, and an exact-match verifier returns
+one only for the correct sequence \citep{alpaydin1998optdigits}.  The finite
+population makes the policy gradient and reward exact, while the sequence action
+retains the product importance ratio that drives ESS in RLVR.  The testbed is
+therefore deliberately simpler than language generation but better suited to
+testing the theory.
 
-Each run then follows an RLVR training loop
-\citep{shao2024deepseekmath,yu2025dapo}.  A rollout contains 128 prompts and 16
-responses per prompt, from which we compute leave-one-out group advantages.
-The prompt groups are partitioned into 16 sequential minibatches.  Before each
-update, we recompute the sequence ratios and ESS under the current policy.  The
-permissive (raw) method always uses the unmasked gradient, PPO always applies its
-advantage-sign mask with $\epsilon=0.2$, and the heuristic ESS gate applies that
-mask only below $0.1$.  After the 16 updates, the new policy generates the next rollout.
-We repeat this cycle for eight rollouts and compare 100 paired replications.
-Thus ESS deteriorates endogenously as optimization proceeds on fixed data; it
-is not imposed by an artificial ratio distribution.  Appendix~\ref{app:bandit}
-specifies the task, oracle, algorithm, and statistical protocol in full.
+We embed this bandit in the data flow used by RLVR
+\citep{shao2024deepseekmath,yu2025dapo}.  Each rollout generates grouped
+responses, computes leave-one-out advantages, and supplies 16 sequential policy
+minibatches.  Ratios and sample ESS are recomputed before every update, and a new
+rollout is collected only after the current one has been optimized.  ESS thus
+changes because the current policy moves away from its rollout policy, not
+because we impose an artificial ratio distribution.  We compare raw, PPO-masked,
+and ESS-gated updates in 100 paired replications.  Appendix~\ref{app:bandit}
+specifies the task, oracle, randomization, and aggregation protocol in full.
 
-Figure~\ref{fig:ess-validation} reads from mechanism to consequence.  Panel (a)
-tests whether ESS predicts gradient error.  Panel (b) tests whether that error
-changes the value of a policy step.  Panel (c) tests whether the same statistic
-can choose between permissive and masked updates during training.
+\subsection{ESS identifies unreliable permissive updates}
+
+Figure~\ref{fig:ess-validation} tests the first question and introduces the
+application heuristic used later in RLVR.  Panels (a) and (b) connect ESS to
+permissive-gradient error and then to the exact value of the resulting policy
+step.  Panel (c) asks whether the observable sample ESS can activate PPO masking
+only when the permissive update becomes unreliable.  The heuristic uses the raw
+gradient when sample ESS is at least $0.1$ and the PPO-masked gradient otherwise.
+The threshold is prespecified rather than fitted from this experiment.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/ess_policy_validation.pdf}
-  \caption{ESS in an RLVR-style optimization loop.  (a) Permissive-gradient
-  error by pre-update ESS.  (b) Exact reward change after a permissive step and
-  after the corresponding oracle-gradient step.  Dotted lines mark the
-  prespecified heuristic threshold of $0.1$; error bars in (a) and (b) are standard errors
-  within fixed ESS bins.  (c) Relative population-reward improvement against
-  cumulative verifier responses; bands are 95\% confidence intervals over 100
-  paired replications, and labels mark the first checkpoint above 100\%
-  improvement.}
+  \caption{Contextual-bandit test of ESS reliability and the prespecified
+  application heuristic.  (a) Permissive-gradient error by pre-update ESS.
+  (b) Exact reward change after a permissive step and the corresponding
+  oracle-gradient step.  Dotted lines mark the fixed threshold $0.1$; error bars
+  in (a) and (b) are standard errors within ESS bins.  (c) Relative
+  population-reward improvement against verifier responses; bands are 95\%
+  confidence intervals over 100 paired replications.}
   \label{fig:ess-validation}
 \end{figure}
-
-\subsection{Results}
 
 ESS separates reliable from unreliable permissive updates.  The gradient MSE
 is $1.6\times10^{-2}$ above ESS $0.8$, increases to $1.31\times10^{-1}$ between
@@ -744,44 +744,39 @@ corresponding oracle-gradient steps improve reward in every bin.  Low ESS
 therefore identifies gradient estimation failure rather than an inherently
 unfavorable local objective.
 
-The preceding diagnostic establishes that ESS predicts permissive-gradient
-error, but it does not compare the permissive and PPO-masked estimators
-directly.  We therefore freeze 56 pre-update policy states, eight in each
-population-ESS interval, and draw 32 paired gradient estimates at each state.
-Figure~\ref{fig:ess-crossover} reports one training-size minibatch ($N=128$)
-and the average of four independent minibatch blocks ($N=512$).  This fourfold
-change tests Corollary~\ref{cor:batch-crossover}: averaging reduces covariance
-without removing clipping bias.  The diagnostic is counterfactual and leaves
-every optimization trajectory unchanged.
+The operational heuristic provides the first bridge to training.  It doubles
+the initial reward after $6.1$K verifier responses, compared with $8.2$K for
+the raw method and $10.2$K for always applying the PPO mask.  Because it masks
+only 5.17 of 128 updates on average, it retains permissive learning when ESS is
+high and intervenes only in the observed failure regime.  This result motivates
+an ESS gate, but it does not yet validate how its boundary should depend on
+estimator size.  That is the second question.
 
-\begin{figure}[htbp]
+\subsection{A calibrated ESS gate selects the estimator}
+
+We first verify the MSE premise directly at 56 frozen policy states.  At
+$N=128$, PPO masking has lower MSE throughout the observed ESS range.  At
+$N=512$, the preference changes between the $[0.2,0.4)$ and $[0.4,0.6)$
+intervals.  This is the pattern predicted by
+Corollary~\ref{cor:batch-crossover}: increasing $N$ suppresses variance while
+leaving clipping bias intact.  Appendix Figure~\ref{fig:ess-crossover} and
+Table~\ref{tab:rlvr-crossover} report the complete paired diagnostic.  The main
+question is whether this crossover can be converted into a rule without using
+the evaluation outcomes.
+
+\begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{figures/ess_estimator_crossover.pdf}
-  \caption{Direct raw-versus-PPO gradient-MSE comparison at frozen policy
-  states.  (a) At $N=512$, PPO masking has lower MSE in the low-ESS regime,
-  whereas the permissive estimator has lower MSE at high ESS.  (b) PPO MSE
-  reduction relative to the permissive estimator for $N=128$ and $N=512$;
-  positive values favor PPO masking.  Each point averages eight policy states,
-  each evaluated with 32 independent redraws.  Error bars are standard errors
-  across policy states.}
-  \label{fig:ess-crossover}
+  \includegraphics[width=\linewidth]{figures/ess_formula_oracle.pdf}
+  \caption{Contextual-bandit validation of the ESS decision rule.  (a) At the
+  calibration-selected $N=512$, the predicted MSE preference changes sign with
+  population ESS.  (b) The fitted boundary moves with $N$; the count-transfer
+  rule holds $N\rho$ fixed, while $0.1$ denotes the later application heuristic.
+  (c) Held-out gradient MSE relative to the better static estimator at $N=512$;
+  negative values are better.  Error bars are standard errors across 28 test
+  states.  (d) Relative reward improvement in a four-epoch optimization loop;
+  bands are 95\% confidence intervals over 100 paired runs.}
+  \label{fig:formula-oracle}
 \end{figure}
-
-The direct comparison yields the qualified crossover predicted by
-Corollary~\ref{cor:batch-crossover}.  At $N=128$, PPO masking has lower MSE in
-every nontrivial ESS bin, which places this estimator size on the
-variance-dominated side of the comparison.  At $N=512$, PPO masking reduces
-MSE by 27\% below ESS $0.03$, while the permissive estimator reduces MSE by
-19\% in $[0.4,0.6)$ and 18\% in $[0.6,0.8)$.  The sign changes between the
-$[0.2,0.4)$ and $[0.4,0.6)$ bins.  The joint dependence on ESS and estimator
-size is the predicted evidence: ESS locates the reliability regime at fixed
-size, while additional averaging can move the crossover.  This result does not
-identify $0.1$ as a universal threshold.  It also does not imply that the
-lower-MSE estimator realizes the larger reward gain at every state, because
-Theorem~\ref{thm:mse-improvement} orders conservative certificates rather than
-exact improvements.  A useful gate must therefore pass two further tests: its
-boundary must be fixed without held-out outcomes, and the resulting choice must
-improve optimization rather than only estimator risk.
 
 We construct that test with a disjoint calibration protocol.  Within each of
 the seven ESS intervals, four frozen states fit the decision boundary and four
@@ -793,23 +788,6 @@ selects $N=512$ before the held-out redraws are examined.  The smaller sizes
 select PPO throughout, while $N=1024$ selects the raw estimator throughout.
 These boundary cases remain part of the reported result rather than being
 discarded.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/ess_formula_oracle.pdf}
-  \caption{From the crossover formula to an ESS-gated update.  (a) At the
-  calibration-selected $N=512$, the predicted MSE preference changes sign as
-  population ESS increases.  (b) Fitted boundaries for every candidate $N$;
-  the effective-count transfer holds $N\rho$ fixed, and $0.1$ is shown only as
-  the later application heuristic.  (c) Held-out gradient MSE relative to the
-  better static estimator at $N=512$; negative values are better.  The formula
-  rule uses state-specific calibrated risk components as a diagnostic reference,
-  whereas the ESS rules use population ESS and their fitted thresholds.  Error bars are
-  standard errors across 28 test states.  (d) Relative reward improvement in a
-  four-epoch RLVR loop at $N=512$; bands are 95\% confidence intervals over 100
-  paired runs.}
-  \label{fig:formula-oracle}
-\end{figure}
 
 The calibration-selected boundary is $0.42$ at $N=512$.  On 100 independent
 redraws of each held-out state, its population-ESS rule reduces MSE by $4.3\%\pm1.1\%$
@@ -831,29 +809,24 @@ three rollouts, but the gate overtakes it after the fourth and masks only 61.7
 of 512 updates on average.  The gate therefore preserves the useful
 permissive regime and intervenes before its later errors dominate.
 
-The separate heuristic test translates the reliability diagnosis into faster
-optimization.  The ESS-gated method
-doubles the initial reward after $6.1$K verifier responses, compared with
-$8.2$K for the always-permissive method and $10.2$K for always applying the PPO
-mask.  The gate therefore reduces the response budget to this target by 25\%
-and 40\%, respectively.  Only 5.17 of 128 updates are masked on average, so the
-gate follows the permissive trajectory while the batch remains reliable and
-intervenes only in the low-ESS regime.  At the final checkpoint, the gate and
-always-masked method reach nearly identical relative improvements of $208.5\%$
-and $208.3\%$, compared with $195.1\%$ for the permissive method; uncertainty
-does not resolve a final-reward difference between the gate and always masking.
-The supported conclusion is therefore sharper than universal dominance: ESS
-locates the most damaging permissive updates and converts that diagnosis into
-a sample-efficiency gain in this testbed.
+The contextual-bandit study therefore establishes the role of this experiment
+in the paper.  ESS predicts when the permissive gradient becomes unreliable,
+the preferred estimator changes jointly with ESS and $N$, and a boundary fixed
+before evaluation improves both held-out gradient risk and repeated policy
+optimization.  The fitted value $0.42$ belongs to this controlled configuration,
+while $0.1$ remains the simpler application heuristic carried into RLVR.  The
+next section tests whether this observable gate transfers when the exact
+gradient is no longer available.
 
 \section{Main experiments: ESS-gated RLVR}
 \label{sec:llm-experiments}
 
-The controlled study establishes the mechanism under an exact oracle.  The main
-experiment tests whether the same ESS rule improves language-model training,
-where neither the population gradient nor its MSE is observable.  Evidence must
-therefore come from matched training trajectories: the gate should preserve the
-early efficiency of a permissive update while improving its late stability.
+The contextual-bandit study establishes the mechanism under an exact oracle.
+The main experiment tests the prespecified $0.1$ application gate in
+language-model training, where neither the population gradient nor its MSE is
+observable.  Evidence must therefore come from matched training trajectories:
+the gate should preserve the early efficiency of a permissive update while
+improving its late stability.
 
 \subsection{Decision rule and comparison set}
 
@@ -937,22 +910,22 @@ early progress of the permissive estimator while improving final reward or
 reducing collapse relative to its static alternatives, then ESS identifies a
 useful regime change across distinct safeguards.  This paragraph remains a
 placeholder until the measured effect sizes and uncertainty are available; at
-present, the controlled simulation is the paper's completed empirical evidence.
+present, the contextual-bandit study is the paper's completed empirical evidence.
 
 \appendix
 
-\section{Simulation protocol and additional results}
+\section{Contextual-bandit protocol and additional results}
 \label{app:bandit}
 
-This appendix defines every quantity used in
-Figure~\ref{fig:ess-validation} and gives the complete simulation protocol.  We
+This appendix defines every quantity used in the contextual-bandit study.  We
 first map the finite verifier task to an RLVR update, then derive the population
 gradient, specify the rollout and minibatch order, and finally report the full
-diagnostic and optimization results.
+diagnostic and optimization results supporting Figures~\ref{fig:ess-validation}
+and \ref{fig:formula-oracle}.
 
 \subsection{Task and correspondence to RLVR}
 
-The simulator turns supervised classification into a verifier task using the
+The testbed turns supervised classification into a verifier task using the
 standard contextual-bandit reduction of \citet{wang2017adaptive}: an input is
 presented as the context, a policy samples an answer, and reward is one only for
 the correct label.  We replace the single label action with a token sequence and
@@ -963,11 +936,11 @@ embed this task in the grouped rollout and minibatch structure used by RLVR
 \begin{table}[htbp]
 \centering
 \small
-\caption{Correspondence between RLVR and the finite verifier task.}
+\caption{Correspondence between RLVR and the contextual-bandit verifier task.}
 \label{tab:rlvr-correspondence}
 \begin{tabular}{lll}
 \toprule
-RLVR object & Simulator object & Realization \\
+RLVR object & Bandit object & Realization \\
 \midrule
 Prompt $X$ & Context $x$ & Optdigits feature vector \\
 Complete response $Y$ & Sequence $Y_{1:16}$ & 16-token binary digit code \\
@@ -981,7 +954,7 @@ PPO epoch & Minibatch sequence & 16 sequential updates, then a new rollout \\
 \end{tabular}
 \end{table}
 
-The simulator is a sequence policy, not a language model.  Its token heads are
+The testbed uses a sequence policy, not a language model.  Its token heads are
 conditionally independent so that the population gradient remains exact, but
 its response ratio is the same product of token ratios that appears in RLVR.
 During training, the learner observes only sampled responses, rollout log
@@ -1019,7 +992,7 @@ per token position,
 The verifier reward is
 $R(x_j,a_{1:16})=\mathbf{1}\{a_{1:16}=c(y_j)\}$.
 
-Initialization is deterministic and uses no simulation outcomes.  Starting
+Initialization is deterministic and uses no experimental outcomes.  Starting
 from zero, we fit all token heads for 500 full-population logistic-regression
 steps with step size $0.8$ and no regularization.  We then multiply the fitted
 weights by $0.55$ to keep the initial policy stochastic, which gives exact
@@ -1123,7 +1096,7 @@ every response in a group has the same reward, all group advantages are zero.
 \subsection{Rollout and minibatch procedure}
 
 Each replication begins from the same $\theta_0$ and processes eight newly
-generated rollout batches.  For rollout $r$, the simulator executes the
+generated rollout batches.  For rollout $r$, the testbed executes the
 following operations in order.
 \begin{enumerate}
   \item Set the rollout policy $Q_r=P_{\theta_{r,0}}$ and sample 128 distinct
@@ -1193,7 +1166,7 @@ not numerical ratio truncation.  The third method uses
   {N\sum_{i,g}W_{ig,t}^2}.
   \label{eq:simulation-gate}
 \end{equation}
-The threshold is fixed before the runs and is not selected from any simulation
+The threshold is fixed before the runs and is not selected from any reported
 outcome.  It is an operational heuristic for this $N=128$ update, not the
 theoretical crossover threshold.
 
@@ -1213,9 +1186,14 @@ gradient and the other by the oracle gradient, without changing the actual
 training trajectory.  Their outcomes isolate whether a harmful sampled step is
 caused by estimation error or by an unfavorable population gradient.
 
-Before running the simulation, we fixed the ESS intervals $[0,0.03)$,
-$[0.03,0.1)$, $[0.1,0.2)$, $[0.2,0.4)$, $[0.4,0.6)$, $[0.6,0.8)$, and
-$[0.8,1]$.  Panels (a) and (b) report the within-bin mean and its standard error.
+Before running the experiment, we fixed seven ESS intervals:
+\[
+  \begin{gathered}
+    \relax[0,0.03),\ [0.03,0.1),\ [0.1,0.2),\ [0.2,0.4),\\
+    [0.4,0.6),\ [0.6,0.8),\ [0.8,1].
+  \end{gathered}
+\]
+Panels (a) and (b) report the within-bin mean and its standard error.
 Panel (c) uses all 100 replications and reports
 \begin{equation}
   \Delta_r^{\mathrm{rel}}
@@ -1302,6 +1280,18 @@ $100(\widehat{\operatorname{MSE}}_{\mathrm{raw}}-
 masking.  The released redraw file also records both counterfactual one-step
 reward changes, although Figure~\ref{fig:ess-crossover} focuses on the gradient
 risk required by Theorem~\ref{thm:crossover}.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/ess_estimator_crossover.pdf}
+  \caption{Direct raw-versus-PPO gradient-MSE diagnostic at frozen policy
+  states.  (a) At $N=512$, PPO masking has lower MSE in the low-ESS regime,
+  whereas the raw estimator has lower MSE at high ESS.  (b) PPO MSE reduction
+  relative to the raw estimator for $N=128$ and $N=512$; positive values favor
+  PPO masking.  Each point averages eight states evaluated with 32 independent
+  redraws.  Error bars are standard errors across states.}
+  \label{fig:ess-crossover}
+\end{figure}
 
 \subsection{Formula calibration and held-out decision test}
 
