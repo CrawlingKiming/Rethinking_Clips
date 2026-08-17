@@ -273,6 +273,36 @@ The left side is negative exactly when the covariance reduction exceeds
 $N\|b_C\|_2^2$, which is \eqref{eq:crossover}.
 \end{proof}
 
+\subsection{Proof of Corollary~\ref{cor:batch-crossover}}
+
+\begin{proof}
+Suppose first that $b_C\ne0$.  Theorem~\ref{thm:crossover} gives
+\begin{align}
+  \operatorname{MSE}(\widehat g_C)
+  <\operatorname{MSE}(\widehat g_W)
+  &\iff \Delta_C>N\|b_C\|_2^2
+    \label{eq:batch-crossover-proof-1}\\
+  &\iff \frac{\Delta_C}{\|b_C\|_2^2}>N
+    \label{eq:batch-crossover-proof-2}\\
+  &\iff N<N_C^*.
+    \label{eq:batch-crossover-proof-3}
+\end{align}
+Equation~\eqref{eq:batch-crossover-proof-2} divides both sides by the strictly
+positive quantity $\|b_C\|_2^2$.  Equation
+\eqref{eq:batch-crossover-proof-3} substitutes the definition of $N_C^*$ in
+Equation~\eqref{eq:batch-crossover}.  If $b_C=0$, Theorem~\ref{thm:crossover}
+instead gives
+\begin{align}
+  \operatorname{MSE}(\widehat g_C)
+  <\operatorname{MSE}(\widehat g_W)
+  &\iff \Delta_C>N\cdot0
+    \label{eq:batch-crossover-proof-4}\\
+  &\iff \Delta_C>0,
+    \label{eq:batch-crossover-proof-5}
+\end{align}
+which holds by assumption for every finite $N$.
+\end{proof}
+
 \subsection{Proof of Corollary~\ref{cor:upper-truncation}}
 
 \begin{proof}

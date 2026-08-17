@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from ess_policy_optimization import make_figure
+from ess_policy_optimization import make_crossover_figure, make_figure
 
 
 def read_rows(path: Path) -> list[dict[str, float | str]]:
@@ -34,4 +34,8 @@ if __name__ == "__main__":
         0.1,
         root / "figures" / "ess_policy_validation",
         2048,
+    )
+    make_crossover_figure(
+        read_rows(results / "rlvr_crossover_bins.csv"),
+        root / "figures" / "ess_estimator_crossover",
     )

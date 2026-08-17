@@ -1,6 +1,6 @@
 """RLVR-style simulation of ESS-gated policy optimization.
 
-Optdigits images serve as prompts.  A policy emits an eight-token binary
+Optdigits images serve as prompts.  A policy emits a sixteen-token binary
 response, and a deterministic verifier returns one exactly when the response
 encodes the image label.  Every rollout is followed by sixteen sequential PPO
 minibatch updates.  The raw, PPO-masked, and ESS-gated methods share prompts,
@@ -29,6 +29,9 @@ class Config:
     seed: int = 73
     replications: int = 100
     diagnostic_replications: int = 20
+    crossover_checkpoints_per_bin: int = 8
+    crossover_draws_per_checkpoint: int = 32
+    crossover_minibatches_per_draw: int = 4
     rollout_steps: int = 8
     prompts_per_rollout: int = 128
     responses_per_prompt: int = 16
@@ -43,6 +46,9 @@ class Config:
 
 
 METHODS = ("Raw", "PPO masked", "ESS gated")
+ESS_BOUNDARIES = np.asarray(
+    [0.0, 0.03, 0.1, 0.2, 0.4, 0.6, 0.8, 1.000001]
+)
 DATA_URL = (
     "https://archive.ics.uci.edu/static/public/80/"
     "optical+recognition+of+handwritten+digits.zip"
@@ -121,6 +127,39 @@ def population_value_and_gradient(
     return value, gradient
 
 
+def population_value(
+    weights: np.ndarray,
+    features: np.ndarray,
+    codes: np.ndarray,
+) -> float:
+    """Compute exact reward over the finite prompt population."""
+    probabilities = sigmoid(features @ weights.T)
+    correct_token_probability = (
+        codes * probabilities + (1.0 - codes) * (1.0 - probabilities)
+    )
+    return float(np.mean(np.prod(correct_token_probability, axis=1)))
+
+
+def population_sequence_ess(
+    weights: np.ndarray,
+    rollout_weights: np.ndarray,
+    features: np.ndarray,
+) -> float:
+    """Compute population normalized ESS for the sequence likelihood ratio."""
+    current = np.clip(sigmoid(features @ weights.T), 1e-12, 1.0 - 1e-12)
+    rollout = np.clip(
+        sigmoid(features @ rollout_weights.T),
+        1e-12,
+        1.0 - 1e-12,
+    )
+    token_second_moment = (
+        current**2 / rollout
+        + (1.0 - current) ** 2 / (1.0 - rollout)
+    )
+    sequence_second_moment = np.prod(token_second_moment, axis=1)
+    return float(1.0 / np.mean(sequence_second_moment))
+
+
 def sequence_log_probability(
     actions: np.ndarray,
     probabilities: np.ndarray,
@@ -161,6 +200,32 @@ def make_replication_randomness(
             }
         )
     return draws
+
+
+def make_minibatch_randomness(
+    rng: np.random.Generator,
+    population_size: int,
+    config: Config,
+) -> dict[str, np.ndarray]:
+    """Draw one fresh minibatch with the same marginal law as training."""
+    prompts_per_minibatch = (
+        config.prompts_per_rollout // config.minibatches_per_rollout
+    )
+    return {
+        "prompts": rng.choice(
+            population_size,
+            size=prompts_per_minibatch,
+            replace=False,
+        ),
+        "uniforms": rng.random(
+            (
+                prompts_per_minibatch,
+                config.responses_per_prompt,
+                config.response_tokens,
+            )
+        ),
+        "prompt_order": np.arange(prompts_per_minibatch),
+    }
 
 
 def collect_rollout(
@@ -263,18 +328,25 @@ def simulate_method(
     config: Config,
     replication: int,
     collect_diagnostics: bool,
-) -> tuple[np.ndarray, list[dict[str, float]], dict[str, float]]:
+) -> tuple[
+    np.ndarray,
+    list[dict[str, float]],
+    dict[str, float],
+    list[dict[str, object]],
+]:
     weights = initial_weights.copy()
     initial_value, _ = population_value_and_gradient(weights, features, codes)
     values = [initial_value]
     diagnostic_rows: list[dict[str, float]] = []
+    diagnostic_checkpoints: list[dict[str, object]] = []
     gate_raw_updates = 0
     gate_masked_updates = 0
     all_ess: list[float] = []
 
     for rollout_index, random_draw in enumerate(random_draws, start=1):
+        rollout_weights = weights.copy()
         rollout = collect_rollout(
-            weights,
+            rollout_weights,
             features,
             codes,
             random_draw,
@@ -305,10 +377,20 @@ def simulate_method(
                     features,
                     codes,
                 )
+                ppo_value = population_value(
+                    weights + config.policy_learning_rate * masked_gradient,
+                    features,
+                    codes,
+                )
                 oracle_value, _ = population_value_and_gradient(
                     weights + config.policy_learning_rate * true_gradient,
                     features,
                     codes,
+                )
+                exact_ess = population_sequence_ess(
+                    weights,
+                    rollout_weights,
+                    features,
                 )
                 diagnostic_rows.append(
                     {
@@ -316,18 +398,43 @@ def simulate_method(
                         "rollout_batch": float(rollout_index),
                         "minibatch": float(minibatch_index),
                         "normalized_ess": normalized_ess,
+                        "population_sequence_ess": exact_ess,
                         "effective_sequences": normalized_ess * len(ratios),
                         "mean_ratio": float(np.mean(ratios)),
                         "max_ratio": float(np.max(ratios)),
                         "raw_gradient_mse": float(
                             np.sum((raw_gradient - true_gradient) ** 2)
                         ),
+                        "ppo_gradient_mse": float(
+                            np.sum((masked_gradient - true_gradient) ** 2)
+                        ),
+                        "raw_minus_ppo_mse": float(
+                            np.sum((raw_gradient - true_gradient) ** 2)
+                            - np.sum((masked_gradient - true_gradient) ** 2)
+                        ),
                         "raw_relative_gain_pct": float(
                             100.0 * (raw_value - value_before) / value_before
+                        ),
+                        "ppo_relative_gain_pct": float(
+                            100.0 * (ppo_value - value_before) / value_before
+                        ),
+                        "ppo_minus_raw_gain_pct": float(
+                            100.0 * (ppo_value - raw_value) / value_before
                         ),
                         "oracle_relative_gain_pct": float(
                             100.0 * (oracle_value - value_before) / value_before
                         ),
+                    }
+                )
+                diagnostic_checkpoints.append(
+                    {
+                        "replication": replication,
+                        "rollout_batch": rollout_index,
+                        "minibatch": minibatch_index,
+                        "observed_normalized_ess": normalized_ess,
+                        "population_sequence_ess": exact_ess,
+                        "weights": weights.copy(),
+                        "rollout_weights": rollout_weights.copy(),
                     }
                 )
 
@@ -353,7 +460,7 @@ def simulate_method(
         "mean_minibatch_ess": float(np.mean(all_ess)),
         "minimum_minibatch_ess": float(np.min(all_ess)),
     }
-    return np.asarray(values), diagnostic_rows, metadata
+    return np.asarray(values), diagnostic_rows, metadata, diagnostic_checkpoints
 
 
 def write_csv(path: Path, rows: list[dict[str, float | str]]) -> None:
@@ -452,10 +559,9 @@ def bin_diagnostics(
     ess_values = np.asarray(
         [float(row["normalized_ess"]) for row in diagnostic_rows]
     )
-    boundaries = np.asarray([0.0, 0.03, 0.1, 0.2, 0.4, 0.6, 0.8, 1.000001])
     output: list[dict[str, float]] = []
     for index, (lower, upper) in enumerate(
-        zip(boundaries[:-1], boundaries[1:]), start=1
+        zip(ESS_BOUNDARIES[:-1], ESS_BOUNDARIES[1:]), start=1
     ):
         chunk = np.flatnonzero((ess_values >= lower) & (ess_values < upper))
         if len(chunk) == 0:
@@ -466,11 +572,23 @@ def bin_diagnostics(
         mse = np.asarray(
             [float(diagnostic_rows[i]["raw_gradient_mse"]) for i in chunk]
         )
+        ppo_mse = np.asarray(
+            [float(diagnostic_rows[i]["ppo_gradient_mse"]) for i in chunk]
+        )
+        mse_difference = np.asarray(
+            [float(diagnostic_rows[i]["raw_minus_ppo_mse"]) for i in chunk]
+        )
         raw_gain = np.asarray(
             [float(diagnostic_rows[i]["raw_relative_gain_pct"]) for i in chunk]
         )
         oracle_gain = np.asarray(
             [float(diagnostic_rows[i]["oracle_relative_gain_pct"]) for i in chunk]
+        )
+        ppo_gain = np.asarray(
+            [float(diagnostic_rows[i]["ppo_relative_gain_pct"]) for i in chunk]
+        )
+        gain_difference = np.asarray(
+            [float(diagnostic_rows[i]["ppo_minus_raw_gain_pct"]) for i in chunk]
         )
         output.append(
             {
@@ -482,14 +600,504 @@ def bin_diagnostics(
                 "median_normalized_ess": float(np.median(ess)),
                 "mean_raw_gradient_mse": float(np.mean(mse)),
                 "raw_gradient_mse_se": standard_error(mse),
+                "mean_ppo_gradient_mse": float(np.mean(ppo_mse)),
+                "ppo_gradient_mse_se": standard_error(ppo_mse),
+                "mean_raw_minus_ppo_mse": float(np.mean(mse_difference)),
+                "raw_minus_ppo_mse_se": standard_error(mse_difference),
                 "mean_raw_relative_gain_pct": float(np.mean(raw_gain)),
                 "raw_relative_gain_pct_se": standard_error(raw_gain),
                 "mean_oracle_relative_gain_pct": float(np.mean(oracle_gain)),
                 "oracle_relative_gain_pct_se": standard_error(oracle_gain),
+                "mean_ppo_relative_gain_pct": float(np.mean(ppo_gain)),
+                "ppo_relative_gain_pct_se": standard_error(ppo_gain),
+                "mean_ppo_minus_raw_gain_pct": float(
+                    np.mean(gain_difference)
+                ),
+                "ppo_minus_raw_gain_pct_se": standard_error(gain_difference),
                 "observations": float(len(chunk)),
             }
         )
     return output
+
+
+def select_crossover_checkpoints(
+    checkpoints: list[dict[str, object]],
+    config: Config,
+) -> list[dict[str, object]]:
+    """Select a fixed number of policy states from each population-ESS bin."""
+    rng = np.random.default_rng(config.seed + 99173)
+    selected: list[dict[str, object]] = []
+    for bin_index, (lower, upper) in enumerate(
+        zip(ESS_BOUNDARIES[:-1], ESS_BOUNDARIES[1:]), start=1
+    ):
+        candidates = [
+            checkpoint
+            for checkpoint in checkpoints
+            if lower
+            <= float(checkpoint["population_sequence_ess"])
+            < upper
+        ]
+        if not candidates:
+            continue
+        count = min(config.crossover_checkpoints_per_bin, len(candidates))
+        indices = rng.choice(len(candidates), size=count, replace=False)
+        for index in np.sort(indices):
+            checkpoint = dict(candidates[int(index)])
+            checkpoint["selection_bin"] = bin_index
+            selected.append(checkpoint)
+    return selected
+
+
+def run_crossover_diagnostics(
+    checkpoints: list[dict[str, object]],
+    features: np.ndarray,
+    codes: np.ndarray,
+    config: Config,
+) -> list[dict[str, float]]:
+    """Estimate raw and PPO-masked MSE at frozen policy checkpoints."""
+    rng = np.random.default_rng(config.seed + 271828)
+    rows: list[dict[str, float]] = []
+    for checkpoint_id, checkpoint in enumerate(checkpoints, start=1):
+        weights = np.asarray(checkpoint["weights"])
+        rollout_weights = np.asarray(checkpoint["rollout_weights"])
+        value_before, true_gradient = population_value_and_gradient(
+            weights,
+            features,
+            codes,
+        )
+        for draw_index in range(1, config.crossover_draws_per_checkpoint + 1):
+            raw_gradients: list[np.ndarray] = []
+            masked_gradients: list[np.ndarray] = []
+            ratio_batches: list[np.ndarray] = []
+            for _ in range(config.crossover_minibatches_per_draw):
+                random_draw = make_minibatch_randomness(
+                    rng,
+                    len(features),
+                    config,
+                )
+                rollout = collect_rollout(
+                    rollout_weights,
+                    features,
+                    codes,
+                    random_draw,
+                )
+                group_indices = rollout["prompt_order"]
+                raw_gradient, masked_gradient, _, ratios = minibatch_gradients(
+                    weights,
+                    rollout,
+                    group_indices,
+                    config,
+                )
+                raw_gradients.append(raw_gradient)
+                masked_gradients.append(masked_gradient)
+                ratio_batches.append(ratios)
+            multipliers = sorted(
+                {1, config.crossover_minibatches_per_draw}
+            )
+            for minibatches_per_estimator in multipliers:
+                raw_gradient = np.mean(
+                    np.stack(raw_gradients[:minibatches_per_estimator]),
+                    axis=0,
+                )
+                masked_gradient = np.mean(
+                    np.stack(masked_gradients[:minibatches_per_estimator]),
+                    axis=0,
+                )
+                all_ratios = np.concatenate(
+                    ratio_batches[:minibatches_per_estimator]
+                )
+                sample_ess = float(
+                    np.sum(all_ratios) ** 2
+                    / (len(all_ratios) * np.sum(all_ratios**2))
+                )
+                raw_value = population_value(
+                    weights + config.policy_learning_rate * raw_gradient,
+                    features,
+                    codes,
+                )
+                ppo_value = population_value(
+                    weights + config.policy_learning_rate * masked_gradient,
+                    features,
+                    codes,
+                )
+                raw_mse = float(
+                    np.sum((raw_gradient - true_gradient) ** 2)
+                )
+                ppo_mse = float(
+                    np.sum((masked_gradient - true_gradient) ** 2)
+                )
+                raw_gain = float(
+                    100.0 * (raw_value - value_before) / value_before
+                )
+                ppo_gain = float(
+                    100.0 * (ppo_value - value_before) / value_before
+                )
+                rows.append(
+                    {
+                        "checkpoint_id": float(checkpoint_id),
+                        "replication": float(checkpoint["replication"]),
+                        "rollout_batch": float(checkpoint["rollout_batch"]),
+                        "minibatch": float(checkpoint["minibatch"]),
+                        "selection_bin": float(checkpoint["selection_bin"]),
+                        "draw": float(draw_index),
+                        "minibatches_per_estimator": float(
+                            minibatches_per_estimator
+                        ),
+                        "population_sequence_ess": float(
+                            checkpoint["population_sequence_ess"]
+                        ),
+                        "training_sample_ess": float(
+                            checkpoint["observed_normalized_ess"]
+                        ),
+                        "diagnostic_sample_ess": sample_ess,
+                        "effective_sequences": sample_ess * len(all_ratios),
+                        "sequences_per_diagnostic": float(len(all_ratios)),
+                        "raw_gradient_squared_error": raw_mse,
+                        "ppo_gradient_squared_error": ppo_mse,
+                        "raw_minus_ppo_squared_error": raw_mse - ppo_mse,
+                        "raw_relative_gain_pct": raw_gain,
+                        "ppo_relative_gain_pct": ppo_gain,
+                        "ppo_minus_raw_gain_pct": ppo_gain - raw_gain,
+                    }
+                )
+    return rows
+
+
+def aggregate_crossover_checkpoints(
+    diagnostic_rows: list[dict[str, float | str]],
+) -> list[dict[str, float]]:
+    """Average independent diagnostic redraws within each fixed checkpoint."""
+    groups = sorted(
+        {
+            (
+                int(float(row["checkpoint_id"])),
+                int(float(row["minibatches_per_estimator"])),
+            )
+            for row in diagnostic_rows
+        }
+    )
+    output: list[dict[str, float]] = []
+    for checkpoint_id, minibatches_per_estimator in groups:
+        chunk = [
+            row
+            for row in diagnostic_rows
+            if int(float(row["checkpoint_id"])) == checkpoint_id
+            and int(float(row["minibatches_per_estimator"]))
+            == minibatches_per_estimator
+        ]
+        first = chunk[0]
+
+        def values(key: str) -> np.ndarray:
+            return np.asarray([float(row[key]) for row in chunk])
+
+        output.append(
+            {
+                "checkpoint_id": float(checkpoint_id),
+                "replication": float(first["replication"]),
+                "rollout_batch": float(first["rollout_batch"]),
+                "minibatch": float(first["minibatch"]),
+                "selection_bin": float(first["selection_bin"]),
+                "minibatches_per_estimator": float(
+                    minibatches_per_estimator
+                ),
+                "sequences_per_diagnostic": float(
+                    first["sequences_per_diagnostic"]
+                ),
+                "population_sequence_ess": float(
+                    first["population_sequence_ess"]
+                ),
+                "training_sample_ess": float(first["training_sample_ess"]),
+                "mean_diagnostic_sample_ess": float(
+                    np.mean(values("diagnostic_sample_ess"))
+                ),
+                "raw_gradient_mse": float(
+                    np.mean(values("raw_gradient_squared_error"))
+                ),
+                "ppo_gradient_mse": float(
+                    np.mean(values("ppo_gradient_squared_error"))
+                ),
+                "raw_minus_ppo_mse": float(
+                    np.mean(values("raw_minus_ppo_squared_error"))
+                ),
+                "ppo_mse_reduction_pct": float(
+                    100.0
+                    * np.mean(values("raw_minus_ppo_squared_error"))
+                    / np.mean(values("raw_gradient_squared_error"))
+                ),
+                "raw_relative_gain_pct": float(
+                    np.mean(values("raw_relative_gain_pct"))
+                ),
+                "ppo_relative_gain_pct": float(
+                    np.mean(values("ppo_relative_gain_pct"))
+                ),
+                "ppo_minus_raw_gain_pct": float(
+                    np.mean(values("ppo_minus_raw_gain_pct"))
+                ),
+                "diagnostic_draws": float(len(chunk)),
+            }
+        )
+    return output
+
+
+def bin_crossover_checkpoints(
+    checkpoint_rows: list[dict[str, float | str]],
+) -> list[dict[str, float]]:
+    """Aggregate fixed-checkpoint MSE estimates in prespecified ESS bins."""
+    output: list[dict[str, float]] = []
+    multipliers = sorted(
+        {
+            int(float(row["minibatches_per_estimator"]))
+            for row in checkpoint_rows
+        }
+    )
+    for minibatches_per_estimator in multipliers:
+        matching_rows = [
+            row
+            for row in checkpoint_rows
+            if int(float(row["minibatches_per_estimator"]))
+            == minibatches_per_estimator
+        ]
+        for bin_index, (lower, upper) in enumerate(
+            zip(ESS_BOUNDARIES[:-1], ESS_BOUNDARIES[1:]), start=1
+        ):
+            chunk = [
+                row
+                for row in matching_rows
+                if lower <= float(row["population_sequence_ess"]) < upper
+            ]
+            if not chunk:
+                continue
+
+            def values(key: str) -> np.ndarray:
+                return np.asarray([float(row[key]) for row in chunk])
+
+            population_ess = values("population_sequence_ess")
+            raw_mse = values("raw_gradient_mse")
+            ppo_mse = values("ppo_gradient_mse")
+            mse_difference = values("raw_minus_ppo_mse")
+            relative_mse_reduction = values("ppo_mse_reduction_pct")
+            raw_gain = values("raw_relative_gain_pct")
+            ppo_gain = values("ppo_relative_gain_pct")
+            gain_difference = values("ppo_minus_raw_gain_pct")
+            output.append(
+                {
+                    "minibatches_per_estimator": float(
+                        minibatches_per_estimator
+                    ),
+                    "sequences_per_diagnostic": float(
+                        chunk[0]["sequences_per_diagnostic"]
+                    ),
+                    "ess_bin": float(bin_index),
+                    "ess_bin_lower": float(lower),
+                    "ess_bin_upper": float(upper),
+                    "median_population_sequence_ess": float(
+                        np.median(population_ess)
+                    ),
+                    "mean_raw_gradient_mse": float(np.mean(raw_mse)),
+                    "raw_gradient_mse_se": standard_error(raw_mse),
+                    "mean_ppo_gradient_mse": float(np.mean(ppo_mse)),
+                    "ppo_gradient_mse_se": standard_error(ppo_mse),
+                    "mean_raw_minus_ppo_mse": float(
+                        np.mean(mse_difference)
+                    ),
+                    "raw_minus_ppo_mse_se": standard_error(mse_difference),
+                    "mean_ppo_mse_reduction_pct": float(
+                        np.mean(relative_mse_reduction)
+                    ),
+                    "ppo_mse_reduction_pct_se": standard_error(
+                        relative_mse_reduction
+                    ),
+                    "mean_raw_relative_gain_pct": float(np.mean(raw_gain)),
+                    "raw_relative_gain_pct_se": standard_error(raw_gain),
+                    "mean_ppo_relative_gain_pct": float(np.mean(ppo_gain)),
+                    "ppo_relative_gain_pct_se": standard_error(ppo_gain),
+                    "mean_ppo_minus_raw_gain_pct": float(
+                        np.mean(gain_difference)
+                    ),
+                    "ppo_minus_raw_gain_pct_se": standard_error(
+                        gain_difference
+                    ),
+                    "checkpoints": float(len(chunk)),
+                    "diagnostic_draws": float(
+                        np.sum(values("diagnostic_draws"))
+                    ),
+                }
+            )
+    return output
+
+
+def make_crossover_figure(
+    crossover_bins: list[dict[str, float | str]],
+    output_base: Path,
+) -> None:
+    """Render the fixed-checkpoint estimator-crossover diagnostic."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import LogLocator, NullFormatter
+
+    plt.rcParams.update(
+        {
+            "font.family": "serif",
+            "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+            "font.size": 7.5,
+            "axes.titlesize": 8.5,
+            "axes.titleweight": "bold",
+            "axes.labelsize": 8,
+            "xtick.labelsize": 7,
+            "ytick.labelsize": 7,
+            "legend.fontsize": 7,
+            "legend.frameon": False,
+            "axes.linewidth": 0.7,
+            "lines.linewidth": 1.5,
+            "lines.markersize": 4.0,
+            "xtick.major.width": 0.7,
+            "ytick.major.width": 0.7,
+            "axes.grid": True,
+            "grid.alpha": 0.16,
+            "grid.linewidth": 0.45,
+            "grid.linestyle": "-",
+            "figure.dpi": 150,
+            "savefig.dpi": 300,
+            "savefig.bbox": "tight",
+            "savefig.pad_inches": 0.03,
+        }
+    )
+
+    figure, axes = plt.subplots(1, 2, figsize=(6.5, 2.2))
+    blue = "#0072B2"
+    vermillion = "#D55E00"
+    gray = "#6F6F6F"
+    light_gray = "#9A9A9A"
+    multipliers = sorted(
+        {
+            int(float(row["minibatches_per_estimator"]))
+            for row in crossover_bins
+        }
+    )
+    if len(multipliers) != 2:
+        raise ValueError("Crossover figure requires two diagnostic batch sizes")
+    all_x = np.asarray(
+        [float(row["median_population_sequence_ess"]) for row in crossover_bins]
+    )
+    x_lower = max(1e-4, float(np.min(all_x)) * 0.72)
+    pooled_multiplier = max(multipliers)
+    pooled_rows = [
+        row
+        for row in crossover_bins
+        if int(float(row["minibatches_per_estimator"])) == pooled_multiplier
+    ]
+    pooled_x = np.asarray(
+        [float(row["median_population_sequence_ess"]) for row in pooled_rows]
+    )
+    for key, error_key, label, color, marker, linestyle in (
+        (
+            "mean_raw_gradient_mse",
+            "raw_gradient_mse_se",
+            "Permissive",
+            blue,
+            "o",
+            "-",
+        ),
+        (
+            "mean_ppo_gradient_mse",
+            "ppo_gradient_mse_se",
+            "PPO masked",
+            gray,
+            "s",
+            "--",
+        ),
+    ):
+        axes[0].errorbar(
+            pooled_x,
+            np.asarray([float(row[key]) for row in pooled_rows]),
+            yerr=np.asarray([float(row[error_key]) for row in pooled_rows]),
+            marker=marker,
+            linestyle=linestyle,
+            color=color,
+            capsize=1.8,
+            elinewidth=0.9,
+            markeredgecolor="white",
+            markeredgewidth=0.45,
+            label=label,
+            zorder=3,
+        )
+    pooled_sequences = int(
+        float(pooled_rows[0]["sequences_per_diagnostic"])
+    )
+    axes[0].set_yscale("log")
+    axes[0].yaxis.set_minor_formatter(NullFormatter())
+    axes[0].set_ylabel("Gradient MSE")
+    axes[0].set_title(
+        f"(a) Raw versus PPO, $N={pooled_sequences}$",
+        loc="left",
+        pad=5,
+    )
+    axes[0].legend(loc="best", handlelength=2.0)
+
+    reduction_styles = {
+        min(multipliers): (gray, "--", "s"),
+        max(multipliers): (vermillion, "-", "D"),
+    }
+    for multiplier in multipliers:
+        rows = [
+            row
+            for row in crossover_bins
+            if int(float(row["minibatches_per_estimator"])) == multiplier
+        ]
+        x = np.asarray(
+            [float(row["median_population_sequence_ess"]) for row in rows]
+        )
+        sequences = int(float(rows[0]["sequences_per_diagnostic"]))
+        color, linestyle, marker = reduction_styles[multiplier]
+        axes[1].errorbar(
+            x,
+            np.asarray(
+                [float(row["mean_ppo_mse_reduction_pct"]) for row in rows]
+            ),
+            yerr=np.asarray(
+                [float(row["ppo_mse_reduction_pct_se"]) for row in rows]
+            ),
+            marker=marker,
+            linestyle=linestyle,
+            color=color,
+            capsize=1.8,
+            elinewidth=0.9,
+            markeredgecolor="white",
+            markeredgewidth=0.45,
+            label=f"$N={sequences}$",
+            zorder=3,
+        )
+    axes[1].axhline(0.0, color=light_gray, linewidth=0.7)
+    axes[1].set_ylabel("PPO MSE reduction (%)")
+    axes[1].set_title("(b) Batch size shifts crossover", loc="left", pad=5)
+    axes[1].legend(loc="best", handlelength=2.0)
+
+    for axis in axes:
+        axis.set_xscale("log")
+        axis.set_xlim(x_lower, 1.05)
+        axis.xaxis.set_major_locator(LogLocator(base=10, numticks=4))
+        axis.xaxis.set_minor_formatter(NullFormatter())
+        axis.set_xlabel("Population normalized ESS")
+
+    for axis in axes:
+        axis.spines["top"].set_visible(False)
+        axis.spines["right"].set_visible(False)
+        axis.grid(axis="y")
+        axis.grid(axis="x", visible=False)
+        axis.tick_params(axis="both", which="major", pad=2)
+    figure.subplots_adjust(
+        left=0.085,
+        right=0.995,
+        bottom=0.205,
+        top=0.89,
+        wspace=0.34,
+    )
+    output_base.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output_base.with_suffix(".pdf"))
+    figure.savefig(output_base.with_suffix(".png"), dpi=300)
+    plt.close(figure)
 
 
 def make_figure(
@@ -736,6 +1344,7 @@ def run(config: Config, skip_figure: bool = False) -> None:
         method: [] for method in METHODS
     }
     diagnostics: list[dict[str, float | str]] = []
+    diagnostic_checkpoints: list[dict[str, object]] = []
 
     master_rng = np.random.default_rng(config.seed)
     for replication in range(config.replications):
@@ -750,7 +1359,7 @@ def run(config: Config, skip_figure: bool = False) -> None:
                 method == "ESS gated"
                 and replication < config.diagnostic_replications
             )
-            values, diagnostic_rows, metadata = simulate_method(
+            values, diagnostic_rows, metadata, checkpoint_rows = simulate_method(
                 method,
                 initial_weights,
                 features,
@@ -763,15 +1372,39 @@ def run(config: Config, skip_figure: bool = False) -> None:
             values_by_method[method].append(values)
             metadata_by_method[method].append(metadata)
             diagnostics.extend(diagnostic_rows)
+            diagnostic_checkpoints.extend(checkpoint_rows)
 
     path_rows = aggregate_paths(values_by_method)
     summary_rows = summarize_runs(values_by_method, metadata_by_method, config)
     diagnostic_bins = bin_diagnostics(diagnostics)
+    selected_checkpoints = select_crossover_checkpoints(
+        diagnostic_checkpoints,
+        config,
+    )
+    crossover_diagnostics = run_crossover_diagnostics(
+        selected_checkpoints,
+        features,
+        codes,
+        config,
+    )
+    crossover_checkpoints = aggregate_crossover_checkpoints(
+        crossover_diagnostics
+    )
+    crossover_bins = bin_crossover_checkpoints(crossover_checkpoints)
     results = root / "simulation" / "results"
     write_csv(results / "rlvr_training_paths.csv", path_rows)
     write_csv(results / "rlvr_summary.csv", summary_rows)
     write_csv(results / "rlvr_minibatch_diagnostics.csv", diagnostics)
     write_csv(results / "rlvr_diagnostic_bins.csv", diagnostic_bins)
+    write_csv(
+        results / "rlvr_crossover_diagnostics.csv",
+        crossover_diagnostics,
+    )
+    write_csv(
+        results / "rlvr_crossover_checkpoints.csv",
+        crossover_checkpoints,
+    )
+    write_csv(results / "rlvr_crossover_bins.csv", crossover_bins)
     if not skip_figure:
         make_figure(
             diagnostic_bins,
@@ -779,6 +1412,10 @@ def run(config: Config, skip_figure: bool = False) -> None:
             config.ess_threshold,
             root / "figures" / "ess_policy_validation",
             config.prompts_per_rollout * config.responses_per_prompt,
+        )
+        make_crossover_figure(
+            crossover_bins,
+            root / "figures" / "ess_estimator_crossover",
         )
 
     print(f"Initial exact population reward: {initial_value:.6f}")
@@ -794,12 +1431,20 @@ def run(config: Config, skip_figure: bool = False) -> None:
         f"raw={float(gate['mean_gate_raw_updates']):.2f}, "
         f"masked={float(gate['mean_gate_masked_updates']):.2f}"
     )
+    print(
+        "Fixed-checkpoint crossover diagnostic: "
+        f"{len(selected_checkpoints)} checkpoints, "
+        f"{config.crossover_draws_per_checkpoint} paired redraws per checkpoint"
+    )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--replications", type=int, default=100)
     parser.add_argument("--diagnostic-replications", type=int, default=20)
+    parser.add_argument("--crossover-checkpoints-per-bin", type=int, default=8)
+    parser.add_argument("--crossover-draws-per-checkpoint", type=int, default=32)
+    parser.add_argument("--crossover-minibatches-per-draw", type=int, default=4)
     parser.add_argument("--rollout-steps", type=int, default=8)
     parser.add_argument("--policy-learning-rate", type=float, default=3.0)
     parser.add_argument("--response-tokens", type=int, default=16)
@@ -813,6 +1458,15 @@ if __name__ == "__main__":
             diagnostic_replications=min(
                 arguments.diagnostic_replications,
                 arguments.replications,
+            ),
+            crossover_checkpoints_per_bin=(
+                arguments.crossover_checkpoints_per_bin
+            ),
+            crossover_draws_per_checkpoint=(
+                arguments.crossover_draws_per_checkpoint
+            ),
+            crossover_minibatches_per_draw=(
+                arguments.crossover_minibatches_per_draw
             ),
             rollout_steps=arguments.rollout_steps,
             policy_learning_rate=arguments.policy_learning_rate,
