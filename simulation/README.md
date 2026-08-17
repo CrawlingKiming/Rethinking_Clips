@@ -37,12 +37,23 @@ resulting rule.  The main adaptive regime is selected from the fit states only:
 `N = 512` is the sole candidate whose fitted threshold selects both raw and PPO
 updates.  The final paired optimization study then fixes this threshold and uses
 512 sequences per update, four epochs per rollout, and eight rollout batches.
+Along the fixed-0.1 trajectory, the script also evaluates shadow raw and
+PPO-masked gradients whenever sample ESS is below the fitted 0.417 boundary.
+These gradients do not alter training.  They test whether the observable
+0.1 event satisfies the conditional MSE premise of the gate guarantee.
 
 Run from the repository root:
 
 ```powershell
 python -m pip install -r simulation/requirements.txt
 python simulation/ess_policy_optimization.py --replications 100
+```
+
+To reuse the saved calibration study and rerun only the 100-replication
+N = 512 optimization and its on-trajectory diagnostic:
+
+```powershell
+python simulation/ess_policy_optimization.py --replications 100 --scaled-only
 ```
 
 The script downloads the official UCI Optdigits archive only when the local
@@ -64,6 +75,9 @@ Outputs:
 - `simulation/results/rlvr_formula_oracle_summary.csv`
 - `simulation/results/rlvr_n512_optimization_paths.csv`
 - `simulation/results/rlvr_n512_optimization_summary.csv`
+- `simulation/results/rlvr_n512_on_trajectory_diagnostics.csv`
+- `simulation/results/rlvr_n512_on_trajectory_bins.csv`
+- `simulation/results/rlvr_n512_on_trajectory_gate_summary.csv`
 - `figures/ess_policy_validation.pdf`
 - `figures/ess_policy_validation.png`
 - `figures/ess_estimator_crossover.pdf`
@@ -83,7 +97,10 @@ initial population reward.
 the always-PPO cases at `N = 128` and `N = 256` and the always-raw case at
 `N = 1024`.  `rlvr_formula_oracle_summary.csv` contains the held-out gradient
 risk comparison.  The two `rlvr_n512_optimization` files contain the trajectory
-and final summary for the four-epoch adaptive-rule test.
+and final summary for the four-epoch adaptive-rule test.  The three
+`rlvr_n512_on_trajectory` files contain every shadow comparison, the
+sample-ESS-bin summary used in Figure 3(c), and counterfactual summaries for
+the three fixed gates.
 
 References:
 

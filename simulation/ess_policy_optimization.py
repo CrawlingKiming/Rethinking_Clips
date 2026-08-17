@@ -366,6 +366,9 @@ def simulate_method(
     config: Config,
     replication: int,
     collect_diagnostics: bool,
+    diagnostic_ess_ceiling: float | None = None,
+    collect_population_ess: bool = True,
+    collect_checkpoints: bool = True,
 ) -> tuple[
     np.ndarray,
     list[dict[str, float]],
@@ -409,13 +412,17 @@ def simulate_method(
             )
             all_ess.append(normalized_ess)
 
-            if collect_diagnostics:
+            should_collect = collect_diagnostics and (
+                diagnostic_ess_ceiling is None
+                or normalized_ess < diagnostic_ess_ceiling
+            )
+            if should_collect:
                 value_before, true_gradient = population_value_and_gradient(
                     weights,
                     features,
                     codes,
                 )
-                raw_value, _ = population_value_and_gradient(
+                raw_value = population_value(
                     weights + config.policy_learning_rate * raw_gradient,
                     features,
                     codes,
@@ -425,15 +432,23 @@ def simulate_method(
                     features,
                     codes,
                 )
-                oracle_value, _ = population_value_and_gradient(
-                    weights + config.policy_learning_rate * true_gradient,
-                    features,
-                    codes,
+                oracle_value = (
+                    population_value(
+                        weights + config.policy_learning_rate * true_gradient,
+                        features,
+                        codes,
+                    )
+                    if collect_checkpoints
+                    else float("nan")
                 )
-                exact_ess = population_sequence_ess(
-                    weights,
-                    rollout_weights,
-                    features,
+                exact_ess = (
+                    population_sequence_ess(
+                        weights,
+                        rollout_weights,
+                        features,
+                    )
+                    if collect_population_ess
+                    else float("nan")
                 )
                 diagnostic_rows.append(
                     {
@@ -469,17 +484,18 @@ def simulate_method(
                         ),
                     }
                 )
-                diagnostic_checkpoints.append(
-                    {
-                        "replication": replication,
-                        "rollout_batch": rollout_index,
-                        "minibatch": minibatch_index,
-                        "observed_normalized_ess": normalized_ess,
-                        "population_sequence_ess": exact_ess,
-                        "weights": weights.copy(),
-                        "rollout_weights": rollout_weights.copy(),
-                    }
-                )
+                if collect_checkpoints:
+                    diagnostic_checkpoints.append(
+                        {
+                            "replication": replication,
+                            "rollout_batch": rollout_index,
+                            "minibatch": minibatch_index,
+                            "observed_normalized_ess": normalized_ess,
+                            "population_sequence_ess": exact_ess,
+                            "weights": weights.copy(),
+                            "rollout_weights": rollout_weights.copy(),
+                        }
+                    )
 
             if method == "Raw":
                 selected_gradient = raw_gradient
@@ -514,6 +530,11 @@ def write_csv(path: Path, rows: list[dict[str, float | str]]) -> None:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
+
+
+def read_csv(path: Path) -> list[dict[str, float | str]]:
+    with path.open(newline="", encoding="utf-8") as handle:
+        return [dict(row) for row in csv.DictReader(handle)]
 
 
 def aggregate_paths(
@@ -560,18 +581,52 @@ def summarize_runs(
         ) / initial_values
         gate_minus_raw = final_values[method] - final_values["Raw"]
         gate_minus_ppo = final_values[method] - final_values["PPO masked"]
+        fitted_difference = (
+            final_values[method] - final_values["ESS fitted"]
+            if "ESS fitted" in final_values
+            else None
+        )
+        ordered_final = np.sort(final_values[method])
+        tail_count = max(1, int(math.ceil(0.1 * len(ordered_final))))
         metadata = metadata_by_method[method]
         rows.append(
             {
                 "method": method,
                 "final_population_reward": float(np.mean(final_values[method])),
                 "final_population_reward_se": standard_error(final_values[method]),
+                "median_final_population_reward": float(
+                    np.median(final_values[method])
+                ),
+                "p10_final_population_reward": float(
+                    np.quantile(final_values[method], 0.1)
+                ),
+                "lower_tail_mean_final_population_reward": float(
+                    np.mean(ordered_final[:tail_count])
+                ),
                 "final_relative_improvement_pct": float(np.mean(relative)),
                 "final_relative_improvement_pct_se": standard_error(relative),
                 "paired_difference_from_raw": float(np.mean(gate_minus_raw)),
                 "paired_difference_from_raw_se": standard_error(gate_minus_raw),
+                "paired_win_rate_vs_raw_pct": float(
+                    100.0 * np.mean(gate_minus_raw > 0.0)
+                ),
                 "paired_difference_from_ppo": float(np.mean(gate_minus_ppo)),
                 "paired_difference_from_ppo_se": standard_error(gate_minus_ppo),
+                "paired_difference_from_fitted": (
+                    ""
+                    if fitted_difference is None
+                    else float(np.mean(fitted_difference))
+                ),
+                "paired_difference_from_fitted_se": (
+                    ""
+                    if fitted_difference is None
+                    else standard_error(fitted_difference)
+                ),
+                "paired_win_rate_vs_fitted_pct": (
+                    ""
+                    if fitted_difference is None
+                    else float(100.0 * np.mean(fitted_difference > 0.0))
+                ),
                 "mean_gate_raw_updates": float(
                     np.mean([row["gate_raw_updates"] for row in metadata])
                 ),
@@ -605,7 +660,13 @@ def run_scaled_batch_optimization(
     codes: np.ndarray,
     threshold_rows: list[dict[str, float | str]],
     config: Config,
-) -> tuple[list[dict[str, float | str]], list[dict[str, float | str]]]:
+) -> tuple[
+    list[dict[str, float | str]],
+    list[dict[str, float | str]],
+    list[dict[str, float | str]],
+    list[dict[str, float | str]],
+    list[dict[str, float | str]],
+]:
     """Run a paired optimization study with 512 sequences per update."""
     threshold_row = next(
         row
@@ -634,6 +695,12 @@ def run_scaled_batch_optimization(
     metadata_by_method: dict[str, list[dict[str, float]]] = {
         method: [] for method in methods
     }
+    on_trajectory_diagnostics: list[dict[str, float | str]] = []
+    diagnostic_ceiling = max(
+        float(threshold)
+        for threshold in method_thresholds.values()
+        if threshold is not None
+    )
     master_rng = np.random.default_rng(config.seed + 424242)
     for replication in range(config.replications):
         replication_seed = int(master_rng.integers(0, np.iinfo(np.int32).max))
@@ -655,7 +722,8 @@ def run_scaled_batch_optimization(
                     scaled_config,
                     ess_threshold=float(threshold),
                 )
-            values, _, metadata, _ = simulate_method(
+            collect_diagnostics = method == "ESS fixed 0.1"
+            values, diagnostic_rows, metadata, _ = simulate_method(
                 simulation_method,
                 initial_weights,
                 features,
@@ -663,10 +731,16 @@ def run_scaled_batch_optimization(
                 random_draws,
                 method_config,
                 replication,
-                False,
+                collect_diagnostics,
+                diagnostic_ess_ceiling=diagnostic_ceiling,
+                collect_population_ess=False,
+                collect_checkpoints=False,
             )
             values_by_method[method].append(values)
             metadata_by_method[method].append(metadata)
+            for row in diagnostic_rows:
+                row["trajectory_method"] = method
+            on_trajectory_diagnostics.extend(diagnostic_rows)
 
     path_rows = aggregate_paths(values_by_method, methods)
     summary_rows = summarize_runs(
@@ -689,7 +763,238 @@ def run_scaled_batch_optimization(
             scaled_config.prompts_per_rollout
             * scaled_config.responses_per_prompt
         )
-    return path_rows, summary_rows
+    on_trajectory_bins, on_trajectory_gate_summary = (
+        aggregate_on_trajectory_gate_diagnostics(
+            on_trajectory_diagnostics,
+            {
+                method: float(threshold)
+                for method, threshold in method_thresholds.items()
+                if threshold is not None
+            },
+            total_updates=(
+                scaled_config.rollout_steps
+                * scaled_config.minibatches_per_rollout
+                * scaled_config.optimization_epochs
+            ),
+        )
+    )
+    return (
+        path_rows,
+        summary_rows,
+        on_trajectory_diagnostics,
+        on_trajectory_bins,
+        on_trajectory_gate_summary,
+    )
+
+
+def aggregate_on_trajectory_gate_diagnostics(
+    rows: list[dict[str, float | str]],
+    thresholds: dict[str, float],
+    total_updates: int,
+) -> tuple[
+    list[dict[str, float | str]],
+    list[dict[str, float | str]],
+]:
+    """Summarize shadow raw-versus-PPO decisions on the fixed-0.1 trajectory."""
+    if not rows:
+        raise ValueError("No on-trajectory diagnostics were collected")
+    replications = sorted({int(float(row["replication"])) for row in rows})
+    boundaries = sorted({0.0, *thresholds.values()})
+    bin_rows: list[dict[str, float | str]] = []
+    for lower, upper in zip(boundaries[:-1], boundaries[1:]):
+        per_replication: list[dict[str, float]] = []
+        for replication in replications:
+            chunk = [
+                row
+                for row in rows
+                if int(float(row["replication"])) == replication
+                and lower <= float(row["normalized_ess"]) < upper
+            ]
+            if not chunk:
+                continue
+            raw_mse = np.asarray(
+                [float(row["raw_gradient_mse"]) for row in chunk]
+            )
+            ppo_mse = np.asarray(
+                [float(row["ppo_gradient_mse"]) for row in chunk]
+            )
+            ppo_reward_advantage = np.asarray(
+                [float(row["ppo_minus_raw_gain_pct"]) for row in chunk]
+            )
+            raw_total = float(np.sum(raw_mse))
+            mse_reduction = (
+                100.0 * (raw_total - float(np.sum(ppo_mse))) / raw_total
+                if raw_total > 0.0
+                else 0.0
+            )
+            per_replication.append(
+                {
+                    "updates": float(len(chunk)),
+                    "mean_raw_mse": float(np.mean(raw_mse)),
+                    "mean_ppo_mse": float(np.mean(ppo_mse)),
+                    "ppo_mse_reduction_pct": mse_reduction,
+                    "ppo_minus_raw_gain_pct": float(
+                        np.mean(ppo_reward_advantage)
+                    ),
+                    "ppo_mse_win_rate_pct": float(
+                        100.0 * np.mean(ppo_mse < raw_mse)
+                    ),
+                    "ppo_reward_win_rate_pct": float(
+                        100.0 * np.mean(ppo_reward_advantage > 0.0)
+                    ),
+                }
+            )
+
+        def values(key: str) -> np.ndarray:
+            return np.asarray([row[key] for row in per_replication])
+
+        bin_rows.append(
+            {
+                "ess_bin_lower": lower,
+                "ess_bin_upper": upper,
+                "ess_bin_label": f"[{lower:.3f},{upper:.3f})",
+                "mean_updates_per_replication": float(
+                    np.mean(values("updates"))
+                ),
+                "updates_per_replication_se": standard_error(values("updates")),
+                "mean_raw_gradient_mse": float(
+                    np.mean(values("mean_raw_mse"))
+                ),
+                "raw_gradient_mse_se": standard_error(values("mean_raw_mse")),
+                "mean_ppo_gradient_mse": float(
+                    np.mean(values("mean_ppo_mse"))
+                ),
+                "ppo_gradient_mse_se": standard_error(values("mean_ppo_mse")),
+                "ppo_mse_reduction_pct": float(
+                    np.mean(values("ppo_mse_reduction_pct"))
+                ),
+                "ppo_mse_reduction_pct_se": standard_error(
+                    values("ppo_mse_reduction_pct")
+                ),
+                "ppo_minus_raw_gain_pct": float(
+                    np.mean(values("ppo_minus_raw_gain_pct"))
+                ),
+                "ppo_minus_raw_gain_pct_se": standard_error(
+                    values("ppo_minus_raw_gain_pct")
+                ),
+                "ppo_mse_win_rate_pct": float(
+                    np.mean(values("ppo_mse_win_rate_pct"))
+                ),
+                "ppo_mse_win_rate_pct_se": standard_error(
+                    values("ppo_mse_win_rate_pct")
+                ),
+                "ppo_reward_win_rate_pct": float(
+                    np.mean(values("ppo_reward_win_rate_pct"))
+                ),
+                "ppo_reward_win_rate_pct_se": standard_error(
+                    values("ppo_reward_win_rate_pct")
+                ),
+                "replications_with_updates": float(len(per_replication)),
+            }
+        )
+
+    gate_rows: list[dict[str, float | str]] = []
+    for method, threshold in thresholds.items():
+        per_replication = []
+        for replication in replications:
+            chunk = [
+                row
+                for row in rows
+                if int(float(row["replication"])) == replication
+            ]
+            raw_mse = np.asarray(
+                [float(row["raw_gradient_mse"]) for row in chunk]
+            )
+            ppo_mse = np.asarray(
+                [float(row["ppo_gradient_mse"]) for row in chunk]
+            )
+            ess = np.asarray([float(row["normalized_ess"]) for row in chunk])
+            ppo_selected = ess < threshold
+            selected_mse = np.where(ppo_selected, ppo_mse, raw_mse)
+            raw_gain = np.asarray(
+                [float(row["raw_relative_gain_pct"]) for row in chunk]
+            )
+            ppo_gain = np.asarray(
+                [float(row["ppo_relative_gain_pct"]) for row in chunk]
+            )
+            selected_gain = np.where(ppo_selected, ppo_gain, raw_gain)
+            raw_total = float(np.sum(raw_mse))
+            selected_count = int(np.sum(ppo_selected))
+            per_replication.append(
+                {
+                    "selected_updates": float(selected_count),
+                    "mse_reduction_vs_raw_pct": (
+                        100.0
+                        * (raw_total - float(np.sum(selected_mse)))
+                        / raw_total
+                        if raw_total > 0.0
+                        else 0.0
+                    ),
+                    "one_step_gain_advantage_vs_raw_pp": float(
+                        np.sum(selected_gain - raw_gain) / total_updates
+                    ),
+                    "selected_mse_win_rate_pct": (
+                        float(
+                            100.0
+                            * np.mean(ppo_mse[ppo_selected] < raw_mse[ppo_selected])
+                        )
+                        if selected_count
+                        else 0.0
+                    ),
+                    "selected_reward_win_rate_pct": (
+                        float(
+                            100.0
+                            * np.mean(ppo_gain[ppo_selected] > raw_gain[ppo_selected])
+                        )
+                        if selected_count
+                        else 0.0
+                    ),
+                }
+            )
+
+        def gate_values(key: str) -> np.ndarray:
+            return np.asarray([row[key] for row in per_replication])
+
+        gate_rows.append(
+            {
+                "method": method,
+                "sample_ess_threshold": threshold,
+                "mean_selected_updates": float(
+                    np.mean(gate_values("selected_updates"))
+                ),
+                "selected_updates_se": standard_error(
+                    gate_values("selected_updates")
+                ),
+                "mse_reduction_vs_raw_pct": float(
+                    np.mean(gate_values("mse_reduction_vs_raw_pct"))
+                ),
+                "mse_reduction_vs_raw_pct_se": standard_error(
+                    gate_values("mse_reduction_vs_raw_pct")
+                ),
+                "one_step_gain_advantage_vs_raw_pp": float(
+                    np.mean(gate_values("one_step_gain_advantage_vs_raw_pp"))
+                ),
+                "one_step_gain_advantage_vs_raw_pp_se": standard_error(
+                    gate_values("one_step_gain_advantage_vs_raw_pp")
+                ),
+                "selected_mse_win_rate_pct": float(
+                    np.mean(gate_values("selected_mse_win_rate_pct"))
+                ),
+                "selected_mse_win_rate_pct_se": standard_error(
+                    gate_values("selected_mse_win_rate_pct")
+                ),
+                "selected_reward_win_rate_pct": float(
+                    np.mean(gate_values("selected_reward_win_rate_pct"))
+                ),
+                "selected_reward_win_rate_pct_se": standard_error(
+                    gate_values("selected_reward_win_rate_pct")
+                ),
+                "replications": float(len(per_replication)),
+                "total_updates_per_replication": float(total_updates),
+                "trajectory_method": "ESS fixed 0.1",
+            }
+        )
+    return bin_rows, gate_rows
 
 
 def bin_diagnostics(
@@ -1683,8 +1988,9 @@ def make_crossover_figure(
 def make_formula_oracle_figure(
     component_rows: list[dict[str, float | str]],
     threshold_rows: list[dict[str, float | str]],
-    summary_rows: list[dict[str, float | str]],
+    _summary_rows: list[dict[str, float | str]],
     scaled_path_rows: list[dict[str, float | str]],
+    on_trajectory_bin_rows: list[dict[str, float | str]],
     output_base: Path,
 ) -> None:
     """Render the formula-oracle and N-dependent ESS-rule diagnostic."""
@@ -1800,9 +2106,6 @@ def make_formula_oracle_figure(
     sequence_counts = np.asarray(
         [float(row["sequences_per_estimator"]) for row in threshold_rows]
     )
-    informative_counts = np.asarray(
-        [128.0 * multiplier for multiplier in informative_multipliers]
-    )
     axes[1].plot(
         sequence_counts,
         [
@@ -1840,89 +2143,47 @@ def make_formula_oracle_figure(
     axes[1].set_title("(b) The boundary moves with $N$", loc="left", pad=5)
     axes[1].legend(loc="best", handlelength=2.0)
 
-    method_styles = {
-        "Formula oracle": ("#333333", "-", "P"),
-        "Fitted ESS": ("#0072B2", "--", "o"),
-        "Effective-count transfer": ("#009E73", "-.", "D"),
-        "Fixed ESS 0.1": ("#D55E00", ":", "s"),
-    }
-    if len(informative_counts) == 1:
-        short_labels = (
-            "Formula\nrule",
-            "Fitted\nESS",
-            "$N\\rho$\ntransfer",
-            "Fixed\n0.1",
+    on_trajectory_bin_rows = sorted(
+        on_trajectory_bin_rows,
+        key=lambda row: float(row["ess_bin_lower"]),
+    )
+    positions = np.arange(len(on_trajectory_bin_rows))
+    bars = axes[2].bar(
+        positions,
+        [float(row["ppo_mse_win_rate_pct"]) for row in on_trajectory_bin_rows],
+        yerr=[
+            float(row["ppo_mse_win_rate_pct_se"])
+            for row in on_trajectory_bin_rows
+        ],
+        color=("#D55E00", "#56B4E9", "#56B4E9"),
+        width=0.62,
+        capsize=2.0,
+        linewidth=0.0,
+        zorder=3,
+    )
+    axes[2].axhline(
+        50.0,
+        color="#6F6F6F",
+        linewidth=0.8,
+        linestyle="--",
+        label="No predictive value",
+    )
+    axes[2].set_xticks(positions)
+    axes[2].set_xticklabels(("$<0.1$", "$0.1$--$0.25$", "$0.25$--$0.42$"))
+    axes[2].set_xlabel("Sample normalized ESS")
+    axes[2].set_ylabel("Updates where PPO has lower MSE (%)")
+    axes[2].set_ylim(45.0, 100.0)
+    axes[2].set_title("(c) The 0.1 gate selects high-risk updates", loc="left", pad=5)
+    axes[2].legend(loc="lower left", handlelength=1.8)
+    for bar, row in zip(bars, on_trajectory_bin_rows):
+        axes[2].text(
+            bar.get_x() + bar.get_width() / 2.0,
+            min(98.5, bar.get_height() + 2.0),
+            f'{float(row["mean_updates_per_replication"]):.0f} updates',
+            ha="center",
+            va="bottom",
+            fontsize=6.5,
         )
-        methods = tuple(method_styles)
-        rows = [
-            next(
-                row
-                for row in summary_rows
-                if row["method"] == method
-                and int(float(row["blocks_per_estimator"]))
-                == informative_multipliers[0]
-            )
-            for method in methods
-        ]
-        positions = np.arange(len(methods))
-        axes[2].bar(
-            positions,
-            [float(row["mean_excess_mse_vs_best_static_pct"]) for row in rows],
-            yerr=[
-                float(row["excess_mse_vs_best_static_pct_se"])
-                for row in rows
-            ],
-            color=[method_styles[method][0] for method in methods],
-            width=0.68,
-            capsize=2.0,
-            linewidth=0.0,
-            zorder=3,
-        )
-        axes[2].set_xticks(positions)
-        axes[2].set_xticklabels(short_labels)
-        axes[2].set_xlabel(f"Decision rule at $N={int(informative_counts[0])}$")
-    else:
-        for method, (color, linestyle, marker) in method_styles.items():
-            rows = sorted(
-                [
-                    row
-                    for row in summary_rows
-                    if row["method"] == method
-                    and int(float(row["blocks_per_estimator"]))
-                    in informative_multipliers
-                ],
-                key=lambda row: float(row["sequences_per_estimator"]),
-            )
-            axes[2].errorbar(
-                [float(row["sequences_per_estimator"]) for row in rows],
-                [
-                    float(row["mean_excess_mse_vs_best_static_pct"])
-                    for row in rows
-                ],
-                yerr=[
-                    float(row["excess_mse_vs_best_static_pct_se"])
-                    for row in rows
-                ],
-                color=color,
-                linestyle=linestyle,
-                marker=marker,
-                capsize=1.6,
-                elinewidth=0.8,
-                markeredgecolor="white",
-                markeredgewidth=0.4,
-                label=method,
-                zorder=3,
-            )
-        axes[2].set_xscale("log", base=2)
-        axes[2].set_xticks(informative_counts)
-        axes[2].set_xticklabels(
-            [str(int(value)) for value in informative_counts]
-        )
-        axes[2].set_xlabel("Sequences per estimator $N$")
-        axes[2].legend(loc="best", handlelength=2.0)
-    axes[2].axhline(0.0, color="#8A8A8A", linewidth=0.7)
-    axes[2].set_ylabel("Excess MSE vs. best static (%)")
-    axes[2].set_title("(c) Held-out estimator risk", loc="left", pad=5)
 
     trajectory_styles = {
         "Raw": ("#0072B2", "--", "o", "Raw"),
@@ -2210,7 +2471,11 @@ def make_figure(
     plt.close(figure)
 
 
-def run(config: Config, skip_figure: bool = False) -> None:
+def run(
+    config: Config,
+    skip_figure: bool = False,
+    scaled_only: bool = False,
+) -> None:
     if config.replications > 100:
         raise ValueError("The simulation is limited to at most 100 replications")
     if config.prompts_per_rollout % config.minibatches_per_rollout != 0:
@@ -2227,6 +2492,67 @@ def run(config: Config, skip_figure: bool = False) -> None:
         features,
         codes,
     )
+    results = root / "simulation" / "results"
+
+    if scaled_only:
+        formula_components = read_csv(
+            results / "rlvr_formula_oracle_components.csv"
+        )
+        formula_thresholds = read_csv(
+            results / "rlvr_formula_oracle_thresholds.csv"
+        )
+        formula_summary = read_csv(
+            results / "rlvr_formula_oracle_summary.csv"
+        )
+        (
+            scaled_optimization_paths,
+            scaled_optimization_summary,
+            scaled_on_trajectory_diagnostics,
+            scaled_on_trajectory_bins,
+            scaled_on_trajectory_gate_summary,
+        ) = run_scaled_batch_optimization(
+            initial_weights,
+            features,
+            codes,
+            formula_thresholds,
+            config,
+        )
+        write_csv(
+            results / "rlvr_n512_optimization_paths.csv",
+            scaled_optimization_paths,
+        )
+        write_csv(
+            results / "rlvr_n512_optimization_summary.csv",
+            scaled_optimization_summary,
+        )
+        write_csv(
+            results / "rlvr_n512_on_trajectory_diagnostics.csv",
+            scaled_on_trajectory_diagnostics,
+        )
+        write_csv(
+            results / "rlvr_n512_on_trajectory_bins.csv",
+            scaled_on_trajectory_bins,
+        )
+        write_csv(
+            results / "rlvr_n512_on_trajectory_gate_summary.csv",
+            scaled_on_trajectory_gate_summary,
+        )
+        if not skip_figure:
+            make_formula_oracle_figure(
+                formula_components,
+                formula_thresholds,
+                formula_summary,
+                scaled_optimization_paths,
+                scaled_on_trajectory_bins,
+                root / "figures" / "ess_formula_oracle",
+            )
+        print(f"Initial exact population reward: {initial_value:.6f}")
+        for row in scaled_optimization_summary:
+            print(
+                f"{row['method']}: final reward "
+                f"{float(row['final_population_reward']):.6f}"
+            )
+        return
 
     values_by_method: dict[str, list[np.ndarray]] = {
         method: [] for method in METHODS
@@ -2304,16 +2630,19 @@ def run(config: Config, skip_figure: bool = False) -> None:
     formula_checkpoint_results, formula_summary = (
         aggregate_formula_oracle_evaluation(formula_evaluations)
     )
-    scaled_optimization_paths, scaled_optimization_summary = (
-        run_scaled_batch_optimization(
-            initial_weights,
-            features,
-            codes,
-            formula_thresholds,
-            config,
-        )
+    (
+        scaled_optimization_paths,
+        scaled_optimization_summary,
+        scaled_on_trajectory_diagnostics,
+        scaled_on_trajectory_bins,
+        scaled_on_trajectory_gate_summary,
+    ) = run_scaled_batch_optimization(
+        initial_weights,
+        features,
+        codes,
+        formula_thresholds,
+        config,
     )
-    results = root / "simulation" / "results"
     write_csv(results / "rlvr_training_paths.csv", path_rows)
     write_csv(results / "rlvr_summary.csv", summary_rows)
     write_csv(results / "rlvr_minibatch_diagnostics.csv", diagnostics)
@@ -2355,6 +2684,18 @@ def run(config: Config, skip_figure: bool = False) -> None:
         results / "rlvr_n512_optimization_summary.csv",
         scaled_optimization_summary,
     )
+    write_csv(
+        results / "rlvr_n512_on_trajectory_diagnostics.csv",
+        scaled_on_trajectory_diagnostics,
+    )
+    write_csv(
+        results / "rlvr_n512_on_trajectory_bins.csv",
+        scaled_on_trajectory_bins,
+    )
+    write_csv(
+        results / "rlvr_n512_on_trajectory_gate_summary.csv",
+        scaled_on_trajectory_gate_summary,
+    )
     if not skip_figure:
         make_figure(
             diagnostic_bins,
@@ -2372,6 +2713,7 @@ def run(config: Config, skip_figure: bool = False) -> None:
             formula_thresholds,
             formula_summary,
             scaled_optimization_paths,
+            scaled_on_trajectory_bins,
             root / "figures" / "ess_formula_oracle",
         )
 
@@ -2417,6 +2759,7 @@ if __name__ == "__main__":
     parser.add_argument("--response-tokens", type=int, default=16)
     parser.add_argument("--responses-per-prompt", type=int, default=16)
     parser.add_argument("--skip-figure", action="store_true")
+    parser.add_argument("--scaled-only", action="store_true")
     arguments = parser.parse_args()
     run(
         replace(
@@ -2443,4 +2786,5 @@ if __name__ == "__main__":
             responses_per_prompt=arguments.responses_per_prompt,
         ),
         skip_figure=arguments.skip_figure,
+        scaled_only=arguments.scaled_only,
     )

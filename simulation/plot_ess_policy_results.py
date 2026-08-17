@@ -48,5 +48,6 @@ if __name__ == "__main__":
         read_rows(results / "rlvr_formula_oracle_thresholds.csv"),
         read_rows(results / "rlvr_formula_oracle_summary.csv"),
         read_rows(results / "rlvr_n512_optimization_paths.csv"),
+        read_rows(results / "rlvr_n512_on_trajectory_bins.csv"),
         root / "figures" / "ess_formula_oracle",
     )
