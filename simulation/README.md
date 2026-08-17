@@ -27,6 +27,16 @@ prompt draws, sampling uniforms, and minibatch orders within each replication.
 The policy uses 16 factorized Bernoulli token heads, so the sequence ratio is a
 product of token ratios while the exact population gradient remains available.
 
+The script also runs a leakage-controlled estimator-selection study.  It freezes
+56 policy states, stratifies them into seven population-ESS intervals, and uses
+four states per interval to fit an ESS boundary while reserving four for testing.
+One hundred calibration blocks estimate PPO bias and covariance at
+`N = 128, 256, 512, 1024`; 100 independent redraws per test state evaluate the
+resulting rule.  The main adaptive regime is selected from the fit states only:
+`N = 512` is the sole candidate whose fitted threshold selects both raw and PPO
+updates.  The final paired optimization study then fixes this threshold and uses
+512 sequences per update, four epochs per rollout, and eight rollout batches.
+
 Run from the repository root:
 
 ```powershell
@@ -43,8 +53,22 @@ Outputs:
 - `simulation/results/rlvr_summary.csv`
 - `simulation/results/rlvr_minibatch_diagnostics.csv`
 - `simulation/results/rlvr_diagnostic_bins.csv`
+- `simulation/results/rlvr_crossover_diagnostics.csv`
+- `simulation/results/rlvr_crossover_checkpoints.csv`
+- `simulation/results/rlvr_crossover_bins.csv`
+- `simulation/results/rlvr_formula_oracle_components.csv`
+- `simulation/results/rlvr_formula_oracle_thresholds.csv`
+- `simulation/results/rlvr_formula_oracle_evaluations.csv`
+- `simulation/results/rlvr_formula_oracle_checkpoints.csv`
+- `simulation/results/rlvr_formula_oracle_summary.csv`
+- `simulation/results/rlvr_n512_optimization_paths.csv`
+- `simulation/results/rlvr_n512_optimization_summary.csv`
 - `figures/ess_policy_validation.pdf`
 - `figures/ess_policy_validation.png`
+- `figures/ess_estimator_crossover.pdf`
+- `figures/ess_estimator_crossover.png`
+- `figures/ess_formula_oracle.pdf`
+- `figures/ess_formula_oracle.png`
 
 `rlvr_minibatch_diagnostics.csv` contains every diagnostic minibatch from the
 first 20 replications, including ESS, exact squared gradient error, and exact
@@ -53,6 +77,12 @@ population reward after every new rollout batch.  Panel (c) converts those
 checkpoints to the cumulative number of verifier responses, with 2,048 complete
 responses per rollout batch, and marks the first checkpoint that doubles the
 initial population reward.
+
+`rlvr_formula_oracle_thresholds.csv` records every fitted boundary, including
+the always-PPO cases at `N = 128` and `N = 256` and the always-raw case at
+`N = 1024`.  `rlvr_formula_oracle_summary.csv` contains the held-out gradient
+risk comparison.  The two `rlvr_n512_optimization` files contain the trajectory
+and final summary for the four-epoch adaptive-rule test.
 
 References:
 

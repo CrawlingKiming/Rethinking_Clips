@@ -36,21 +36,19 @@ Effective Sample Size as a Criterion}
 
 \begin{abstract}
 Clipping is widely treated as necessary for policy optimization, yet it
-can also remove useful learning signal.  This tension is pronounced in
-reinforcement learning with verifiable rewards, where permissive updates often
-learn quickly but may fail after the policy moves too far from its rollout data.
-We ask when clipping becomes useful, rather than whether it should be used at
-all.  We show that the answer depends jointly on how concentrated the
-importance weights are and how many samples are averaged.  The amount of
-effective support is therefore not determined by weight concentration alone.
-We connect this support to gradient error and policy
-improvement, then derive the batch-size-dependent point at which clipping's
-variance reduction outweighs its bias.  A controlled verifier task recovers
-this predicted estimator crossover.  Separately, a prespecified ESS heuristic
-preserves fast early learning and reaches a fixed reward target with fewer
-verifier responses than either static choice.  These results support ESS as a
-reliability coordinate for deciding when to clip, while ruling out a universal
-threshold independent of the training configuration.
+can also discard useful learning signal.  This tension is pronounced in
+reinforcement learning with verifiable rewards, where permissive updates learn
+quickly but can fail after the policy moves too far from its rollout data.  We
+ask when clipping becomes useful.  We show that the answer depends jointly on
+the concentration of the importance weights and the number of samples being
+averaged.  We connect this effective support to gradient error and policy
+improvement, then derive when clipping's variance reduction repays its bias.
+An exactly evaluable verifier task recovers the predicted change of regime.  A
+calibrated ESS rule reduces held-out gradient risk relative to either static
+choice and, under repeated optimization, preserves early progress while
+reaching a better final policy.  A separate fixed-threshold test yields a
+sample-efficiency gain without treating that threshold as universal.  These
+results identify ESS as a reliability coordinate for deciding when to clip.
 \end{abstract}
 
 \section{Introduction}
@@ -127,11 +125,14 @@ Across 100 paired runs, ESS predicts both gradient error and the sign of the
 resulting reward change.  Paired redraws at frozen policy states recover the
 predicted estimator crossover: PPO masking has lower MSE when effective support
 is scarce, while averaging more samples exposes the high-ESS regime in which
-the permissive estimator has lower MSE.  This batch-size-dependent change is
-the direct evidence predicted by the theory.
-As a separate operational test, a prespecified $0.1$ heuristic reaches a fixed
-reward target with 25\% fewer verifier responses than always using the
-permissive gradient and 40\% fewer than always applying the PPO mask.
+the permissive estimator has lower MSE.  A calibration split then identifies
+the estimator size at which both regimes occur, fits an ESS boundary without
+using the held-out outcomes, and improves held-out gradient risk relative to
+both static estimators.  Repeated optimization with this boundary ends above
+both static choices.  As a separate operational test, a prespecified $0.1$
+heuristic reaches a fixed reward target with 25\% fewer verifier responses than
+always using the permissive gradient and 40\% fewer than always applying the
+PPO mask.
 Section~\ref{sec:llm-experiments}
 specifies the matched LLM experiment needed to test whether the same regime
 change appears under PPO, Clip-Higher, and DPPO safeguards.
@@ -165,8 +166,9 @@ and the mean-squared error of a fixed-rollout policy-gradient estimator.
 \item We connect gradient error to certified policy improvement and show that
 batch size shifts the bias--variance crossover between permissive and clipped
 gradients.
-\item We directly validate this crossover in an RLVR-style verifier task, then
-evaluate a prespecified ESS heuristic for choosing between the two updates.
+\item We recover the predicted crossover in an RLVR-style verifier task and
+show that a calibration-selected ESS gate can outperform both static updates
+under repeated optimization.
 \end{enumerate}
 
 The next section states the fixed-rollout problem in which this reliability
@@ -672,10 +674,11 @@ reshaping \cite{zheng2025m2po,shen2026vespo,huang2026vcpo,fakoor2026p3o}.
 Section~\ref{sec:simulation} separates the theoretical and operational tests.
 First, frozen-policy redraws vary estimator size and ask whether ESS locates the
 raw-versus-PPO MSE crossover predicted by
-Corollary~\ref{cor:batch-crossover}.  Second, an RLVR optimization loop asks
-whether the fixed $0.1$ heuristic identifies damaging permissive updates and
-improves the training trajectory.  The first test validates the mechanism; the
-second evaluates a practical rule under one fixed training configuration.
+Corollary~\ref{cor:batch-crossover}.  A disjoint calibration split then turns
+the crossover formula into an ESS decision boundary and tests it on independent
+redraws.  Finally, RLVR optimization loops ask whether the calibrated rule and
+the fixed $0.1$ heuristic improve training.  This order separates the mechanism,
+the decision rule, and its optimization consequence.
 
 \section{Controlled simulation: ESS in an RLVR optimization loop}
 \label{sec:simulation}
@@ -776,8 +779,57 @@ size, while additional averaging can move the crossover.  This result does not
 identify $0.1$ as a universal threshold.  It also does not imply that the
 lower-MSE estimator realizes the larger reward gain at every state, because
 Theorem~\ref{thm:mse-improvement} orders conservative certificates rather than
-exact improvements.  The heuristic must therefore be evaluated in the
-optimization loop itself.
+exact improvements.  A useful gate must therefore pass two further tests: its
+boundary must be fixed without held-out outcomes, and the resulting choice must
+improve optimization rather than only estimator risk.
+
+We construct that test with a disjoint calibration protocol.  Within each of
+the seven ESS intervals, four frozen states fit the decision boundary and four
+remain for evaluation.  Calibration estimates the bias and covariance terms in
+Theorem~\ref{thm:crossover} for $N\in\{128,256,512,1024\}$.  We designate an
+estimator size as informative only when the fitted ESS boundary is interior, so
+both raw and PPO updates are selected on the calibration states.  This rule
+selects $N=512$ before the held-out redraws are examined.  The smaller sizes
+select PPO throughout, while $N=1024$ selects the raw estimator throughout.
+These boundary cases remain part of the reported result rather than being
+discarded.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/ess_formula_oracle.pdf}
+  \caption{From the crossover formula to an ESS-gated update.  (a) At the
+  calibration-selected $N=512$, the predicted MSE preference changes sign as
+  population ESS increases.  (b) Fitted boundaries for every candidate $N$;
+  the effective-count transfer holds $N\rho$ fixed, and $0.1$ is shown only as
+  the later application heuristic.  (c) Held-out gradient MSE relative to the
+  better static estimator at $N=512$; negative values are better.  The formula
+  rule uses state-specific calibrated risk components as a diagnostic reference,
+  whereas the ESS rules use population ESS and their fitted thresholds.  Error bars are
+  standard errors across 28 test states.  (d) Relative reward improvement in a
+  four-epoch RLVR loop at $N=512$; bands are 95\% confidence intervals over 100
+  paired runs.}
+  \label{fig:formula-oracle}
+\end{figure}
+
+The calibration-selected boundary is $0.42$ at $N=512$.  On 100 independent
+redraws of each held-out state, its population-ESS rule reduces MSE by $4.3\%\pm1.1\%$
+relative to the better static estimator.  Holding the fitted effective-count
+boundary fixed and transferring it to $N=512$ yields a $4.9\%\pm1.2\%$
+reduction.  By comparison, the fixed $0.1$ heuristic yields
+$1.1\%\pm2.7\%$, which is not resolved in this risk diagnostic.  The result
+supports an $N$-dependent ESS rule and does not retroactively derive the LLM
+heuristic.
+
+The repeated-optimization test then fixes these boundaries before training.
+Each rollout contains 512 prompts and 16 responses per prompt, is divided into
+16 minibatches, and is optimized for four epochs.  Across 100 paired runs, the
+fitted ESS gate reaches final reward $0.4961\pm0.0003$, compared with
+$0.4606\pm0.0098$ for the raw estimator and $0.4038\pm0.0005$ for always
+applying the PPO mask.  Its paired gains are $0.0356\pm0.0098$ and
+$0.0923\pm0.0006$, respectively.  The raw method learns faster in the first
+three rollouts, but the gate overtakes it after the fourth and masks only 61.7
+of 512 updates on average.  The gate therefore preserves the useful
+permissive regime and intervenes before its later errors dominate.
 
 The separate heuristic test translates the reliability diagnosis into faster
 optimization.  The ESS-gated method
@@ -1251,18 +1303,100 @@ masking.  The released redraw file also records both counterfactual one-step
 reward changes, although Figure~\ref{fig:ess-crossover} focuses on the gradient
 risk required by Theorem~\ref{thm:crossover}.
 
+\subsection{Formula calibration and held-out decision test}
+
+The direct diagnostic establishes a crossover but uses no decision rule.  We
+therefore split the eight checkpoints in every population-ESS interval into
+four threshold-fit states and four test states.  The split is stratified by ESS
+interval and fixed with seed 161,876.  This gives 28 fit states and 28 test
+states with identical interval counts.
+
+At every state, we draw $M=100$ independent base-minibatch blocks, each
+containing 128 sequences.  Let $g$ be the exact finite-population gradient,
+$G_{W,j}$ the raw gradient from block $j$, and $G_{C,j}$ its paired PPO-masked
+gradient.  We estimate the block-level raw covariance trace by
+\begin{equation}
+  \widehat V_W
+  :=\frac1M\sum_{j=1}^M\|G_{W,j}-g\|_F^2.
+  \label{eq:formula-raw-variance}
+\end{equation}
+The raw block is unbiased, so no bias term is added.  For PPO, define
+\begin{align}
+  \overline G_C
+  &:=\frac1M\sum_{j=1}^M G_{C,j},
+  \label{eq:formula-ppo-mean}\\
+  \widehat V_C
+  &:=\frac1{M-1}\sum_{j=1}^M
+    \|G_{C,j}-\overline G_C\|_F^2,
+  \label{eq:formula-ppo-variance}\\
+  \widehat B_C
+  &:=\max\left\{0,
+    \|\overline G_C-g\|_F^2-\frac{\widehat V_C}{M}\right\}.
+  \label{eq:formula-ppo-bias}
+\end{align}
+The subtraction in Equation~\eqref{eq:formula-ppo-bias} removes the sampling
+variance of the estimated mean; truncation at zero enforces a nonnegative
+squared-bias estimate.  Averaging $K\in\{1,2,4,8\}$ independent blocks gives
+$N=128K$ sequences and the estimated risks
+\begin{equation}
+  \widehat R_W(K):=\frac{\widehat V_W}{K},
+  \qquad
+  \widehat R_C(K):=\widehat B_C+\frac{\widehat V_C}{K}.
+  \label{eq:formula-risks}
+\end{equation}
+These are the two sides of Theorem~\ref{thm:crossover} at block level.
+
+For each $K$, the fitted rule applies PPO when
+$\rho_{\mathrm{pop}}<\tau_K$ and the raw estimator otherwise.  Candidate
+thresholds are zero, the midpoints between adjacent fit-state ESS values, and a
+sentinel just above one.  We choose the candidate minimizing the mean of
+$\widehat R_C(K)$ or $\widehat R_W(K)$ selected across the 28 fit states.  The
+informative estimator size is then chosen using the fit states alone: it must
+have $0<\tau_K<1$, so that the rule selects both estimators.  This criterion
+selects $K=4$, hence $N=512$.  For comparison, the effective-count transfer
+anchors the $K=1$ fit and uses
+\begin{equation}
+  \tau_K^{\mathrm{count}}:=\min\{1,\tau_1/K\},
+  \label{eq:count-transfer}
+\end{equation}
+which holds the boundary in $N\rho$ fixed.
+
+Held-out evaluation uses an independent stream with seed 271,974.  At each test
+state, each of 100 redraws generates eight paired base blocks.  Prefix averages
+of one, two, four, and eight blocks form the four estimator sizes, so comparisons
+across $N$ share their initial randomness.  Raw and PPO gradients within every
+block use the same prompts, responses, rewards, and advantages.  We average
+squared gradient error across redraws within a state, then average across the 28
+states.  Standard errors use states, not the 2,800 redraws, as the independent
+units.  The state-specific component rule in Figure~\ref{fig:formula-oracle}
+uses Equation~\eqref{eq:formula-risks} as a diagnostic reference.  The fitted
+ESS rule uses the exact population ESS and the threshold learned on the
+disjoint fit states; it never sees the test-state gradient errors.  This choice
+isolates the quality of the decision boundary from plug-in ESS noise.
+
+The optimization test uses that frozen threshold without further fitting.  A
+rollout contains 512 prompts and 16 responses per prompt.  The 512 prompt groups
+are partitioned into 16 minibatches, giving 512 sequences per update.  Each
+rollout is traversed for four epochs in the same minibatch order, then replaced
+by a new rollout; eight rollout cycles produce 512 updates and 65,536 verifier
+responses.  We run 100 paired replications.  Within a replication, every method
+shares rollout prompts, response-sampling uniforms, and minibatch order.  ESS,
+ratios, and the selected gradient are recomputed before every update.  The
+gate now uses the observable sample ESS in
+Equation~\eqref{eq:sample-ess}, so no population statistic enters training.
+The optimization random stream is derived from master seed 424,315.
+
 \subsection{Reproducibility}
 
 The complete implementation is
 \texttt{simulation/ess\_policy\_optimization.py}.  When the dataset is absent,
-the script downloads the official UCI archive.  It writes four CSV files: the
-aggregated training trajectories, final summary, all minibatch diagnostics, and
-fixed-bin diagnostic summary.  Three additional CSV files contain every
-crossover redraw, checkpoint-level means, and fixed-bin crossover means.  The
-script writes Figures~\ref{fig:ess-validation} and
-\ref{fig:ess-crossover} in PDF and PNG formats.  All optimization and
-oracle calculations use double-precision NumPy on CPU; Matplotlib only renders
-the saved results.  The command used for the paper is
+the script downloads the official UCI archive.  It writes the full training,
+minibatch, frozen-state, formula-calibration, held-out-evaluation, and
+$N=512$ optimization records as CSV files.  It also writes
+Figures~\ref{fig:ess-validation}, \ref{fig:ess-crossover}, and
+\ref{fig:formula-oracle} in PDF and PNG formats.  All optimization and exact
+gradient calculations use double-precision NumPy on CPU; Matplotlib only
+renders the saved results.  The command used for the paper is
 \texttt{python simulation/ess\_policy\_optimization.py --replications 100}.
 
 \subsection{Results}
@@ -1339,6 +1473,88 @@ $512$ & $[0.2,0.4)$ & $0.007\pm0.001$ & $0.006\pm0.001$ & $9.1\pm6.5$ \\
 $512$ & $[0.4,0.6)$ & $0.006\pm0.001$ & $0.007\pm0.001$ & $-19.0\pm5.4$ \\
 $512$ & $[0.6,0.8)$ & $0.005\pm0.001$ & $0.005\pm0.001$ & $-17.6\pm4.8$ \\
 $512$ & $[0.8,1)$ & $0.004\pm0.001$ & $0.004\pm0.001$ & $-10.5\pm6.5$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Calibration isolates the informative estimator size.}
+Table~\ref{tab:formula-thresholds} reports every candidate $N$.  The fitted
+boundary is above the ESS range for $N=128$ and $N=256$, so these sizes select
+PPO at every fit state.  At $N=1024$, the fitted boundary is zero and therefore
+selects the raw estimator throughout.  Only $N=512$ yields an interior boundary,
+$\tau_4=0.417$, and therefore tests an adaptive rule.  This selection uses no
+held-out gradient errors.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{ESS boundaries fitted from the 28 calibration states.  ``Static''
+indicates that the fitted boundary chooses one estimator throughout the
+calibration range.}
+\label{tab:formula-thresholds}
+\begin{tabular}{rrrrl}
+\toprule
+$N$ & Blocks $K$ & Fitted $\tau_K$ & Count-transfer $\tau_K$ & Fit-state regime \\
+\midrule
+128  & 1 & $\geq1.00$ & $1.00$ & PPO static \\
+256  & 2 & $\geq1.00$ & $0.50$ & PPO static \\
+512  & 4 & $0.417$ & $0.25$ & Adaptive \\
+1024 & 8 & $0.000$ & $0.125$ & Raw static \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{The calibrated rule improves held-out gradient risk.}
+Table~\ref{tab:formula-heldout} reports the relative excess MSE at $N=512$.
+The comparison baseline is the better static method on the 28 test states,
+which is PPO masking.  Relative differences are computed within each state and
+then averaged, so no state with a large gradient scale dominates the reported
+percentage.  Both the fitted boundary and the effective-count transfer improve
+on the static baseline.  The $0.1$ heuristic is directionally favorable but its
+uncertainty includes zero.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Held-out estimator selection at $N=512$.  Excess MSE is relative to
+the better static estimator and is reported as mean $\pm$ standard error across
+28 test states; negative values are better.}
+\label{tab:formula-heldout}
+\begin{tabular}{lrrr}
+\toprule
+Decision rule & ESS boundary & Excess MSE (\%) & PPO selections (\%) \\
+\midrule
+State-specific formula reference & State-specific & $-3.4\pm2.0$ & $50.0$ \\
+Fitted ESS & $0.417$ & $-4.3\pm1.1$ & $57.1$ \\
+Fixed effective count & $0.250$ & $-4.9\pm1.2$ & $50.0$ \\
+Fixed ESS heuristic & $0.100$ & $-1.1\pm2.7$ & $28.6$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{The adaptive rule improves repeated optimization.}
+Table~\ref{tab:n512-optimization} reports the four-epoch $N=512$ study.  The
+fitted ESS gate has the highest final reward and the smallest uncertainty.  It
+uses the raw estimator for 450.3 of 512 updates on average, which explains its
+fast progress, while its 61.7 PPO-masked updates prevent the late loss observed
+under the static raw estimator.  The transferred and fixed-$0.1$ boundaries
+also improve on both static methods, but neither exceeds the fitted boundary.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Four-epoch optimization with 512 sequences per update.  Values are
+means $\pm$ standard errors over 100 paired replications.}
+\label{tab:n512-optimization}
+\begin{tabular}{lrrr}
+\toprule
+Update rule & Final reward & Relative improvement (\%) & Masked updates \\
+\midrule
+Raw & $0.4606\pm0.0098$ & $380.9\pm10.2$ & $0.0$ \\
+PPO masked & $0.4038\pm0.0005$ & $321.6\pm0.6$ & $512.0$ \\
+Fitted ESS, $\tau=0.417$ & $0.4961\pm0.0003$ & $418.0\pm0.3$ & $61.7$ \\
+Fixed count, $\tau=0.250$ & $0.4928\pm0.0050$ & $414.6\pm5.2$ & $35.4$ \\
+Fixed ESS, $\tau=0.100$ & $0.4940\pm0.0050$ & $415.9\pm5.2$ & $16.9$ \\
 \bottomrule
 \end{tabular}
 \end{table}
