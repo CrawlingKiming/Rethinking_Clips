@@ -381,50 +381,51 @@ stationarity rather than a global optimum: a random iterate $\theta_U$ is
 $\varepsilon$-stationary in mean square when
 $\E\|\nabla J(\theta_U)\|_2^2\le\varepsilon^2$.  This is the convergence notion
 used in established vanilla and off-policy policy-gradient analyses
-\citep{yuan2022general,kallus2020efficient}.  The next result specializes their
-smoothness-and-telescoping argument while retaining the realized gradient error
-needed for our estimator comparison.
+\citep{yuan2022general,kallus2020efficient}.  The next result states convergence
+directly and isolates gradient MSE as the only estimator-dependent term.
 
-\begin{corollary}[Finite-time convergence to first-order stationarity]
-\label{cor:finite-time-mse}
+\begin{theorem}[Finite-time convergence under gradient MSE]
+\label{thm:finite-time-mse}
 Fix $\theta_0$, and let $\theta_{t+1}=\theta_t+\eta\widehat g_t$ for
-$t=0,\ldots,T-1$, and let $g_t=\nabla J(\theta_t)$.  Suppose the conditions of
+$t=0,\ldots,T-1$.  Suppose the conditions of
 Theorem~\ref{thm:mse-improvement} hold at every update with a common
-$0<\eta\le1/L$, and suppose $J(\theta)\le J^\star$ along the path.  Then
-\begin{equation}
-  \frac1T\sum_{t=0}^{T-1}\|g_t\|_2^2
-  \le
-  \frac{2\{J^\star-J(\theta_0)\}}{\eta T}
-  +\frac1T\sum_{t=0}^{T-1}\|\widehat g_t-g_t\|_2^2.
-  \label{eq:finite-time-mse}
-\end{equation}
-If the estimates are random and $U$ is uniform on
-$\{0,\ldots,T-1\}$ independently of the optimization path, then taking
-expectation in \eqref{eq:finite-time-mse} gives the corresponding bound on
-$\E\|\nabla J(\theta_U)\|_2^2$ in terms of the average gradient MSE.
-\end{corollary}
-
-Corollary~\ref{cor:finite-time-mse} states precisely what converges.  Define
+$0<\eta\le1/L$, suppose $J(\theta)\le J^\star$ on the feasible domain, and suppose
+$\E\|\widehat g_t-\nabla J(\theta_t)\|_2^2<\infty$.  Let $U$ be uniform on
+$\{0,\ldots,T-1\}$ independently of the optimization path, and define
 \begin{equation}
   \overline e_T
   :=\frac1T\sum_{t=0}^{T-1}
-    \E\|\widehat g_t-g_t\|_2^2,
-  \qquad
-  \Delta_0:=J^\star-J(\theta_0).
+    \E\|\widehat g_t-\nabla J(\theta_t)\|_2^2.
   \label{eq:average-gradient-error}
 \end{equation}
-For any $\varepsilon>0$, choosing
-$T\ge2\Delta_0/(\eta\varepsilon^2)$ yields
+There exists a finite constant $C_{\mathrm{init}}$, independent of $T$ and the
+gradient estimator, such that
 \begin{equation}
   \E\|\nabla J(\theta_U)\|_2^2
-  \le \varepsilon^2+\overline e_T.
-  \label{eq:finite-time-complexity}
+  \le \frac{C_{\mathrm{init}}}{T}+\overline e_T.
+  \label{eq:finite-time-convergence}
 \end{equation}
-Thus exact gradients recover the usual $O(1/T)$ convergence of the average
-squared gradient, and vanishing average MSE implies convergence to first-order
-stationarity.  A persistent MSE level instead certifies only a stationary
-neighborhood whose size is set by that error.  The result does not
-claim that the parameter sequence converges, nor does it claim convergence to a
+Consequently,
+\begin{equation}
+  \overline e_T\longrightarrow0
+  \quad\Longrightarrow\quad
+  \E\|\nabla J(\theta_U)\|_2^2\longrightarrow0.
+  \label{eq:vanishing-mse-convergence}
+\end{equation}
+More quantitatively, if $\overline e_T\le\varepsilon^2/2$ and
+$T\ge2C_{\mathrm{init}}/\varepsilon^2$, then $\theta_U$ is
+$\varepsilon$-stationary in mean square.  If instead
+$\limsup_{T\to\infty}\overline e_T\le\sigma^2$, then
+$\limsup_{T\to\infty}\E\|\nabla J(\theta_U)\|_2^2\le\sigma^2$.
+\end{theorem}
+
+Theorem~\ref{thm:finite-time-mse} states precisely what converges.  Exact
+gradients recover the usual $O(1/T)$ rate for the average squared gradient, and
+vanishing average MSE implies convergence to first-order stationarity.  A
+persistent MSE level instead certifies only a stationary neighborhood.  The
+exact initialization constant is given in Appendix~\ref{app:proofs}; it affects
+the finite optimization horizon but not the estimator comparison.  The theorem
+does not claim convergence of the parameter sequence or convergence to a
 global optimum.
 
 This distinction also clarifies what is inherited from prior work.  Corollary
@@ -439,12 +440,12 @@ standard argument so that clipping rules can be compared and ESS can enter the
 estimator-dependent term.
 
 No bounded parameter set or projection is required by
-Corollary~\ref{cor:finite-time-mse}.  It instead assumes that every update is
+Theorem~\ref{thm:finite-time-mse}.  It instead assumes that every update is
 feasible, that $J$ is smooth along the realized update segments, that the
-gradient errors have finite second moments, and that $J$ is upper bounded along
-the path.  In RLVR with rewards in $[0,1]$, the last condition holds with
-$J^\star\le1$.  Bounded rewards alone do not guarantee policy smoothness or
-finite importance-weight moments.  The smoothing-policy conditions of
+gradient MSE is finite, and that $J$ is upper bounded on the feasible domain.  In RLVR
+with rewards in $[0,1]$, the last condition holds automatically.  Bounded
+rewards alone do not guarantee policy smoothness or finite importance-weight
+moments.  The smoothing-policy conditions of
 \citet{papini2022smoothing}, or the expected score and log-policy-Hessian bounds
 in Assumption~4.1 of \citet{yuan2022general}, are sufficient routes to the
 required smoothness.  A projection can make such a bound uniform by keeping the
@@ -454,14 +455,18 @@ active projection onto a constrained parameter set is part of the algorithm,
 the appropriate convergence measure is a projected gradient mapping.  The
 Euclidean-gradient statement above does not cover that case; projected policy
 gradient requires a separate analysis such as \citet{xiao2022convergence}.
+The finite-MSE condition concerns the estimator rather than the parameter
+domain.  If the raw importance-weighted gradient has an infinite second moment,
+the expected convergence certificate is vacuous; Section~\ref{sec:ratio-truncation}
+explains when upper-ratio truncation repairs this problem and what bias it costs.
 
 The ESS factorization now supplies a coverage-dependent convergence guarantee.
 To state it without hiding a dependence assumption, let each gradient batch be
 drawn after $\theta_t$ is fixed.
 
-\begin{corollary}[Finite-time ESS certificate under conditional sampling]
+\begin{corollary}[Finite-time ESS convergence certificate]
 \label{cor:ess-convergence}
-In the setting of Corollary~\ref{cor:finite-time-mse}, let $\mathcal F_t$
+In the setting of Theorem~\ref{thm:finite-time-mse}, let $\mathcal F_t$
 contain the history before update $t$, with $\theta_t$ measurable with respect
 to $\mathcal F_t$.  Suppose that, conditional on $\mathcal F_t$,
 $\widehat g_t$ is the raw estimator formed from $N$ independent draws from the
@@ -470,7 +475,7 @@ population ESS and weighted gradient scale.  Then
 \begin{equation}
   \E\|\nabla J(\theta_U)\|_2^2
   \le
-  \frac{2\{J^\star-J(\theta_0)\}}{\eta T}
+  \frac{C_{\mathrm{init}}}{T}
   +\frac1T\sum_{t=0}^{T-1}
     \E\!\left[\frac{G_{2,t}}{N\rho_t}\right].
   \label{eq:ess-convergence}
@@ -480,7 +485,7 @@ along the path, then
 \begin{equation}
   \E\|\nabla J(\theta_U)\|_2^2
   \le
-  \frac{2\{J^\star-J(\theta_0)\}}{\eta T}
+  \frac{C_{\mathrm{init}}}{T}
   +\frac{\overline G_2}{N\underline\rho}.
   \label{eq:ess-convergence-uniform}
 \end{equation}
@@ -503,9 +508,9 @@ is sufficient for positive expected improvement.  Neither statement produces
 a universal normalized-ESS threshold because the guarantee also depends on
 gradient scale and true-gradient magnitude.  Moreover, the ESS substitution in
 Corollary~\ref{cor:ess-convergence} requires conditional sampling.  Under
-repeated optimization of one fixed rollout, the pathwise bound
-\eqref{eq:finite-time-mse} remains valid, but replacing its realized error by
-the fixed-$\theta$ ESS identity requires additional adaptive-data control.  The
+repeated optimization of one fixed rollout, the pathwise inequality underlying
+Theorem~\ref{thm:finite-time-mse} remains valid, but replacing its realized
+error by the fixed-$\theta$ ESS identity requires additional adaptive-data control.  The
 contextual-bandit study therefore measures this relationship directly along a
 reused-rollout path.  Before that comparison, we examine why the remaining
 scale term is particularly manageable in RLVR.
@@ -764,6 +769,7 @@ test whether the observable choice $\tau=0.1$ satisfies the low-ESS part of
 this requirement well enough to serve as a practical bridge to RLVR.
  
 \subsubsection{Ratio truncation bias trade-off}
+\label{sec:ratio-truncation}
 
 Ratio truncation changes the importance coefficient after the gradient has been
 specified, so it is distinct from the derivative of the PPO objective.  For
@@ -793,16 +799,26 @@ $\widehat g_c=N^{-1}\sum_i C_{c,i}^{\mathrm{tr}}H_{\theta,i}$ satisfies
 \end{align}
 \end{corollary}
 
-The result isolates the appeal of upper truncation.  It replaces the raw
-second-moment term by $c/N$, while the introduced bias remains small when the
-tail excess $\tau_c$ is small.  The cap is therefore a tunable estimator
-parameter, not part of the paper's central claim.  Truncated importance ratios
-also appear in ACER with
+The result isolates the appeal of upper truncation.  If
+$\E_Q[W_\theta^2\|H_\theta\|_2^2]=\infty$ while $H_\theta$ is bounded, the raw
+expected convergence bound is vacuous but the truncated estimator has finite MSE.  More generally,
+substituting either estimator into Theorem~\ref{thm:finite-time-mse} shows that
+truncation tightens the finite-time guarantee exactly when its full MSE is lower
+than the raw MSE.  Finite variance alone is therefore not sufficient: a fixed
+cap can leave persistent bias and hence only a stationary neighborhood.  Exact
+stationarity requires the average truncated-estimator MSE, including its bias,
+to vanish along the optimization path.
+
+Upper truncation replaces the raw second-moment term by $c/N$, while its bias
+remains small when the tail excess $\tau_c$ is small.  The cap is therefore a
+tunable estimator safeguard, not part of the paper's central claim.  Truncated importance ratios also appear in ACER with
 bias correction \citep{wang2017acer} and in the V-trace correction used by
 IMPALA \citep{espeholt2018impala}; recent LLM methods likewise control extreme
 weight moments \citep{zheng2025m2po,fakoor2026p3o}.  These precedents motivate
 truncation as a separate importance-sampling device.  They do not make it
-equivalent to PPO clipping.
+equivalent to PPO clipping.  In particular, PPO's advantage-sign mask does not
+bound every retained ratio contribution and therefore does not by itself ensure
+finite estimator variance.
 
 The theory now yields a complete decision logic.  When $G_{2,\theta}$ is
 controlled, effective support governs permissive-gradient reliability and its

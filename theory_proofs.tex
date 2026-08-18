@@ -120,7 +120,7 @@ $\|g\|_2^2$ outside the expectation.  This is
 positive.
 \end{proof}
 
-\subsection{Proof of Corollary~\ref{cor:finite-time-mse}}
+\subsection{Proof of Theorem~\ref{thm:finite-time-mse}}
 
 This is the standard smooth nonconvex policy-gradient telescoping argument used
 by \citet{yuan2022general} and \citet{kallus2020efficient}.  We provide every
@@ -160,15 +160,44 @@ Rearrange one term per line and use $J(\theta_T)\le J^\star$:
     +\sum_{t=0}^{T-1}\|\widehat g_t-g_t\|_2^2.
     \label{eq:finite-time-proof-5}
 \end{align}
-Divide \eqref{eq:finite-time-proof-5} by $T$ to obtain
-\eqref{eq:finite-time-mse}.  For a uniform independent index $U$,
+Divide \eqref{eq:finite-time-proof-5} by $T$ to obtain the pathwise inequality
+\begin{align}
+  \frac1T\sum_{t=0}^{T-1}\|g_t\|_2^2
+  &\le
+  \frac{2\{J^\star-J(\theta_0)\}}{\eta T}
+  +\frac1T\sum_{t=0}^{T-1}\|\widehat g_t-g_t\|_2^2.
+  \label{eq:finite-time-mse}
+\end{align}
+For a uniform independent index $U$,
 \begin{align}
   \E\|\nabla J(\theta_U)\|_2^2
   &=\frac1T\sum_{t=0}^{T-1}\E\|g_t\|_2^2.
     \label{eq:finite-time-proof-6}
 \end{align}
-Taking expectation in \eqref{eq:finite-time-mse} gives the stated random-path
-version.
+Take expectation in \eqref{eq:finite-time-mse} and define
+\begin{align}
+  C_{\mathrm{init}}
+  &:=\frac{2\{J^\star-J(\theta_0)\}}{\eta}
+    \label{eq:finite-time-proof-7}\\
+  \E\|\nabla J(\theta_U)\|_2^2
+  &\le\frac{C_{\mathrm{init}}}{T}+\overline e_T.
+    \label{eq:finite-time-proof-8}
+\end{align}
+Equation~\eqref{eq:finite-time-proof-7} is finite because $J$ is upper bounded
+on the feasible domain.  Equation~\eqref{eq:finite-time-proof-8} is
+\eqref{eq:finite-time-convergence}.  Taking limits proves
+\eqref{eq:vanishing-mse-convergence}.  If
+$\overline e_T\le\varepsilon^2/2$ and
+$T\ge2C_{\mathrm{init}}/\varepsilon^2$, then
+\begin{align}
+  \E\|\nabla J(\theta_U)\|_2^2
+  &\le\frac{\varepsilon^2}{2}+\frac{\varepsilon^2}{2}
+    \label{eq:finite-time-proof-9}\\
+  &=\varepsilon^2.
+    \label{eq:finite-time-proof-10}
+\end{align}
+Finally, taking the limit superior of \eqref{eq:finite-time-proof-8} gives the
+stationary-neighborhood statement.
 \end{proof}
 
 \subsection{Proof of Corollary~\ref{cor:ess-convergence}}
@@ -193,17 +222,17 @@ term $-\|g_t\|_2^2/N$.  Take expectation in
 \eqref{eq:ess-convergence-proof-2}:
 \begin{align}
   \E\|\nabla J(\theta_U)\|_2^2
-  &\le\frac{2\{J^\star-J(\theta_0)\}}{\eta T}
+  &\le\frac{C_{\mathrm{init}}}{T}
     +\frac1T\sum_{t=0}^{T-1}
       \E\|\widehat g_t-g_t\|_2^2
     \label{eq:ess-convergence-proof-3}\\
-  &\le\frac{2\{J^\star-J(\theta_0)\}}{\eta T}
+  &\le\frac{C_{\mathrm{init}}}{T}
     +\frac1T\sum_{t=0}^{T-1}
       \E\!\left[\frac{G_{2,t}}{N\rho_t}\right].
     \label{eq:ess-convergence-proof-4}
 \end{align}
 Equation~\eqref{eq:ess-convergence-proof-3} uses the random-path conclusion of
-Corollary~\ref{cor:finite-time-mse}.  Equation
+Theorem~\ref{thm:finite-time-mse}.  Equation
 \eqref{eq:ess-convergence-proof-4} applies the conditional MSE bound and the
 tower property.  This proves \eqref{eq:ess-convergence}.  Under the uniform
 bounds in the corollary,
