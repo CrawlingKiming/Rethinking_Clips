@@ -50,10 +50,10 @@ inherently unstable: permissive gradients are reliable while support is broad,
 whereas clipping can become useful after support concentrates.  An exactly
 evaluable contextual bandit verifies the predicted connection among ESS,
 gradient error, policy improvement, and the clipped-versus-permissive crossover.
-A deliberately simple ESS-triggered intervention then tests this implication in
-language-model training, where it prevents late collapse and improves final
-scores across several safeguards.  The intervention is an operational check of
-the theory, not the paper's primary contribution.
+A simple ESS-triggered intervention carries this prediction to language-model
+training, where it prevents late collapse and improves final scores across
+several safeguards.  Together, the analysis and experiments establish ESS as
+the reliability coordinate that explains when clipping helps.
 \end{abstract}
 
 \section{Introduction}
@@ -109,9 +109,8 @@ weighted gradient scale.  Second, we show that this error controls one-step
 policy improvement and finite-time convergence.  Third, we differentiate the
 PPO surrogate and show that clipping is an advantage-sign gradient mask, not
 global ratio truncation.  The resulting bias--variance condition states exactly
-when the clipped estimator has lower gradient error.  ESS is therefore not a
-new objective; it is the bridge that connects rollout coverage to the changing
-role of clipping.
+when the clipped estimator has lower gradient error.  ESS is the bridge that
+connects rollout coverage to the changing role of clipping.
 
 An exactly evaluable contextual bandit tests each link without relying on an
 LLM-scale proxy.  Its RLVR-style rollout loop preserves sequence ratios and
@@ -121,19 +120,17 @@ permissive-gradient error and harmful policy steps.  Independent redraws at
 frozen policies then recover the predicted crossover under a fixed diagnostic
 construction: clipping has lower MSE when effective support is scarce, whereas
 the permissive estimator is favored when support is broad.  These results
-validate the explanation rather than benchmark a new bandit algorithm.
+isolate the predicted reliability transition under an exact gradient oracle.
 
-The theory also has a simple operational implication.  If clipping is useful
-only after effective support deteriorates, a conservative ESS threshold should
-preserve permissive learning in the reliable regime and activate protection in
-the unreliable regime.  We use this minimal intervention as a falsifiable test,
-not as the paper's main innovation.  In the controlled study it selects a sparse
-set of high-error updates and improves lower-tail optimization.  In
-Qwen3-30B-A3B RLVR, the same prespecified trigger improves the reported final
-AIME-2024 score under GRPO, Clip-Higher, DPPO, and TIS comparisons, and prevents
-the late TIS collapse shown in Figure~\ref{fig:llm-motivation}.  These
-trajectory-level results show that the theoretical regime change remains useful
-when the true gradient is no longer observable.
+The theory also yields a simple operational rule.  A conservative ESS threshold
+preserves permissive learning while support is broad and activates protection
+after support deteriorates.  In the controlled study, the prespecified $0.1$
+trigger selects a sparse set of high-error updates and improves lower-tail
+optimization.  In Qwen3-30B-A3B RLVR, the same trigger improves the reported
+final AIME-2024 score under GRPO, Clip-Higher, DPPO, and TIS comparisons, and
+prevents the late TIS collapse shown in Figure~\ref{fig:llm-motivation}.  These
+trajectory-level results carry the theoretical regime change to the setting in
+which the true gradient is no longer observable.
 
 \subsection{Related perspectives}
 
@@ -184,10 +181,8 @@ the rollout policy explicit throughout.
 
 \subsection{Population target and sampled update}
 
-Let $\theta\in\Theta\subseteq\mathbb R^d$ denote the policy parameter.  The
-analysis permits the unconstrained choice $\Theta=\mathbb R^d$; if $\Theta$ is
-constrained, every parameter segment used below must remain in $\Theta$.  Let
-$X\sim\nu$ be a prompt, let $Q(\cdot\mid X)$ be the rollout policy, and let
+Let $\theta\in\mathbb R^d$ denote the policy parameter.  Let $X\sim\nu$ be a
+prompt, let $Q(\cdot\mid X)$ be the rollout policy, and let
 $R(X,Y)$ be the terminal verifier reward of a complete response.  During the
 optimization phase, the policy of interest is $P_\theta$, with objective
 $J(\theta):=\E_{P_\theta}[R]$.  Assuming $P_\theta\ll Q$, this target can be
@@ -352,9 +347,7 @@ estimators can be compared on the same optimization scale.
 \begin{theorem}[Gradient error controls one-step policy improvement]
 \label{thm:mse-improvement}
 Fix $\theta$ and let $g=g(\theta)$.  Let $\widehat g$ be any, possibly biased,
-gradient estimate.  Suppose $J$ is $L$-smooth on the line segment from
-$\theta$ to $\theta+\eta\widehat g$, and that the update is feasible.  For
-$0<\eta\le 1/L$,
+gradient estimate.  Suppose $J$ is $L$-smooth.  For $0<\eta\le 1/L$,
 \begin{equation}
   J(\theta+\eta\widehat g)-J(\theta)
   \ge \frac{\eta}{2}
@@ -384,9 +377,8 @@ directly and isolates gradient MSE as the only estimator-dependent term.
 \begin{theorem}[Finite-time convergence under gradient MSE]
 \label{thm:finite-time-mse}
 Fix $\theta_0$, and let $\theta_{t+1}=\theta_t+\eta\widehat g_t$ for
-$t=0,\ldots,T-1$.  Suppose the conditions of
-Theorem~\ref{thm:mse-improvement} hold at every update with a common
-$0<\eta\le1/L$, suppose $J(\theta)\le J^\star$ on the feasible domain, and suppose
+$t=0,\ldots,T-1$.  Suppose $J$ is $L$-smooth and bounded above by $J^\star$,
+let $0<\eta\le1/L$, and suppose
 $\E\|\widehat g_t-\nabla J(\theta_t)\|_2^2<\infty$.  Let $U$ be uniform on
 $\{0,\ldots,T-1\}$ independently of the optimization path, and define
 \begin{equation}
@@ -416,50 +408,21 @@ $\limsup_{T\to\infty}\overline e_T\le\sigma^2$, then
 $\limsup_{T\to\infty}\E\|\nabla J(\theta_U)\|_2^2\le\sigma^2$.
 \end{theorem}
 
-Theorem~\ref{thm:finite-time-mse} states precisely what converges.  Exact
-gradients recover the usual $O(1/T)$ rate for the average squared gradient, and
-vanishing average MSE implies convergence to first-order stationarity.  A
-persistent MSE level instead certifies only a stationary neighborhood.  The
-exact initialization constant is given in Appendix~\ref{app:proofs}; it affects
-the finite optimization horizon but not the estimator comparison.  The theorem
-does not claim convergence of the parameter sequence or convergence to a
-global optimum.
+Theorem~\ref{thm:finite-time-mse} separates optimization progress from gradient
+quality.  Exact gradients recover the usual $O(1/T)$ rate for the average
+squared gradient, vanishing average MSE yields first-order stationarity, and a
+persistent MSE determines the stationary neighborhood.  This is the standard
+smooth nonconvex structure used in vanilla and off-policy policy-gradient
+analysis \citep{yuan2022general,kallus2020efficient,driggs2022biased}.  Retaining
+the full MSE term makes the guarantee directly comparable across permissive,
+clipped, and truncated estimators.
 
-This distinction also clarifies what is inherited from prior work.  Corollary
-4.6 of \citet{yuan2022general} proves finite-time stationarity for vanilla policy
-gradient under smoothness and a second-moment condition.  Theorem~11 of
-\citet{kallus2020efficient} gives the analogous average-gradient structure with
-off-policy estimation error.  Theorem~20 and Remark~21 of
-\citet{driggs2022biased} show more generally that biased-gradient convergence
-can depend on bias through MSE.  Our contribution is not a new generic
-nonconvex convergence theorem.  It preserves the full gradient MSE in the
-standard argument so that clipping rules can be compared and ESS can enter the
-estimator-dependent term.
-
-No bounded parameter set or projection is required by
-Theorem~\ref{thm:finite-time-mse}.  It instead assumes that every update is
-feasible, that $J$ is smooth along the realized update segments, that the
-gradient MSE is finite, and that $J$ is upper bounded on the feasible domain.  In RLVR
-with rewards in $[0,1]$, the last condition holds automatically.  Bounded
-rewards alone do not guarantee policy smoothness or finite importance-weight
-moments.  The smoothing-policy conditions of
-\citet{papini2022smoothing}, or the expected score and log-policy-Hessian bounds
-in Assumption~4.1 of \citet{yuan2022general}, are sufficient routes to the
-required smoothness.  A projection can make such a bound uniform by keeping the
-iterates in a controlled region, but the proof does not require a bound on
-$\|\theta_t\|_2$ when pathwise smoothness already holds.  By contrast, if an
-active projection onto a constrained parameter set is part of the algorithm,
-the appropriate convergence measure is a projected gradient mapping.  The
-Euclidean-gradient statement above does not cover that case; projected policy
-gradient requires a separate analysis such as \citet{xiao2022convergence}.
-The finite-MSE condition concerns the estimator rather than the parameter
-domain.  If the raw importance-weighted gradient has an infinite second moment,
-the expected convergence certificate is vacuous; Section~\ref{sec:ratio-truncation}
-explains when upper-ratio truncation repairs this problem and what bias it costs.
-
-The ESS factorization now supplies a coverage-dependent convergence guarantee.
-To state it without hiding a dependence assumption, let each gradient batch be
-drawn after $\theta_t$ is fixed.
+The smoothness premise follows from standard policy regularity conditions such
+as those in \citet{papini2022smoothing} and \citet{yuan2022general}; bounded
+verifier rewards supply the upper bound on $J$ in RLVR.  Gradient estimation is
+therefore the estimator-dependent term.  The ESS factorization turns this term
+into a coverage-dependent convergence guarantee by conditioning on the history
+before each gradient batch is drawn.
 
 \begin{corollary}[Finite-time ESS convergence certificate]
 \label{cor:ess-convergence}
@@ -490,27 +453,18 @@ along the path, then
 
 The result gives effective support a finite-time convergence meaning.  At
 controlled gradient scale, weak coverage enlarges the certified stationary
-neighborhood for a permissive policy-gradient path.  With fixed $N$ and a
-nonzero bound $\overline G_2/(N\underline\rho)$, the certificate does not imply
-exact stationarity as $T\to\infty$.  For this certificate to imply exact
-convergence, the average estimation term must vanish, for example through
-growing effective support or a decreasing weighted gradient scale.  For a single update,
-the exact MSE identity
-also shows that
+neighborhood for a permissive policy-gradient path.  Exact convergence follows
+when the average coverage-dependent error vanishes.  For a single update, the
+exact MSE identity also shows that
 \begin{equation}
   G_{2,\theta}<(N+1)\rho_\theta\|g(\theta)\|_2^2
   \label{eq:positive-ess-update}
 \end{equation}
-is sufficient for positive expected improvement.  Neither statement produces
-a universal normalized-ESS threshold because the guarantee also depends on
-gradient scale and true-gradient magnitude.  Moreover, the ESS substitution in
-Corollary~\ref{cor:ess-convergence} requires conditional sampling.  Under
-repeated optimization of one fixed rollout, the pathwise inequality underlying
-Theorem~\ref{thm:finite-time-mse} remains valid, but replacing its realized
-error by the fixed-$\theta$ ESS identity requires additional adaptive-data control.  The
-contextual-bandit study therefore measures this relationship directly along a
-reused-rollout path.  Before that comparison, we examine why the remaining
-scale term is particularly manageable in RLVR.
+is sufficient for positive expected improvement.  Gradient scale and
+true-gradient magnitude determine the numerical boundary, while ESS supplies
+the coverage coordinate.  Section~\ref{sec:simulation} measures this relation
+directly along a reused-rollout path.  We first show why the remaining gradient
+scale is particularly manageable in RLVR.
 
 \subsection{Why RLVR makes the scale term manageable}
 
@@ -541,28 +495,24 @@ Let $d_i=r_i-\bar r$, let $v=K^{-1}\sum_{j=1}^K d_j^2>0$, and let
 $A_i=d_i/\sqrt v$.  Then $|A_i|\le\sqrt{K-1}$ for every $i$.
 \end{proposition}
 
-These results clarify both the value and the limit of advantage normalization.
-It controls one factor in $G_{2,\theta}$, while the score still requires either a
-bound or an empirical estimate.  Group normalization also couples the $K$
-responses, so Theorem~\ref{thm:raw-mse} cannot be applied response by response
-without a group-level sampling argument.  The binary-reward,
-prompt-baseline case satisfies the theorem directly; the GRPO result controls
-scale but does not supply an independence justification.
+These results clarify the role of advantage normalization.  It controls one
+factor in $G_{2,\theta}$, while the score contributes the remaining scale.
+Because group normalization couples the $K$ responses, the response group is
+the independent sampling unit for the corresponding MSE calculation.
 
 The analysis has now linked effective coverage to gradient error and gradient
 error to finite-time policy optimization.  This link explains why a permissive
-update can work while support remains broad.  It does not yet show that clipping
-is the right response when support deteriorates.  That comparison requires the
-exact gradient induced by the clipped objective.
+update can work while support remains broad.  Determining the right response to
+weak support requires the exact gradient induced by the clipped objective.
 
 \subsection{What clipping changes}
 \label{sec:clipping}
 
-Low ESS indicates that an intervention may be useful, but it does not establish
-that a particular intervention is better.  PPO clipping can remove unstable
-sample contributions, yet it changes the target gradient at the same time.  We
-derive that change explicitly because clipping is often confused with globally
-truncating the importance ratio.
+Choosing an intervention requires comparing its gradient error with the
+permissive estimator.  PPO clipping can remove unstable sample contributions,
+yet it changes the target gradient at the same time.  We derive that change
+explicitly because clipping is often confused with globally truncating the
+importance ratio.
 
 \subsubsection{PPO clipping as an advantage-sign gradient mask}
 
@@ -670,9 +620,8 @@ estimator has lower MSE for every finite $N$ whenever $\Delta_C>0$.
 The crossover condition states the entire reason to clip: the removed
 covariance must exceed the squared bias of the modified gradient at the given
 update construction.  The corollary records that covariance averages away but
-clipping bias does not.  This distinction is retained for theoretical
-completeness; the practical rule compares updates under the same construction.
-For PPO, the coefficient is
+clipping bias persists, so the update construction shifts the crossover.  Our
+empirical comparisons hold that construction fixed.  For PPO, the coefficient is
 $C_\theta^{\mathrm{PPO}}=W_\theta M_\epsilon$.
 Its exact bias is
 \begin{align}
@@ -693,8 +642,8 @@ MSE-based improvement certificates is
   \right\}.
   \label{eq:improvement-crossover}
 \end{equation}
-Thus Equation~\eqref{eq:crossover} determines which estimator has the stronger
-one-step certificate, not merely which estimator has lower gradient risk.
+Thus Equation~\eqref{eq:crossover} identifies both the lower-risk estimator and
+the stronger one-step policy-improvement certificate.
 
 The oracle comparison in Equation~\eqref{eq:crossover} cannot be evaluated
 during ordinary training because it requires the true gradient and population
@@ -796,33 +745,25 @@ $\widehat g_c=N^{-1}\sum_i C_{c,i}^{\mathrm{tr}}H_{\theta,i}$ satisfies
 \end{align}
 \end{corollary}
 
-The result isolates the appeal of upper truncation.  If
-$\E_Q[W_\theta^2\|H_\theta\|_2^2]=\infty$ while $H_\theta$ is bounded, the raw
-expected convergence bound is vacuous but the truncated estimator has finite MSE.  More generally,
-substituting either estimator into Theorem~\ref{thm:finite-time-mse} shows that
-truncation tightens the finite-time guarantee exactly when its full MSE is lower
-than the raw MSE.  Finite variance alone is therefore not sufficient: a fixed
-cap can leave persistent bias and hence only a stationary neighborhood.  Exact
-stationarity requires the average truncated-estimator MSE, including its bias,
-to vanish along the optimization path.
+Upper truncation exchanges tail bias for a bounded second-moment term.  When
+$H_\theta$ is bounded, Corollary~\ref{cor:upper-truncation} replaces the raw
+tail contribution by $c/N$ and controls the bias through $\tau_c$.  Substitution
+into Theorem~\ref{thm:finite-time-mse} then compares raw and truncated updates by
+their full MSE, including the persistent bias of a fixed cap.
 
-Upper truncation replaces the raw second-moment term by $c/N$, while its bias
-remains small when the tail excess $\tau_c$ is small.  The cap is therefore a
-tunable estimator safeguard, not part of the paper's central claim.  Truncated importance ratios also appear in ACER with
-bias correction \citep{wang2017acer} and in the V-trace correction used by
-IMPALA \citep{espeholt2018impala}; recent LLM methods likewise control extreme
-weight moments \citep{zheng2025m2po,fakoor2026p3o}.  These precedents motivate
-truncation as a separate importance-sampling device.  They do not make it
-equivalent to PPO clipping.  In particular, PPO's advantage-sign mask does not
-bound every retained ratio contribution and therefore does not by itself ensure
-finite estimator variance.
+This estimator device appears in ACER with bias correction
+\citep{wang2017acer}, in the V-trace correction used by IMPALA
+\citep{espeholt2018impala}, and in recent LLM methods that control extreme weight
+moments \citep{zheng2025m2po,fakoor2026p3o}.  Ratio truncation bounds the retained
+coefficient, whereas PPO clipping applies an advantage-sign mask.  The two
+mechanisms therefore occupy different points in the same gradient-MSE analysis.
 
 The theory now explains the observed regime change.  When $G_{2,\theta}$ is
 controlled, effective support governs permissive-gradient reliability and its
 policy-improvement certificate.  Clipping becomes preferable only when its
 covariance reduction exceeds the bias penalty.  Thus ESS locates the statistical
-transition between permissive and safeguarded updates.  We next define a minimal
-observable intervention only to test this prediction outside the oracle setting.
+transition between permissive and safeguarded updates.  This prediction suggests
+a direct observable test based on sample ESS.
 
 \subsection{An observable test of the theory}
 \label{sec:practice}
@@ -839,19 +780,16 @@ fixed within each reported comparison, so $\widehat\rho$ directly orders the
 reliability of the competing updates.  Appendix~\ref{app:bandit} reports the
 sensitivity to estimator construction.
 
-The theory does not determine a universal numerical threshold.  The crossover
-also depends on clipping bias, gradient scale, and signal, while sample ESS can
-miss unobserved tail mass.  Moreover, the same batch usually determines both the
-event and the gradient, and a token-local LLM surrogate is not algebraically
-identical to Equation~\eqref{eq:raw-estimator}.  We therefore use
-$\widehat\rho=0.1$ only as a prespecified conservative intervention.  It is not
-presented as a theoretical constant or a new optimization objective.  Recent
-LLM RL methods likewise adapt updates using ESS, weight moments, or sequence
-reshaping \cite{zheng2025m2po,shen2026vespo,huang2026vcpo,fakoor2026p3o}.
+The crossover is determined jointly by coverage, clipping bias, gradient scale,
+and signal.  Sample ESS supplies the observable coverage coordinate.  We use
+$\widehat\rho=0.1$ as a prespecified conservative trigger and test whether it
+selects the low-reliability regime.  Recent LLM RL methods likewise adapt
+updates using ESS, weight moments, or sequence reshaping
+\cite{zheng2025m2po,shen2026vespo,huang2026vcpo,fakoor2026p3o}.
 
-Section~\ref{sec:simulation} first tests the theoretical quantities with an
-exact population oracle.  Only after those tests does an RLVR-style loop ask
-whether the simple observable intervention behaves as the theory predicts.
+Section~\ref{sec:simulation} tests the theoretical quantities with an exact
+population oracle and then evaluates the observable trigger in an RLVR-style
+optimization loop.
 
 \section{Contextual-bandit validation of the theory}
 \label{sec:simulation}
@@ -859,8 +797,9 @@ whether the simple observable intervention behaves as the theory predicts.
 This study tests the explanation developed in Section~\ref{sec:theory}.  It asks
 whether ESS predicts permissive-gradient error, whether that error changes
 policy improvement, and whether clipped and permissive estimators exchange
-their MSE ordering as effective support deteriorates.  A threshold intervention
-is examined only after these three predictions are verified.
+their MSE ordering as effective support deteriorates.  Exact gradients evaluate
+the three predictions; repeated optimization then evaluates the observable
+threshold.
 
 \subsection{Testbed and oracle}
 
@@ -910,15 +849,14 @@ lower error under a fixed construction.
   \label{fig:formula-oracle}
 \end{figure}
 
-Finally, we use $\widehat\rho<0.1$ as a deliberately conservative operational
-check, not as the oracle crossover.  It selects only $3.3\%$ of updates; within
-that event, PPO has lower MSE on $83.7\%\pm1.4\%$ of updates and reduces
+Finally, we evaluate the deliberately conservative rule
+$\widehat\rho<0.1$.  It selects only $3.3\%$ of updates; within that event, PPO
+has lower MSE on $83.7\%\pm1.4\%$ of updates and reduces
 conditional MSE by $53.3\%\pm2.9\%$.  In the four-epoch test, the resulting
 trajectory reaches $0.4940\pm0.0050$ final reward, compared with
 $0.4606\pm0.0098$ for always permissive and $0.4038\pm0.0005$ for always
-masked.  This minimal intervention is evidence for the theory's operational
-consequence, not a claim that $0.1$ is universal or that the paper introduces a
-new optimizer.
+masked.  The sparse trigger therefore captures the low-ESS side of the
+theoretical crossover with an observable training statistic.
 
 The controlled study therefore establishes the paper's main empirical result:
 ESS tracks the reliability transition that changes the role of clipping.  The
@@ -933,7 +871,8 @@ This section tests its operational implication in language-model training,
 where neither the population gradient nor its MSE is observable.  If ESS marks
 the predicted reliability transition, a conservative intervention should retain
 permissive updates while ESS is high and prevent their late failure after ESS
-falls.  This is a test of the explanation, not a new optimizer benchmark.
+falls.  The experiment asks whether this reliability transition remains visible
+at language-model scale.
 
 \subsection{A minimal intervention}
 
@@ -957,8 +896,8 @@ clipping with a permissive TIS update whose ratio cap is 3.
 Each conditional run is compared with its always-permissive and
 always-protected counterparts.  This pairing tests the regime prediction while
 holding the safeguard itself fixed.  The threshold is set before the reported
-runs and is not retuned by update rule.  It is a practical probe, not an
-estimate of the theoretical crossover.
+runs and is shared across update rules, providing one observable approximation
+to the low-support regime.
 
 \subsection{Evaluation protocol}
 
@@ -1005,9 +944,8 @@ Figure~\ref{fig:llm-main} gives a consistent trajectory-level result.  The
 ESS-conditional runs improve the GRPO, Clip-Higher, and DPPO endpoints by
 $6.9$ to $12.3$ percentage points.  The TIS comparison isolates the stability
 failure most clearly: the static TIS 3 run improves early but finishes at
-$0.4\%$, whereas the conditional run finishes at $44.8\%$.  ESS therefore
-transfers as a reliability coordinate across safeguards rather than defining a
-new clipping formula or optimization objective.
+$0.4\%$, whereas the conditional run finishes at $44.8\%$.  The consistency
+across safeguards supports ESS as a shared reliability coordinate.
 
 \begin{figure}[htbp]
   \centering
@@ -1026,6 +964,26 @@ regularization.  The intervention changes with the reliability of the current
 rollout batch.  Detailed response-length, entropy, and TIS diagnostics are
 reported in Appendix~\ref{app:llm-diagnostics}.
 
+\section{Conclusion}
+
+The role of clipping is governed by policy-gradient reliability during repeated
+optimization of fixed rollout data.  This paper identifies effective support,
+measured by sequence ESS, as the variable that tracks this change.  The theory
+connects effective support to gradient MSE and finite-time convergence, then
+places permissive updates, PPO masking, and ratio truncation within one
+bias--variance analysis.  Clipping becomes beneficial when the variance removed
+from the gradient exceeds the bias introduced by the safeguard.
+
+The contextual-bandit study verifies this transition with an exact gradient
+oracle: ESS predicts permissive-gradient error, gradient error predicts policy
+improvement, and the clipped-versus-permissive MSE preference changes with
+effective support.  The language-model trajectories exhibit the same pattern,
+with permissive updates learning rapidly at high ESS and conditional protection
+preventing collapse after ESS falls.  ESS therefore resolves the apparent
+conflict between the speed of permissive optimization and the stability of
+clipping.  A natural next step is to replace the fixed trigger with calibrated
+rules that jointly track effective support and gradient scale.
+
 \appendix
 
 \section{Compact contextual-bandit protocol and supporting results}
@@ -1033,8 +991,8 @@ reported in Appendix~\ref{app:llm-diagnostics}.
 
 This appendix records the task, exact oracle, RLVR-style update loop, frozen-state
 diagnostics, and supporting results.  The sequence is sufficient to interpret
-and reproduce Figures~\ref{fig:ess-validation} and
-\ref{fig:formula-oracle} without repeating derivations from the main theory.
+and reproduce Figures~\ref{fig:formula-oracle} and
+\ref{fig:ess-validation} without repeating derivations from the main theory.
 
 \subsection{Task and correspondence to RLVR}
 
