@@ -48,7 +48,9 @@ Because the exact comparison is unavailable during training, we derive a
 conditional guarantee for replacing it with an observable ESS gate.  A simple
 fixed threshold selects the low-ESS updates on which clipping reduces gradient
 error, masks only a small fraction of updates, and substantially improves
-lower-tail optimization performance.  These results identify ESS as a
+lower-tail optimization performance.  In language-model training, the same
+fixed gate improves the final score across several clipping rules and prevents
+the late collapse of a permissive update.  These results identify ESS as a
 practical reliability coordinate for deciding when to clip.
 \end{abstract}
 
@@ -68,25 +70,22 @@ RLVR practice reveals that this view is incomplete.  Clipping can remove
 gradients from low-probability tokens that carry useful new behavior, slowing
 early learning and contributing to entropy collapse
 \citep{yu2025dapo,park2025clipping}.  More permissive objectives can avoid this
-loss and improve reward faster, yet they may fail later in training; the
-motivating CISPO trajectory in Figure~\ref{fig:llm-motivation} exhibits this
-pattern \citep{minimax2025m1}.  These observations do not rank clipping and
-permissive optimization globally.  They indicate that the preferable update
-changes as a rollout batch becomes less representative of the current policy.
-The central question is therefore not whether to clip, but when clipping
-becomes necessary.
+loss and improve reward faster, yet they may fail later in training.
+Figure~\ref{fig:llm-motivation} shows this pattern for two permissive
+truncated-importance-sampling (TIS) updates: both learn rapidly at first, then
+collapse after sequence ESS approaches zero.  The failure is therefore not
+caused by the mere absence of PPO clipping.  It emerges after the rollout batch
+ceases to represent the current policy.  The central question is not whether to
+clip, but when clipping becomes necessary.
 
 \begin{figure}[H]
   \centering
-  \fbox{\parbox[c][1.28in][c]{0.94\linewidth}{\centering
-  \textbf{LLM empirical motivation placeholder}\\[4pt]
-  Insert the supplied training curves showing efficient early learning without
-  PPO masking, followed by the late CISPO collapse.  Overlay sequence ESS on
-  the same update axis and mark the proposed threshold at $0.1$.}}
-  \caption{Empirical motivation.  A permissive update improves reward rapidly
-  while the rollout batch remains representative, then fails after effective
-  support deteriorates.  The final figure will report the model, benchmark,
-  seeds, confidence intervals, and the onset of the ESS decline.}
+  \includegraphics[width=\linewidth]{figures_mains/motivation/overall.pdf}
+  \caption{Empirical motivation in Qwen3-30B-A3B RLVR.  With TIS caps of 3
+  and 5, AIME-2024 mean@16 initially improves without PPO clipping but later
+  collapses as normalized sequence ESS vanishes.  The dotted line marks the
+  prespecified $0.1$ gate studied below.  Each panel shows the available
+  training trajectory; multi-seed uncertainty is not shown.}
   \label{fig:llm-motivation}
 \end{figure}
 
@@ -133,9 +132,10 @@ prespecified $0.1$ trigger along its own training trajectory.  It selects a
 sparse region in which PPO has lower gradient error, preserves the typical
 endpoint of permissive optimization, and sharply improves its lower tail while
 masking only $3.3\%$ of updates.
-Section~\ref{sec:llm-experiments}
-specifies the matched LLM experiment needed to test whether the same regime
-change appears under PPO, Clip-Higher, and DPPO safeguards.
+In Qwen3-30B-A3B RLVR, the same fixed gate improves the final AIME-2024 score
+under GRPO, Clip-Higher, and DPPO, and prevents the collapse of TIS.  These
+language-model results test the decision rule where gradient MSE is no longer
+observable.
 
 \subsection{Related perspectives}
 
@@ -170,6 +170,8 @@ clipping improves the estimator.
 \item We derive the conditional guarantee of an observable ESS gate, recover
 the predicted crossover in a contextual-bandit verifier task, and show that a
 sparse fixed threshold improves the lower tail of repeated optimization.
+\item We apply the same fixed gate to language-model RLVR and observe higher
+final AIME-2024 scores across GRPO, Clip-Higher, DPPO, and TIS comparisons.
 \end{enumerate}
 
 The next section states the fixed-rollout problem in which this reliability
@@ -936,12 +938,11 @@ improving its late stability.
 At every policy update, we compute sequence ESS from the raw ratios before any
 masking or truncation.  All methods use the same valid sequences and minibatch
 construction.  We then evaluate $0.1$ as a prespecified heuristic:
-when $\widehat\rho\ge0.1$, the method retains the available learning signal
-using either the fully permissive estimator or the CISPO-style weight-capped
-estimator \citep{minimax2025m1}; when $\widehat\rho<0.1$, it activates one of
-three safeguards: conventional PPO clipping, Clip-Higher
-\citep{yu2025dapo}, or the divergence constraint of DPPO
-\citep{qi2026dppo}.
+when $\widehat\rho\ge0.1$, the method retains the permissive update; when
+$\widehat\rho<0.1$, it activates the safeguard associated with the comparison.
+We test conventional GRPO clipping, Clip-Higher \citep{yu2025dapo}, the
+divergence constraint of DPPO \citep{qi2026dppo}.  We also pair conventional
+clipping with a permissive TIS update whose ratio cap is 3.
 
 \begin{equation}
   \widehat g_{\mathrm{LLM}}
@@ -952,66 +953,76 @@ three safeguards: conventional PPO clipping, Clip-Higher
   \label{eq:llm-gate}
 \end{equation}
 Each gated method is compared with its always-permissive and always-protected
-counterparts under identical rollout, optimizer, token-budget, and evaluation
-settings.  This matching separates the value of the ESS decision from the value
-of the safeguard itself.  The threshold is fixed before the reported runs and
-is not retuned by safeguard, model, or benchmark.  It is not claimed to be the
-theoretical crossover.  The number of valid sequences is reported and held
-fixed within every matched comparison.
+counterparts.  This pairing separates the value of the ESS decision from the
+value of the safeguard itself.  The threshold is fixed before the reported
+runs and is not retuned by update rule.  It is a practical trigger, not an
+estimate of the theoretical crossover.
 
 \subsection{Evaluation protocol}
 
-The primary result will report evaluation reward against training steps for the
-permissive baseline, each always-active safeguard, and its ESS-gated version.
-A companion panel will align sequence ESS to the same horizontal axis and mark
-every switch in Equation~\eqref{eq:llm-gate}.  For at least three seeds, we will
-report the mean and confidence interval, peak and final reward, tokens to a
-fixed reward target, and a prespecified measure of post-peak collapse.  Entropy
-and response length will serve as diagnostics for the motivating failure mode.
+We optimize Qwen3-30B-A3B for 200 training steps and evaluate on AIME-2024 with
+mean@16.  The primary comparison is the complete evaluation trajectory and its
+step-200 endpoint.  We also align normalized sequence ESS and the fraction of
+clipped updates to the training axis to verify that the rule responds to a loss
+of effective support.  The supplied artifacts report one trajectory per
+configuration, so we report endpoint differences without uncertainty and treat
+them as trajectory-level evidence.
 
 \begin{figure}[H]
   \centering
-  \fbox{\parbox[c][1.42in][c]{0.94\linewidth}{\centering
-  \textbf{Main RLVR result placeholder}\\[4pt]
-  Insert matched reward curves for: permissive update, always PPO, ESS-gated
-  PPO, always Clip-Higher, ESS-gated Clip-Higher, always DPPO, and ESS-gated
-  DPPO.  Show mean and confidence interval across seeds.}}
-  \caption{Main RLVR comparison placeholder.  Each safeguard is evaluated when
-  always active and when activated by the prespecified ESS-$0.1$ heuristic,
-  under the same rollout and evaluation protocol.}
+  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/curves/overall.pdf}
+  \caption{ESS-gated RLVR on Qwen3-30B-A3B.  Each panel compares a static
+  update rule with the corresponding ESS-conditional variant using the same
+  threshold, $0.1$.  The legend reports step-200 AIME-2024 mean@16.  The gate
+  improves the endpoint under GRPO, Clip-Higher, and DPPO and prevents the
+  late collapse of TIS 3.}
   \label{fig:llm-main}
 \end{figure}
 
 \begin{table}[H]
 \centering
 \small
-\caption{Main RLVR results to be completed from the matched runs.  Higher is
-better for peak and final reward; lower is better for time to target and
-post-peak collapse.}
+\caption{Step-200 AIME-2024 mean@16 read from the reported trajectories.
+Gain is the ESS-gated score minus its static counterpart in percentage points.}
 \label{tab:llm-main}
-\begin{tabular}{lrrrr}
+\begin{tabular}{lrrr}
 \toprule
-Update rule & Peak reward $\uparrow$ & Final reward $\uparrow$ & Time to target $\downarrow$ & Collapse $\downarrow$ \\
+Update family & Static & ESS gated & Gain \\
 \midrule
-Permissive only & TBD & TBD & TBD & TBD \\
-PPO always active & TBD & TBD & TBD & TBD \\
-ESS-gated PPO & TBD & TBD & TBD & TBD \\
-Clip-Higher always active & TBD & TBD & TBD & TBD \\
-ESS-gated Clip-Higher & TBD & TBD & TBD & TBD \\
-DPPO always active & TBD & TBD & TBD & TBD \\
-ESS-gated DPPO & TBD & TBD & TBD & TBD \\
+GRPO, band $0.2/0.2$ & $26.2$ & $38.5$ & $+12.3$ \\
+GRPO Clip-Higher, band $0.2/0.28$ & $37.9$ & $44.8$ & $+6.9$ \\
+DPPO & $30.4$ & $39.2$ & $+8.8$ \\
+TIS 3 & $0.4$ & $44.8$ & $+44.4$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Interpretation criterion}
+\subsection{The gate acts when effective support deteriorates}
 
-The transfer claim is deliberately narrow.  If each gated variant retains the
-early progress of the permissive estimator while improving final reward or
-reducing collapse relative to its static alternatives, then ESS identifies a
-useful regime change across distinct safeguards.  This paragraph remains a
-placeholder until the measured effect sizes and uncertainty are available; at
-present, the contextual-bandit study is the paper's completed empirical evidence.
+Figure~\ref{fig:llm-main} gives a consistent trajectory-level result.  The
+ESS-conditional variants improve the GRPO, Clip-Higher, and DPPO endpoints by
+$6.9$ to $12.3$ percentage points.  The TIS comparison isolates the stability
+failure most clearly: without the gate, TIS 3 improves early but finishes at
+$0.4\%$; with the gate, it finishes at $44.8\%$.  ESS therefore transfers as a
+decision coordinate across safeguards rather than defining a new clipping
+formula.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/gate/overall.pdf}
+  \caption{What the ESS gate measures and when it intervenes.  Normalized
+  sequence ESS decreases during training (left), while the fraction of clipped
+  updates increases (right).  The rule therefore applies little protection
+  while effective support is broad and progressively activates each safeguard
+  as support deteriorates.}
+  \label{fig:llm-gate-action}
+\end{figure}
+
+The temporal ordering in Figure~\ref{fig:llm-gate-action} rules out a simpler
+interpretation in which the gain comes from adding a fixed amount of
+regularization.  The intervention changes with the reliability of the current
+rollout batch.  Detailed response-length, entropy, and TIS diagnostics are
+reported in Appendix~\ref{app:llm-diagnostics}.
 
 \appendix
 
@@ -1781,6 +1792,42 @@ and $0.0002\pm0.0100$ relative to PPO.  These endpoints do not establish a
 statistically resolved final-reward advantage over always masking.  They instead
 show that the gate recovers the masked endpoint after following the more
 efficient permissive trajectory through the reliable regime.
+
+\clearpage
+\section{Additional RLVR diagnostics}
+\label{app:llm-diagnostics}
+
+The main text reports evaluation performance and the gate action.  This section
+records the accompanying training dynamics and a second permissive TIS setting.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/dynamics/overall.pdf}
+  \caption{Training dynamics for the main comparisons.  The ungated TIS 3 run
+  develops extreme response length and entropy together with a collapse in
+  training reward.  The static safeguards and their ESS-gated variants avoid
+  this failure over the reported 200 steps.}
+  \label{fig:llm-dynamics}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/tis3_dynamics/overall.pdf}
+  \caption{Detailed TIS 3 comparison.  Without a gate, ESS falls below $0.01$
+  after step 77 and the response length and entropy diverge.  The fixed-$0.1$
+  gate increases the clipped fraction as ESS declines and keeps both diagnostics
+  controlled.}
+  \label{fig:tis3-dynamics}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/tis5/overall.pdf}
+  \caption{Replication with TIS cap 5.  The ungated trajectory collapses to
+  zero after ESS vanishes, whereas the fixed-$0.1$ gate reaches an AIME-2024
+  mean@16 score of $39.4\%$.}
+  \label{fig:tis5-replication}
+\end{figure}
 
 \clearpage
 \section{Proofs for the theoretical results}
