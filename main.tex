@@ -41,7 +41,7 @@ reinforcement learning with verifiable rewards, where permissive updates learn
 quickly but can fail after the policy moves too far from its rollout data.  We
 ask when clipping becomes useful.  We show that importance-weight concentration
 governs the reliability of a permissive gradient.  We connect this effective
-support to gradient error and policy improvement, then derive when clipping's
+support to gradient error and a finite-time optimization guarantee, then derive when clipping's
 variance reduction repays its bias.  An exactly evaluable contextual-bandit
 testbed recovers the predicted raw-versus-clipped gradient-error crossover.
 Because the exact comparison is unavailable during training, we derive a
@@ -108,8 +108,9 @@ justifies the bias it introduces.
 
 Establishing this thesis requires a bridge from coverage to optimization.  We
 derive the exact mean-squared error of the permissive gradient in terms of
-effective support and gradient scale.  We then show that gradient error enters
-a one-step policy-improvement guarantee.  Finally, we differentiate the PPO
+effective support and gradient scale.  We then show that gradient error controls
+both one-step policy improvement and finite-time convergence to a stationary
+region.  Finally, we differentiate the PPO
 surrogate to show that clipping is an advantage-dependent gradient mask, not
 global ratio truncation, and derive the exact bias--variance condition under
 which a modified gradient is preferable.  Together, these results make ESS a
@@ -155,15 +156,17 @@ Importance-sampling analyses use second moments and ESS to quantify coverage
 weight concentration, ESS, or sequence-level mismatch
 \citep{zheng2025m2po,shen2026vespo,huang2026vcpo,fakoor2026p3o}.  Our analysis
 adds the missing optimization link: it connects sequence ESS to gradient MSE,
-then connects that MSE to policy improvement and the clipping crossover.
+then connects that MSE to finite-time policy optimization and the clipping
+crossover.
 
 \subsection{Contributions}
 
 \begin{enumerate}
 \item We derive an exact connection between sequence ESS, effective support,
 and the mean-squared error of a fixed-rollout policy-gradient estimator.
-\item We connect gradient error to certified policy improvement and derive the
-exact bias--variance condition under which clipping improves the estimator.
+\item We connect gradient error to one-step improvement and finite-time
+stationarity, then derive the exact bias--variance condition under which
+clipping improves the estimator.
 \item We derive the conditional guarantee of an observable ESS gate, recover
 the predicted crossover in a contextual-bandit verifier task, and show that a
 sparse fixed threshold improves the lower tail of repeated optimization.
@@ -272,13 +275,14 @@ change the preferred policy update.
 
 Section~\ref{sec:setting} reduced fixed-rollout optimization to a sampled
 importance-weighted gradient and a measure of its effective support.  This
-section determines when that gradient is reliable, why its error affects policy
-improvement, and when clipping can reduce that error.  The argument follows one
-causal chain: poor coverage raises gradient error, gradient error weakens the
-policy update, and clipping becomes preferable only when its variance reduction
-repays its bias.  This chain gives ESS an operational role rather than treating
-it as another diagnostic of policy drift.  All proofs are given line by line in
-Appendix~\ref{app:proofs} so that the main argument remains visible.
+section determines when that gradient is reliable, how its error controls
+finite-time policy optimization, and when clipping can reduce that error.  The
+argument follows one causal chain: poor coverage raises gradient error, gradient
+error enlarges the certified stationary region, and clipping becomes preferable
+only when its variance reduction repays its bias.  This chain gives ESS an
+operational role rather than treating it as another diagnostic of policy drift.
+All proofs are given line by line in Appendix~\ref{app:proofs} so that the main
+argument remains visible.
 
 \subsection{When the permissive gradient is reliable}
 \label{sec:raw}
@@ -325,33 +329,36 @@ this paper holds that construction fixed and uses ESS to locate the reliability
 regime.  The next question is whether this statistical error has an optimization
 consequence.
 
-\subsection{Why gradient error matters for policy improvement}
+\subsection{From gradient MSE to finite-time policy optimization}
 \label{sec:mse-improvement}
 
-Smoothness turns gradient reliability into a policy-improvement statement.
-Theorem~7 of
-\citet{papini2022smoothing} shows that an $L$-smooth policy objective satisfies
-the following lower bound for any feasible parameter step $d$:
+Smoothness turns gradient reliability into an optimization guarantee.
+Theorem~7 of \citet{papini2022smoothing} shows that an $L$-smooth policy
+objective satisfies the following lower bound for any feasible parameter step
+$d$:
 \begin{equation}
   J(\theta+d)-J(\theta)
   \ge g(\theta)^\top d-\frac{L}{2}\|d\|_2^2.
   \label{eq:smooth-policy-improvement}
 \end{equation}
 The linear term rewards alignment with the true gradient, while the quadratic
-term penalizes an inaccurate or excessively large step.  The following result
-combines both effects into gradient MSE.  It therefore compares permissive,
-clipped, and truncated estimators on the same optimization scale.  Related
-analyses use gradient second moments for policy-gradient convergence
-\citep{yuan2022general}, gradient MSE for off-policy efficiency
-\citep{kallus2020efficient}, and joint bias and variance control for biased
-gradients \citep{driggs2022biased}.
+term penalizes an inaccurate or excessively large step.  Completing the square
+combines both effects into gradient error, so permissive, clipped, and truncated
+estimators can be compared on the same optimization scale.
 
-\begin{theorem}[Gradient MSE controls certified policy improvement]
+\begin{theorem}[Gradient error controls one-step policy improvement]
 \label{thm:mse-improvement}
 Fix $\theta$ and let $g=g(\theta)$.  Let $\widehat g$ be any, possibly biased,
-gradient estimator with finite second moment.  Suppose $J$ is $L$-smooth on
-every line segment from $\theta$ to $\theta+\eta\widehat g$, and that these
-updates are feasible.  For $0<\eta\le 1/L$,
+gradient estimate.  Suppose $J$ is $L$-smooth on the line segment from
+$\theta$ to $\theta+\eta\widehat g$, and that the update is feasible.  For
+$0<\eta\le 1/L$,
+\begin{equation}
+  J(\theta+\eta\widehat g)-J(\theta)
+  \ge \frac{\eta}{2}
+  \left\{\|g\|_2^2-\|\widehat g-g\|_2^2\right\}.
+  \label{eq:pointwise-improvement}
+\end{equation}
+If $\widehat g$ is random with finite second moment, then
 \begin{equation}
   \E\!\left[J(\theta+\eta\widehat g)-J(\theta)\right]
   \ge \frac{\eta}{2}
@@ -362,39 +369,95 @@ Consequently, $\E\|\widehat g-g\|_2^2<\|g\|_2^2$ is sufficient for positive
 expected policy improvement.
 \end{theorem}
 
-For two estimators used with the same learning rate, an MSE reduction of
-$\delta$ improves the
-certified lower bound by $\eta\delta/2$.  The statement compares guarantees,
-not every realized step, because the smoothness inequality need not be tight.
-Substituting the ESS factorization yields the promised consequence of effective
-coverage.
+The one-step statement extends directly to an entire optimization path.  This
+extension matters because policy-gradient convergence is typically assessed
+through first-order stationarity, not improvement of a single update.
 
-\begin{corollary}[ESS certificate for an unclipped update]
-\label{cor:ess-improvement}
-Under Theorems~\ref{thm:raw-mse} and \ref{thm:mse-improvement},
+\begin{corollary}[Finite-time stationarity under gradient error]
+\label{cor:finite-time-mse}
+Fix $\theta_0$, and let $\theta_{t+1}=\theta_t+\eta\widehat g_t$ for
+$t=0,\ldots,T-1$, and let $g_t=\nabla J(\theta_t)$.  Suppose the conditions of
+Theorem~\ref{thm:mse-improvement} hold at every update with a common
+$0<\eta\le1/L$, and suppose $J(\theta)\le J^\star$ along the path.  Then
 \begin{equation}
-  \E\!\left[J(\theta+\eta\widehat g_W)-J(\theta)\right]
-  \ge \frac{\eta}{2}
-  \left\{
-    \left(1+\frac1N\right)\|g\|_2^2
-    -\frac{G_{2,\theta}}{N\rho_\theta}
-  \right\}.
-  \label{eq:ess-improvement-certificate}
+  \frac1T\sum_{t=0}^{T-1}\|g_t\|_2^2
+  \le
+  \frac{2\{J^\star-J(\theta_0)\}}{\eta T}
+  +\frac1T\sum_{t=0}^{T-1}\|\widehat g_t-g_t\|_2^2.
+  \label{eq:finite-time-mse}
 \end{equation}
-In particular,
-\begin{equation}
-  G_{2,\theta}<(N+1)\rho_\theta\|g\|_2^2
-  \label{eq:positive-ess-update}
-\end{equation}
-is sufficient for positive expected policy improvement.
+If the estimates are random and $U$ is uniform on
+$\{0,\ldots,T-1\}$ independently of the optimization path, then taking
+expectation in \eqref{eq:finite-time-mse} gives the corresponding bound on
+$\E\|\nabla J(\theta_U)\|_2^2$ in terms of the average gradient MSE.
 \end{corollary}
 
-The corollary supplies the missing optimization meaning of effective support:
-at fixed signal and weighted gradient scale, larger $N\rho_\theta$ gives a
-stronger one-step improvement certificate.  It does not produce a universal
-normalized-ESS threshold, because reliability also depends on $N$,
-$G_{2,\theta}$, and the gradient signal.  To understand when ESS can
-nevertheless be informative in RLVR, we next examine the remaining scale term.
+The first term in \eqref{eq:finite-time-mse} vanishes with the optimization
+horizon, while the average gradient error determines the certified stationary
+region.  Within this guarantee, reducing average gradient MSE by $\delta$
+tightens the estimator-dependent term by the same $\delta$, without requiring
+the estimator to be unbiased.  This structure agrees with established analyses.
+Theorem~11 of
+\citet{kallus2020efficient} bounds the average squared policy gradient by an
+initial objective gap plus squared off-policy gradient-estimation error.
+Corollary~4.6 of \citet{yuan2022general} similarly retains a stochastic
+variance term in a conventional policy-gradient guarantee.  Theorem~20 and
+Remark~21 of \citet{driggs2022biased} further show that biased-gradient
+convergence can depend on bias through MSE, so an estimator may improve the
+guarantee when its variance reduction exceeds the cost of its bias.
+Corollary~\ref{cor:finite-time-mse} isolates this common principle in the form
+needed to compare clipping rules.
+
+The ESS factorization now supplies a coverage-dependent convergence guarantee.
+To state it without hiding a dependence assumption, let each gradient batch be
+drawn after $\theta_t$ is fixed.
+
+\begin{corollary}[Finite-time ESS certificate under conditional sampling]
+\label{cor:ess-convergence}
+In the setting of Corollary~\ref{cor:finite-time-mse}, let $\mathcal F_t$
+contain the history before update $t$, with $\theta_t$ measurable with respect
+to $\mathcal F_t$.  Suppose that, conditional on $\mathcal F_t$,
+$\widehat g_t$ is the raw estimator formed from $N$ independent draws from the
+rollout distribution $Q_t$.  Let $\rho_t$ and $G_{2,t}$ denote the corresponding
+population ESS and weighted gradient scale.  Then
+\begin{equation}
+  \E\|\nabla J(\theta_U)\|_2^2
+  \le
+  \frac{2\{J^\star-J(\theta_0)\}}{\eta T}
+  +\frac1T\sum_{t=0}^{T-1}
+    \E\!\left[\frac{G_{2,t}}{N\rho_t}\right].
+  \label{eq:ess-convergence}
+\end{equation}
+If $G_{2,t}\le\overline G_2$ and $\rho_t\ge\underline\rho>0$ almost surely
+along the path, then
+\begin{equation}
+  \E\|\nabla J(\theta_U)\|_2^2
+  \le
+  \frac{2\{J^\star-J(\theta_0)\}}{\eta T}
+  +\frac{\overline G_2}{N\underline\rho}.
+  \label{eq:ess-convergence-uniform}
+\end{equation}
+\end{corollary}
+
+The result gives effective support a finite-time meaning: at controlled
+gradient scale, weak coverage enlarges the certified upper bound on
+stationarity error for a permissive policy-gradient path.  For a single update,
+the exact MSE identity
+also shows that
+\begin{equation}
+  G_{2,\theta}<(N+1)\rho_\theta\|g(\theta)\|_2^2
+  \label{eq:positive-ess-update}
+\end{equation}
+is sufficient for positive expected improvement.  Neither statement produces
+a universal normalized-ESS threshold because the guarantee also depends on
+gradient scale and true-gradient magnitude.  Moreover, the ESS substitution in
+Corollary~\ref{cor:ess-convergence} requires conditional sampling.  Under
+repeated optimization of one fixed rollout, the pathwise bound
+\eqref{eq:finite-time-mse} remains valid, but replacing its realized error by
+the fixed-$\theta$ ESS identity requires additional adaptive-data control.  The
+contextual-bandit study therefore measures this relationship directly along a
+reused-rollout path.  Before that comparison, we examine why the remaining
+scale term is particularly manageable in RLVR.
 
 \subsection{Why RLVR makes the scale term manageable}
 
@@ -433,18 +496,11 @@ without a group-level sampling argument.  The binary-reward,
 prompt-baseline case satisfies the theorem directly; the GRPO result controls
 scale but does not supply an independence justification.
 
-\begin{remark}[Pointwise scope]
-The expectation is over a fresh batch at fixed $\theta$.  During same-batch
-optimization, $\theta$ depends on the fixed rollout data.  Extending
-\eqref{eq:ess-bridge} uniformly over that adaptive path requires additional
-stability or complexity control.
-\end{remark}
-
 The analysis has now linked effective coverage to gradient error and gradient
-error to policy improvement.  This link explains why a permissive update can
-work while support remains broad.  It does not yet show that clipping is the
-right response when support deteriorates.  That comparison requires the exact
-gradient induced by the clipped objective.
+error to finite-time policy optimization.  This link explains why a permissive
+update can work while support remains broad.  It does not yet show that clipping
+is the right response when support deteriorates.  That comparison requires the
+exact gradient induced by the clipped objective.
 
 \subsection{What clipping changes}
 \label{sec:clipping}

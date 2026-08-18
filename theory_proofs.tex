@@ -63,70 +63,152 @@ nonpositive term $-\|g\|_2^2/N$.
 
 \begin{proof}
 Apply \eqref{eq:smooth-policy-improvement} with
-$d=\eta\widehat g$ and take expectation:
+$d=\eta\widehat g$:
 \begin{align}
-  &\E\!\left[J(\theta+\eta\widehat g)-J(\theta)\right]
+  &J(\theta+\eta\widehat g)-J(\theta)
     \label{eq:mse-improvement-proof-1}\\
   &\quad\ge
-    \eta\E[g^\top\widehat g]
-    -\frac{L\eta^2}{2}\E\|\widehat g\|_2^2
+    \eta g^\top\widehat g
+    -\frac{L\eta^2}{2}\|\widehat g\|_2^2
     \label{eq:mse-improvement-proof-2}\\
   &\quad\ge
-    \eta\E[g^\top\widehat g]
-    -\frac{\eta}{2}\E\|\widehat g\|_2^2
+    \eta g^\top\widehat g
+    -\frac{\eta}{2}\|\widehat g\|_2^2
     \label{eq:mse-improvement-proof-3}\\
   &\quad=
-    \frac{\eta}{2}\E\!\left[
+    \frac{\eta}{2}\left(
       2g^\top\widehat g-\|\widehat g\|_2^2
-    \right]
+    \right)
     \label{eq:mse-improvement-proof-4}\\
   &\quad=
-    \frac{\eta}{2}\E\!\left[
+    \frac{\eta}{2}\left(
       \|g\|_2^2-\|\widehat g-g\|_2^2
-    \right]
-    \label{eq:mse-improvement-proof-5}\\
-  &\quad=
-    \frac{\eta}{2}
-    \left\{\|g\|_2^2-\E\|\widehat g-g\|_2^2\right\}.
-    \label{eq:mse-improvement-proof-6}
+    \right).
+    \label{eq:mse-improvement-proof-5}
 \end{align}
 Equation~\eqref{eq:mse-improvement-proof-2} uses the cited smoothness bound.
 Equation~\eqref{eq:mse-improvement-proof-3} uses $L\eta\le1$ and the
 nonnegativity of $\|\widehat g\|_2^2$.  Equation
-\eqref{eq:mse-improvement-proof-4} collects the two terms under one
-expectation.  Equation~\eqref{eq:mse-improvement-proof-5} uses
+\eqref{eq:mse-improvement-proof-4} collects the two terms.  Equation
+\eqref{eq:mse-improvement-proof-5} uses
 $2g^\top\widehat g-\|\widehat g\|_2^2
-=\|g\|_2^2-\|\widehat g-g\|_2^2$.  The final line moves the deterministic
-quantity $\|g\|_2^2$ outside the expectation.  If the MSE is below
-$\|g\|_2^2$, the right side is positive.
+=\|g\|_2^2-\|\widehat g-g\|_2^2$.  This proves
+\eqref{eq:pointwise-improvement}.  If $\widehat g$ is random, take expectation
+on both sides:
+\begin{align}
+  &\E\!\left[J(\theta+\eta\widehat g)-J(\theta)\right]
+    \label{eq:mse-improvement-proof-6}\\
+  &\quad\ge
+    \frac{\eta}{2}\E\!\left[
+      \|g\|_2^2-\|\widehat g-g\|_2^2
+    \right]
+    \label{eq:mse-improvement-proof-7}\\
+  &\quad=
+    \frac{\eta}{2}
+    \left\{\|g\|_2^2-\E\|\widehat g-g\|_2^2\right\}.
+    \label{eq:mse-improvement-proof-8}
+\end{align}
+Equation~\eqref{eq:mse-improvement-proof-7} uses
+\eqref{eq:pointwise-improvement}.  Equation
+\eqref{eq:mse-improvement-proof-8} moves the deterministic quantity
+$\|g\|_2^2$ outside the expectation.  This is
+\eqref{eq:mse-improvement}.  If the MSE is below $\|g\|_2^2$, its right side is
+positive.
 \end{proof}
 
-\subsection{Proof of Corollary~\ref{cor:ess-improvement}}
+\subsection{Proof of Corollary~\ref{cor:finite-time-mse}}
 
 \begin{proof}
-Substitute the exact MSE from \eqref{eq:ess-factorization} into
-\eqref{eq:mse-improvement}:
+Apply \eqref{eq:pointwise-improvement} at each update $t$:
 \begin{align}
-  &\E\!\left[J(\theta+\eta\widehat g_W)-J(\theta)\right]
-    \label{eq:ess-improvement-proof-1}\\
-  &\quad\ge\frac{\eta}{2}\left[
-    \|g\|_2^2
-    -\frac1N\left(
-      \frac{G_{2,\theta}}{\rho_\theta}-\|g\|_2^2
-    \right)
-  \right]
-    \label{eq:ess-improvement-proof-2}\\
-  &\quad=\frac{\eta}{2}\left\{
-    \left(1+\frac1N\right)\|g\|_2^2
-    -\frac{G_{2,\theta}}{N\rho_\theta}
-  \right\}.
-    \label{eq:ess-improvement-proof-3}
+  J(\theta_{t+1})-J(\theta_t)
+  &\ge\frac{\eta}{2}
+    \left\{\|g_t\|_2^2-\|\widehat g_t-g_t\|_2^2\right\}.
+    \label{eq:finite-time-proof-1}
 \end{align}
-Equation~\eqref{eq:ess-improvement-proof-2} applies
-Theorem~\ref{thm:mse-improvement}; Equation
-\eqref{eq:ess-improvement-proof-3} collects the two gradient-norm terms.  Its
-right side is positive exactly when
-$G_{2,\theta}<(N+1)\rho_\theta\|g\|_2^2$.
+Sum \eqref{eq:finite-time-proof-1} from $t=0$ to $T-1$:
+\begin{align}
+  \sum_{t=0}^{T-1}\{J(\theta_{t+1})-J(\theta_t)\}
+  &\ge\frac{\eta}{2}\sum_{t=0}^{T-1}\|g_t\|_2^2
+    -\frac{\eta}{2}\sum_{t=0}^{T-1}
+      \|\widehat g_t-g_t\|_2^2
+    \label{eq:finite-time-proof-2}\\
+  J(\theta_T)-J(\theta_0)
+  &\ge\frac{\eta}{2}\sum_{t=0}^{T-1}\|g_t\|_2^2
+    -\frac{\eta}{2}\sum_{t=0}^{T-1}
+      \|\widehat g_t-g_t\|_2^2.
+    \label{eq:finite-time-proof-3}
+\end{align}
+Equation~\eqref{eq:finite-time-proof-2} sums the one-step bounds.
+Equation~\eqref{eq:finite-time-proof-3} telescopes the objective differences.
+Rearrange one term per line and use $J(\theta_T)\le J^\star$:
+\begin{align}
+  \sum_{t=0}^{T-1}\|g_t\|_2^2
+  &\le\frac{2\{J(\theta_T)-J(\theta_0)\}}{\eta}
+    +\sum_{t=0}^{T-1}\|\widehat g_t-g_t\|_2^2
+    \label{eq:finite-time-proof-4}\\
+  &\le\frac{2\{J^\star-J(\theta_0)\}}{\eta}
+    +\sum_{t=0}^{T-1}\|\widehat g_t-g_t\|_2^2.
+    \label{eq:finite-time-proof-5}
+\end{align}
+Divide \eqref{eq:finite-time-proof-5} by $T$ to obtain
+\eqref{eq:finite-time-mse}.  For a uniform independent index $U$,
+\begin{align}
+  \E\|\nabla J(\theta_U)\|_2^2
+  &=\frac1T\sum_{t=0}^{T-1}\E\|g_t\|_2^2.
+    \label{eq:finite-time-proof-6}
+\end{align}
+Taking expectation in \eqref{eq:finite-time-mse} gives the stated random-path
+version.
+\end{proof}
+
+\subsection{Proof of Corollary~\ref{cor:ess-convergence}}
+
+\begin{proof}
+Condition on $\mathcal F_t$.  The parameter $\theta_t$ and rollout distribution
+$Q_t$ are then fixed, and the batch contains independent draws from $Q_t$.
+Apply Theorem~\ref{thm:raw-mse} conditionally:
+\begin{align}
+  \E\!\left[\|\widehat g_t-g_t\|_2^2\mid\mathcal F_t\right]
+  &=\frac1N\left(
+    \frac{G_{2,t}}{\rho_t}-\|g_t\|_2^2
+  \right)
+    \label{eq:ess-convergence-proof-1}\\
+  &\le\frac{G_{2,t}}{N\rho_t}.
+    \label{eq:ess-convergence-proof-2}
+\end{align}
+Equation~\eqref{eq:ess-convergence-proof-1} is the exact conditional MSE
+identity.  Equation~\eqref{eq:ess-convergence-proof-2} drops the nonpositive
+term $-\|g_t\|_2^2/N$.  Take expectation in
+\eqref{eq:finite-time-mse} and substitute
+\eqref{eq:ess-convergence-proof-2}:
+\begin{align}
+  \E\|\nabla J(\theta_U)\|_2^2
+  &\le\frac{2\{J^\star-J(\theta_0)\}}{\eta T}
+    +\frac1T\sum_{t=0}^{T-1}
+      \E\|\widehat g_t-g_t\|_2^2
+    \label{eq:ess-convergence-proof-3}\\
+  &\le\frac{2\{J^\star-J(\theta_0)\}}{\eta T}
+    +\frac1T\sum_{t=0}^{T-1}
+      \E\!\left[\frac{G_{2,t}}{N\rho_t}\right].
+    \label{eq:ess-convergence-proof-4}
+\end{align}
+Equation~\eqref{eq:ess-convergence-proof-3} uses the random-path conclusion of
+Corollary~\ref{cor:finite-time-mse}.  Equation
+\eqref{eq:ess-convergence-proof-4} applies the conditional MSE bound and the
+tower property.  This proves \eqref{eq:ess-convergence}.  Under the uniform
+bounds in the corollary,
+\begin{align}
+  \frac1T\sum_{t=0}^{T-1}
+    \E\!\left[\frac{G_{2,t}}{N\rho_t}\right]
+  &\le\frac1T\sum_{t=0}^{T-1}
+    \frac{\overline G_2}{N\underline\rho}
+    \label{eq:ess-convergence-proof-5}\\
+  &=\frac{\overline G_2}{N\underline\rho}.
+    \label{eq:ess-convergence-proof-6}
+\end{align}
+Substitution into \eqref{eq:ess-convergence-proof-4} gives
+\eqref{eq:ess-convergence-uniform}.
 \end{proof}
 
 \subsection{Proof of Proposition~\ref{prop:g2-bound}}
