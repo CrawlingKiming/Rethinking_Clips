@@ -22,12 +22,14 @@
 \newtheorem{corollary}[theorem]{Corollary}
 \theoremstyle{remark}
 \newtheorem{remark}[theorem]{Remark}
+\newfloat{algorithm}{tbp}{loa}
+\floatname{algorithm}{Algorithm}
 
 \newcommand{\E}{\mathbb{E}}
 \newcommand{\Cov}{\operatorname{Cov}}
 
-\title{\bf When Should We Clip?\\
-Effective Sample Size as a Criterion}
+\title{\bf When Does Clipping Help?\\
+Effective Sample Size and Policy-Gradient Reliability}
 \author{Dongkyu Derek Cho, Thomas Voice}
 \date{}
 
@@ -35,107 +37,103 @@ Effective Sample Size as a Criterion}
 \maketitle
 
 \begin{abstract}
-Clipping is widely treated as necessary for policy optimization, yet it
-can also discard useful learning signal.  This tension is pronounced in
-reinforcement learning with verifiable rewards, where permissive updates learn
-quickly but can fail after the policy moves too far from its rollout data.  We
-ask when clipping becomes useful.  We show that importance-weight concentration
-governs the reliability of a permissive gradient.  We connect this effective
-support to gradient error and a finite-time optimization guarantee, then derive when clipping's
-variance reduction repays its bias.  An exactly evaluable contextual-bandit
-testbed recovers the predicted raw-versus-clipped gradient-error crossover.
-Because the exact comparison is unavailable during training, we derive a
-conditional guarantee for replacing it with an observable ESS gate.  A simple
-fixed threshold selects the low-ESS updates on which clipping reduces gradient
-error, masks only a small fraction of updates, and substantially improves
-lower-tail optimization performance.  In language-model training, the same
-fixed gate improves the final score across several clipping rules and prevents
-the late collapse of a permissive update.  These results identify ESS as a
-practical reliability coordinate for deciding when to clip.
+Clipping is widely treated as a safeguard for stable policy optimization.  Yet
+permissive updates can learn faster and reach higher reward before sometimes
+collapsing late in training.  Existing methods respond by changing clipping
+boundaries or constraints, but this pattern lacks a common statistical
+explanation.  We identify the effective support of the rollout data, measured
+by effective sample size (ESS), as the missing link.  We prove that effective
+support controls the gradient error of a permissive update, connect that error
+to finite-time convergence, and characterize when clipping's variance reduction
+repays its bias.  This analysis shows that the absence of clipping is not
+inherently unstable: permissive gradients are reliable while support is broad,
+whereas clipping can become useful after support concentrates.  An exactly
+evaluable contextual bandit verifies the predicted connection among ESS,
+gradient error, policy improvement, and the clipped-versus-permissive crossover.
+A deliberately simple ESS-triggered intervention then tests this implication in
+language-model training, where it prevents late collapse and improves final
+scores across several safeguards.  The intervention is an operational check of
+the theory, not the paper's primary contribution.
 \end{abstract}
 
 \section{Introduction}
 
-Policy optimization on fixed rollout data faces a basic mismatch: the policy
-being updated is no longer the policy that generated the data.  PPO addresses
-this mismatch with a clipped surrogate that suppresses selected samples once
-their likelihood ratios cross a prescribed boundary \citep{schulman2017ppo}.
-The same mechanism is now standard in reinforcement learning with verifiable
-rewards (RLVR), where an expensive rollout batch is followed by several policy
-updates \citep{shao2024deepseekmath}.  Because the mismatch grows during these
-updates, clipping is often treated as a necessary condition for stable
-training.
+Policy optimization on fixed rollout data is commonly stabilized by clipping.
+The updated policy no longer matches the policy that generated the data, so PPO
+suppresses selected samples after their likelihood ratios cross a prescribed
+boundary \citep{schulman2017ppo}.  RLVR inherits this mechanism because an
+expensive rollout batch is typically followed by several policy updates
+\citep{shao2024deepseekmath}.  This standard account treats clipping as the
+protection needed when policy mismatch grows.
 
-RLVR practice reveals that this view is incomplete.  Clipping can remove
-gradients from low-probability tokens that carry useful new behavior, slowing
-early learning and contributing to entropy collapse
-\citep{yu2025dapo,park2025clipping}.  More permissive objectives can avoid this
-loss and improve reward faster, yet they may fail later in training.
-Figure~\ref{fig:llm-motivation} shows this pattern for two permissive
-truncated-importance-sampling (TIS) updates: both learn rapidly at first, then
-collapse after sequence ESS approaches zero.  The failure is therefore not
-caused by the mere absence of PPO clipping.  It emerges after the rollout batch
-ceases to represent the current policy.  The central question is not whether to
-clip, but when clipping becomes necessary.
+The empirical record is more complicated.  Clipping can discard gradients from
+low-probability tokens that express useful new behavior, which can slow early
+learning and alter entropy dynamics \citep{yu2025dapo,park2025clipping}.  More
+permissive objectives can therefore learn faster and sometimes reach higher
+reward, but the same runs may collapse later.  Figure~\ref{fig:llm-motivation}
+shows this pattern for two truncated-importance-sampling (TIS) updates: both
+improve rapidly without PPO clipping and fail only after sequence ESS approaches
+zero.  The absence of clipping is therefore not itself the instability.
 
-\begin{figure}[H]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/motivation/overall.pdf}
   \caption{Empirical motivation in Qwen3-30B-A3B RLVR.  With TIS caps of 3
   and 5, AIME-2024 mean@16 initially improves without PPO clipping but later
   collapses as normalized sequence ESS vanishes.  The dotted line marks the
-  prespecified $0.1$ gate studied below.  Each panel shows the available
+  prespecified $0.1$ threshold studied below.  Each panel shows the available
   training trajectory; multi-seed uncertainty is not shown.}
   \label{fig:llm-motivation}
 \end{figure}
 
-Common diagnostics do not locate this change of regime.  A clipping threshold
-specifies how to modify an individual sample, an update count records how long
-the batch has been optimized, and a divergence summarizes how far the policy
-has moved \citep{qi2026dppo}.  None of these quantities directly measures
-whether the fixed batch still supports an accurate gradient for the current
-policy.  That question depends on the concentration of the sequence importance
-weights across the entire batch.
+Existing approaches mainly change the intervention rather than explain this
+change of regime.  A clipping threshold specifies how to alter an individual
+sample, an update count measures time spent on a rollout, and a divergence
+summarizes policy movement \citep{qi2026dppo}.  None directly answers whether
+the fixed rollout still supports an accurate gradient for the current policy.
+Without that reliability variable, clipped and permissive objectives remain a
+collection of useful but objective-specific heuristics.
 
-Sequence effective sample size (ESS) measures this concentration.  ESS is high
-when support is distributed across many responses and low when only a few
-responses carry most of the importance weight.  Our central thesis is that the
-absence of clipping is not inherently unstable.  A permissive update remains
-statistically reliable while its effective support is sufficient.  Clipping
-becomes useful when support deteriorates enough that the variance it removes
-justifies the bias it introduces.
+This paper identifies sequence effective sample size (ESS) as the missing
+reliability variable.  ESS is high when importance weight is distributed across
+many responses and low when a few responses dominate the update.  Our central
+claim is that a permissive gradient remains statistically reliable while this
+effective support is broad.  As support concentrates, its gradient error grows,
+and clipping can become preferable when the variance it removes exceeds the
+bias it introduces.  This view explains both sides of the empirical pattern:
+unclipped optimization can be efficient before it becomes unreliable.
 
-Establishing this thesis requires a bridge from coverage to optimization.  We
-derive the exact mean-squared error of the permissive gradient in terms of
-effective support and gradient scale.  We then show that gradient error controls
-both one-step policy improvement and finite-time convergence to a first-order
-stationary neighborhood.  Finally, we differentiate the PPO
-surrogate to show that clipping is an advantage-dependent gradient mask, not
-global ratio truncation, and derive the exact bias--variance condition under
-which a modified gradient is preferable.  Together, these results make ESS a
-reliability coordinate for locating the regime in which a safeguard becomes
-worthwhile.
+We establish this explanation through one theoretical chain.  First, we derive
+the exact mean-squared error of the permissive gradient in terms of ESS and a
+weighted gradient scale.  Second, we show that this error controls one-step
+policy improvement and finite-time convergence.  Third, we differentiate the
+PPO surrogate and show that clipping is an advantage-sign gradient mask, not
+global ratio truncation.  The resulting bias--variance condition states exactly
+when the clipped estimator has lower gradient error.  ESS is therefore not a
+new objective; it is the bridge that connects rollout coverage to the changing
+role of clipping.
 
-We test every link in an exactly evaluable verifier problem before transferring
-the rule to language-model training.  The contextual-bandit study follows the
-rollout and minibatch order of RLVR while exposing the population gradient and
-reward.
-Across 100 paired runs, ESS predicts both gradient error and the sign of the
-resulting reward change.  Paired redraws at frozen policy states recover the
-predicted estimator crossover: PPO masking has lower MSE when effective support
-is scarce, while the permissive estimator has lower MSE when support is broad.
-A disjoint calibration split then fits an oracle reference without using the
-held-out outcomes and improves held-out gradient risk relative to either static
-choice.  Since that oracle calculation is unavailable in RLVR, we prove the
-conditional MSE guarantee supplied by an observable gate and test a
-prespecified $0.1$ trigger along its own training trajectory.  It selects a
-sparse region in which PPO has lower gradient error, preserves the typical
-endpoint of permissive optimization, and sharply improves its lower tail while
-masking only $3.3\%$ of updates.
-In Qwen3-30B-A3B RLVR, the same fixed gate improves the final AIME-2024 score
-under GRPO, Clip-Higher, and DPPO, and prevents the collapse of TIS.  These
-language-model results test the decision rule where gradient MSE is no longer
-observable.
+An exactly evaluable contextual bandit tests each link without relying on an
+LLM-scale proxy.  Its RLVR-style rollout loop preserves sequence ratios and
+group-relative advantages, while its finite population exposes the true
+gradient and reward.  Across 100 paired runs, lower ESS predicts larger
+permissive-gradient error and harmful policy steps.  Independent redraws at
+frozen policies then recover the predicted crossover under a fixed diagnostic
+construction: clipping has lower MSE when effective support is scarce, whereas
+the permissive estimator is favored when support is broad.  These results
+validate the explanation rather than benchmark a new bandit algorithm.
+
+The theory also has a simple operational implication.  If clipping is useful
+only after effective support deteriorates, a conservative ESS threshold should
+preserve permissive learning in the reliable regime and activate protection in
+the unreliable regime.  We use this minimal intervention as a falsifiable test,
+not as the paper's main innovation.  In the controlled study it selects a sparse
+set of high-error updates and improves lower-tail optimization.  In
+Qwen3-30B-A3B RLVR, the same prespecified trigger improves the reported final
+AIME-2024 score under GRPO, Clip-Higher, DPPO, and TIS comparisons, and prevents
+the late TIS collapse shown in Figure~\ref{fig:llm-motivation}.  These
+trajectory-level results show that the theoretical regime change remains useful
+when the true gradient is no longer observable.
 
 \subsection{Related perspectives}
 
@@ -147,31 +145,30 @@ same constraint throughout training.  DAPO relaxes the upper boundary,
 Clip-Low changes entropy behavior, CISPO retains gradients beyond the PPO
 boundary, and DPPO replaces ratio clipping with a divergence-based constraint
 \citep{yu2025dapo,park2025clipping,minimax2025m1,qi2026dppo}.  These methods
-change the intervention; our question is when an intervention is statistically
-warranted.
+change the intervention.  Our analysis explains the common regime change that
+determines when any such intervention is statistically warranted.
 
 \paragraph{Reliability under policy mismatch.}
 Importance-sampling analyses use second moments and ESS to quantify coverage
 \citep{metelli2018pois,metelli2020is}.  Recent LLM methods likewise adapt to
 weight concentration, ESS, or sequence-level mismatch
 \citep{zheng2025m2po,shen2026vespo,huang2026vcpo,fakoor2026p3o}.  Our analysis
-adds the missing optimization link: it connects sequence ESS to gradient MSE,
-then connects that MSE to finite-time policy optimization and the clipping
-crossover.
+provides the missing theoretical link: sequence ESS controls gradient MSE, and
+that MSE determines both finite-time convergence and the clipping crossover.
 
 \subsection{Contributions}
 
 \begin{enumerate}
-\item We derive an exact connection between sequence ESS, effective support,
-and the mean-squared error of a fixed-rollout policy-gradient estimator.
-\item We connect gradient error to finite-time convergence to first-order
-stationarity, then derive the exact bias--variance condition under which
-clipping improves the estimator.
-\item We derive the conditional guarantee of an observable ESS gate, recover
-the predicted crossover in a contextual-bandit verifier task, and show that a
-sparse fixed threshold improves the lower tail of repeated optimization.
-\item We apply the same fixed gate to language-model RLVR and observe higher
-final AIME-2024 scores across GRPO, Clip-Higher, DPPO, and TIS comparisons.
+\item We identify effective support as the missing link between policy mismatch
+and update reliability, and derive its exact connection to the mean-squared
+error of a fixed-rollout policy-gradient estimator.
+\item We connect gradient error to finite-time convergence and derive the exact
+bias--variance condition that determines when clipping helps, while separating
+PPO masking from numerical ratio truncation.
+\item We validate the predicted ESS--error relationship and
+clipped-versus-permissive crossover with an exact contextual-bandit oracle, then
+use a minimal ESS-triggered intervention to test the theory in language-model
+RLVR.
 \end{enumerate}
 
 The next section states the fixed-rollout problem in which this reliability
@@ -701,10 +698,11 @@ one-step certificate, not merely which estimator has lower gradient risk.
 
 The oracle comparison in Equation~\eqref{eq:crossover} cannot be evaluated
 during ordinary training because it requires the true gradient and population
-moments.  An ESS gate replaces that unavailable comparison with an observable
-event.  The next result states exactly what such a replacement guarantees.
+moments.  To make the theory falsifiable with observable quantities, consider
+the simplest proxy: switch estimators only on a low-ESS event.  The next result
+states the conditional risk implication of that test.
 
-\begin{proposition}[Conditional guarantee for an ESS gate]
+\begin{proposition}[Conditional risk of an ESS-indexed switch]
 \label{prop:ess-gate-guarantee}
 Let $D_\tau=\{\widehat\rho<\tau\}$, assume that $D_\tau$ and $D_\tau^c$
 have positive probability, and define
@@ -726,7 +724,7 @@ $R_j(D):=\E[\|\widehat g_j-g\|_2^2\mid D]$.  Then
   &=\Pr(D_\tau^c)\{R_W(D_\tau^c)-R_C(D_\tau^c)\}.
   \label{eq:gate-versus-clipped}
 \end{align}
-Hence the gate has no larger MSE than either static estimator whenever
+Hence the switch has no larger MSE than either static estimator whenever
 $R_C(D_\tau)\le R_W(D_\tau)$ and
 $R_W(D_\tau^c)\le R_C(D_\tau^c)$.  Under the assumptions of
 Theorem~\ref{thm:mse-improvement}, the same ordering holds for the associated
@@ -734,7 +732,7 @@ MSE-based policy-improvement certificates.
 \end{proposition}
 
 \begin{proof}
-Because the two events partition the sample space and the gate equals one
+Because the two events partition the sample space and the switch equals one
 estimator on each event,
 \begin{align}
   \operatorname{MSE}(\widehat g_\tau)
@@ -753,20 +751,19 @@ Similarly,
   &=\Pr(D_\tau)R_C(D_\tau)
     +\Pr(D_\tau^c)R_C(D_\tau^c).
 \end{align}
-Subtracting each static risk from the gated risk gives
+Subtracting each static risk from the conditional risk gives
 Equations~\eqref{eq:gate-versus-raw} and
 \eqref{eq:gate-versus-clipped}.  The risk ordering follows term by term.
 The final claim follows by substituting each MSE into
 Equation~\eqref{eq:mse-improvement} at the same learning rate.
 \end{proof}
 
-Proposition~\ref{prop:ess-gate-guarantee} does not make $0.1$ a universal
-constant.  It instead gives a falsifiable requirement for any proposed
-threshold: below the threshold, masking should reduce conditional gradient
-MSE; above it, the permissive estimator should retain the advantage.  The
-contextual-bandit experiment will first verify the oracle crossover and then
-test whether the observable choice $\tau=0.1$ satisfies the low-ESS part of
-this requirement well enough to serve as a practical bridge to RLVR.
+Proposition~\ref{prop:ess-gate-guarantee} turns the theoretical explanation into
+a falsifiable empirical condition.  Any threshold must identify a region in
+which masking lowers conditional gradient MSE; outside that region, the
+permissive estimator should retain its advantage.  The contextual-bandit study
+first verifies the oracle crossover and only then tests $\tau=0.1$ as a
+conservative observable approximation.
  
 \subsubsection{Ratio truncation bias trade-off}
 \label{sec:ratio-truncation}
@@ -820,15 +817,14 @@ equivalent to PPO clipping.  In particular, PPO's advantage-sign mask does not
 bound every retained ratio contribution and therefore does not by itself ensure
 finite estimator variance.
 
-The theory now yields a complete decision logic.  When $G_{2,\theta}$ is
+The theory now explains the observed regime change.  When $G_{2,\theta}$ is
 controlled, effective support governs permissive-gradient reliability and its
 policy-improvement certificate.  Clipping becomes preferable only when its
-covariance reduction exceeds the bias penalty.  Thus, within a fixed training
-configuration, ESS can locate the crossover between permissive and safeguarded
-updates.  The final step is to turn this population comparison into an
-observable training rule.
+covariance reduction exceeds the bias penalty.  Thus ESS locates the statistical
+transition between permissive and safeguarded updates.  We next define a minimal
+observable intervention only to test this prediction outside the oracle setting.
 
-\subsection{The ESS-guided decision rule}
+\subsection{An observable test of the theory}
 \label{sec:practice}
 
 Population ESS is unavailable during training, but its plug-in estimate is
@@ -843,162 +839,103 @@ fixed within each reported comparison, so $\widehat\rho$ directly orders the
 reliability of the competing updates.  Appendix~\ref{app:bandit} reports the
 sensitivity to estimator construction.
 
-The theory motivates a reliability gate but does not determine a numerical
-threshold.  The exact boundary also depends on clipping bias, gradient scale,
-and signal, while sample ESS can miss unobserved tail mass.  Moreover, the same
-batch usually determines both the gate and the gradient, and a token-local LLM
-surrogate is not algebraically identical to
-Equation~\eqref{eq:raw-estimator}.  We therefore treat $\widehat\rho=0.1$ as a
-prespecified application heuristic, not as a theoretical constant.  Recent LLM
-RL methods likewise adapt updates using ESS, weight moments, or sequence
+The theory does not determine a universal numerical threshold.  The crossover
+also depends on clipping bias, gradient scale, and signal, while sample ESS can
+miss unobserved tail mass.  Moreover, the same batch usually determines both the
+event and the gradient, and a token-local LLM surrogate is not algebraically
+identical to Equation~\eqref{eq:raw-estimator}.  We therefore use
+$\widehat\rho=0.1$ only as a prespecified conservative intervention.  It is not
+presented as a theoretical constant or a new optimization objective.  Recent
+LLM RL methods likewise adapt updates using ESS, weight moments, or sequence
 reshaping \cite{zheng2025m2po,shen2026vespo,huang2026vcpo,fakoor2026p3o}.
 
-Section~\ref{sec:simulation} tests whether these theoretical quantities support
-an actual update decision.  A contextual bandit exposes the population gradient
-needed to validate the MSE analysis, while an RLVR-style optimization loop tests
-whether the resulting ESS gate improves policy learning.  This controlled bridge
-must succeed before the rule is transferred to language-model training.
+Section~\ref{sec:simulation} first tests the theoretical quantities with an
+exact population oracle.  Only after those tests does an RLVR-style loop ask
+whether the simple observable intervention behaves as the theory predicts.
 
-\section{Contextual-bandit validation of the ESS decision rule}
+\section{Contextual-bandit validation of the theory}
 \label{sec:simulation}
 
-The purpose of this study is to validate the paper's decision logic, not to
-benchmark contextual-bandit performance.  It asks three questions in the order
-required by the theory.  First, does ESS predict the error and policy consequence
-of a permissive gradient?  Second, does ESS locate the raw-versus-PPO MSE
-crossover under a fixed diagnostic setting?  Third, does the observable $0.1$
-gate select high-risk updates and improve policy optimization?  Answering all
-three turns ESS from a descriptive statistic into a candidate training rule.
+This study tests the explanation developed in Section~\ref{sec:theory}.  It asks
+whether ESS predicts permissive-gradient error, whether that error changes
+policy improvement, and whether clipped and permissive estimators exchange
+their MSE ordering as effective support deteriorates.  A threshold intervention
+is examined only after these three predictions are verified.
 
-\subsection{Why a contextual-bandit testbed?}
+\subsection{Testbed and oracle}
 
-An LLM experiment cannot answer the first two questions directly because its
-population gradient and reward are unknown.  We therefore use the standard
-classification-to-contextual-bandit reduction
-\citep{wang2017adaptive}.  An Optdigits image is the context, the policy action
-is a 16-token binary encoding of its digit, and an exact-match verifier returns
-one only for the correct sequence \citep{alpaydin1998optdigits}.  The finite
-population makes the policy gradient and reward exact, while the sequence action
-retains the product importance ratio that drives ESS in RLVR.  The testbed is
-therefore deliberately simpler than language generation but better suited to
-testing the theory.
+We use the standard reduction from classification to a contextual bandit on Optdigits
+\citep{wang2017adaptive,alpaydin1998optdigits}.  Each handwritten-digit image is
+a context, the policy emits a 16-token binary encoding of the digit, and an
+exact-match verifier supplies reward.  Because the dataset is a finite
+population, we can enumerate the exact reward and policy gradient.  The
+sequence action still produces the product importance ratios that drive ESS in
+RLVR, so the testbed removes language-model complexity without removing the
+statistical mechanism of interest.
 
-We embed this bandit in the data flow used by RLVR
-\citep{shao2024deepseekmath,yu2025dapo}.  Each rollout generates grouped
-responses, computes leave-one-out advantages, and supplies 16 sequential policy
-minibatches.  Ratios and sample ESS are recomputed before every update, and a new
-rollout is collected only after the current one has been optimized.  ESS thus
-changes because the current policy moves away from its rollout policy, not
-because we impose an artificial ratio distribution.  We compare raw, PPO-masked,
-and ESS-gated updates in 100 paired replications.  Appendix~\ref{app:bandit}
-specifies the task, oracle, randomization, and aggregation protocol in full.
+The optimization loop follows grouped RLVR
+\citep{shao2024deepseekmath,yu2025dapo}.  Each rollout samples 128 prompts and
+16 responses per prompt, computes leave-one-out advantages, and supplies 16
+sequential minibatch updates.  Ratios and ESS are recomputed before every update,
+and a new rollout is collected only afterward.  We run 100 paired replications;
+Appendix~\ref{app:bandit} gives the compact protocol and full result tables.
 
-\subsection{Oracle measurements verify the theory}
+\subsection{The predicted regime change appears}
 
-We begin with the quantities that are observable only because the bandit has
-an exact oracle.  The first test evaluates the permissive estimator against the
-population gradient and then evaluates the resulting policy step against the
-population reward.  Its gradient MSE is $1.6\times10^{-2}$ above ESS $0.8$,
-rises to $1.31\times10^{-1}$ between $0.03$ and $0.1$, and reaches
-$4.77\times10^{-1}$ below $0.03$.  The optimization consequence appears in the
-same region.  Permissive steps reduce reward by $4.0\%$ in the
-$[0.03,0.1)$ interval and by $13.3\%$ below $0.03$, whereas the corresponding
-oracle-gradient steps improve reward in every interval.  ESS therefore
-identifies estimation failure rather than an unfavorable population objective.
-Appendix Figure~\ref{fig:ess-validation} and
-Table~\ref{tab:rlvr-diagnostics} report the complete result.
+ESS first predicts the reliability of the permissive gradient.  Its MSE rises
+from $1.6\times10^{-2}$ above ESS $0.8$ to $1.31\times10^{-1}$ between $0.03$
+and $0.1$, and to $4.77\times10^{-1}$ below $0.03$.  In the same two low-ESS
+regions, permissive steps reduce population reward by $4.0\%$ and $13.3\%$,
+while matched oracle-gradient steps improve reward.  ESS therefore identifies
+estimation failure rather than the absence of an improving direction.
 
-The second test evaluates the estimator comparison in
-Theorem~\ref{thm:crossover}.  At 56 frozen policy states under the fixed oracle
-diagnostic, PPO masking has lower MSE at low ESS and the permissive estimator
-has lower MSE at high ESS.  The preference changes between the $[0.2,0.4)$ and
-$[0.4,0.6)$ intervals.  This is the predicted bias--variance crossover:
-clipping is preferred only where its covariance reduction exceeds its bias
-penalty.  Appendix Figure~\ref{fig:ess-crossover} and
-Table~\ref{tab:rlvr-crossover} report the paired MSE estimates and the full
-sensitivity analysis.
+Frozen-policy redraws then verify the bias--variance crossover in
+Theorem~\ref{thm:crossover}.  With the fixed $N=512$ diagnostic, PPO masking has
+lower MSE below population ESS $0.4$, while the permissive estimator has lower
+MSE above it.  A disjoint calibration split places the crossover at $0.42$ and
+reduces held-out MSE by $4.3\%\pm1.1\%$ relative to the better static estimator.
+Thus ESS predicts not only raw-gradient failure but also which estimator has
+lower error under a fixed construction.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/ess_formula_oracle.pdf}
-  \caption{From oracle verification to an observable ESS rule.
-  (a) Under the fixed diagnostic configuration, the predicted MSE preference
-  changes sign with population ESS.  (b) Along the fixed-$0.1$ trajectory, the
-  bars show how often the
-  shadow PPO gradient has lower MSE than the shadow raw gradient in each
-  sample-ESS region.  The orange bar is the event selected by the gate; blue
-  bars provide nearby context.  Labels give updates per run and error bars are
-  standard errors across 100 replications.  (c) Mean relative reward improvement in a
-  four-epoch optimization loop; bands are 95\% confidence intervals over the
-  same paired runs.}
+  \caption{Controlled tests of the theoretical regime change.  (a) The
+  clipped-versus-permissive MSE preference changes sign with population ESS.
+  (b) A conservative $0.1$ event selects updates on which PPO masking usually
+  has lower MSE.  Labels give updates per run; error bars are standard errors
+  across 100 replications.  (c) The same sparse intervention preserves
+  permissive progress while reducing late failures in repeated optimization;
+  bands are 95\% confidence intervals.}
   \label{fig:formula-oracle}
 \end{figure}
 
-We next ask whether the oracle crossover can be identified without using its
-evaluation outcomes.  Within each of the seven ESS intervals, four frozen
-states fit the decision boundary and four remain for evaluation.  Calibration
-estimates the bias and covariance terms in Theorem~\ref{thm:crossover} and fixes
-an interior reference configuration before the held-out redraws are examined.
-The resulting ESS boundary is $0.42$.  On 100 independent redraws of each
-held-out state, the rule reduces MSE by $4.3\%\pm1.1\%$ relative to the better
-static estimator.  Thus ESS locates the raw-versus-PPO crossover without using
-test outcomes.  Appendix~\ref{app:bandit} gives the complete selection protocol
-and sensitivity to alternative estimator constructions.
+Finally, we use $\widehat\rho<0.1$ as a deliberately conservative operational
+check, not as the oracle crossover.  It selects only $3.3\%$ of updates; within
+that event, PPO has lower MSE on $83.7\%\pm1.4\%$ of updates and reduces
+conditional MSE by $53.3\%\pm2.9\%$.  In the four-epoch test, the resulting
+trajectory reaches $0.4940\pm0.0050$ final reward, compared with
+$0.4606\pm0.0098$ for always permissive and $0.4038\pm0.0005$ for always
+masked.  This minimal intervention is evidence for the theory's operational
+consequence, not a claim that $0.1$ is universal or that the paper introduces a
+new optimizer.
 
-\subsection{A sparse 0.1 heuristic bridges the oracle and RLVR}
+The controlled study therefore establishes the paper's main empirical result:
+ESS tracks the reliability transition that changes the role of clipping.  The
+next section asks whether the same transition is visible in language-model RLVR,
+where the population gradient cannot be enumerated.
 
-The fitted boundary above is not directly available in ordinary RLVR because
-the true gradient, clipping bias, and population covariance cannot be computed.
-Sample ESS is available before every update.  We therefore use
-$\widehat\rho<0.1$ as a simple trigger, not as an estimate of the oracle
-boundary.  Proposition~\ref{prop:ess-gate-guarantee} gives the relevant
-one-sided guarantee: if PPO has lower conditional MSE on the selected
-low-ESS event, replacing raw by PPO only on that event lowers the gate's MSE
-relative to always using raw and strengthens its MSE-based improvement
-certificate.  The bandit lets us test that premise before carrying the rule to
-language models.
-
-Panel (b) performs this test along the actual fixed-$0.1$ optimization
-trajectory.  At every update below the oracle reference boundary, we compute
-shadow raw and PPO gradients against the exact population gradient without
-altering training.  Below $0.1$, PPO has lower MSE on
-$83.7\%\pm1.4\%$ of updates and reduces conditional MSE by
-$53.3\%\pm2.9\%$.  The gate selects only $3.3\%$ of optimizer steps, so
-$0.1$ identifies a sparse, high-confidence subset of the failures predicted by
-the oracle analysis.  It is intentionally not a complete reconstruction of the
-$0.42$ testbed-specific crossover.
-
-Panel (c) then asks whether this selective intervention helps repeated policy
-optimization.  Across the four-epoch study and 100 paired runs, the fixed-$0.1$
-gate reaches final reward
-$0.4940\pm0.0050$, compared with $0.4606\pm0.0098$ for raw and
-$0.4038\pm0.0005$ for always applying PPO masking.  It matches the raw
-median endpoint to four decimals while increasing the tenth-percentile endpoint
-from $0.352$ to $0.495$.  The calibrated $0.42$ gate has the slightly higher
-mean, $0.4961\pm0.0003$, because its 61.7 masked updates remove a small number
-of severe failures.  The sparse $0.1$ gate nevertheless finishes above it in
-90 of 100 paired runs while masking only 16.9 updates.  Thus $0.1$ is a useful
-efficiency-oriented heuristic, whereas the fitted boundary is the stronger
-tail-risk safeguard.
-
-This separation supplies the bridge to the main experiment.  The oracle study
-validates the theoretical crossover.  The on-trajectory diagnostic then
-verifies the conditional MSE premise needed for the observable $0.1$ trigger,
-and repeated optimization shows what that sparse intervention buys.  The next
-section tests the same prespecified trigger in RLVR, where only its observable
-inputs and training consequences remain.
-
-\section{Main experiments: ESS-gated RLVR}
+\section{Language-model evidence for the regime change}
 \label{sec:llm-experiments}
 
 The contextual-bandit study establishes the mechanism under an exact oracle.
-The main experiment tests the prespecified $0.1$ application gate in
-language-model training, where neither the population gradient nor its MSE is
-observable.  Evidence must therefore come from matched training trajectories:
-the gate should preserve the early efficiency of a permissive update while
-improving its late stability.
+This section tests its operational implication in language-model training,
+where neither the population gradient nor its MSE is observable.  If ESS marks
+the predicted reliability transition, a conservative intervention should retain
+permissive updates while ESS is high and prevent their late failure after ESS
+falls.  This is a test of the explanation, not a new optimizer benchmark.
 
-\subsection{Decision rule and comparison set}
+\subsection{A minimal intervention}
 
 At every policy update, we compute sequence ESS from the raw ratios before any
 masking or truncation.  All methods use the same valid sequences and minibatch
@@ -1017,10 +954,10 @@ clipping with a permissive TIS update whose ratio cap is 3.
   \end{cases}
   \label{eq:llm-gate}
 \end{equation}
-Each gated method is compared with its always-permissive and always-protected
-counterparts.  This pairing separates the value of the ESS decision from the
-value of the safeguard itself.  The threshold is fixed before the reported
-runs and is not retuned by update rule.  It is a practical trigger, not an
+Each conditional run is compared with its always-permissive and
+always-protected counterparts.  This pairing tests the regime prediction while
+holding the safeguard itself fixed.  The threshold is set before the reported
+runs and is not retuned by update rule.  It is a practical probe, not an
 estimate of the theoretical crossover.
 
 \subsection{Evaluation protocol}
@@ -1033,26 +970,26 @@ of effective support.  The supplied artifacts report one trajectory per
 configuration, so we report endpoint differences without uncertainty and treat
 them as trajectory-level evidence.
 
-\begin{figure}[H]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/curves/overall.pdf}
-  \caption{ESS-gated RLVR on Qwen3-30B-A3B.  Each panel compares a static
-  update rule with the corresponding ESS-conditional variant using the same
-  threshold, $0.1$.  The legend reports step-200 AIME-2024 mean@16.  The gate
-  improves the endpoint under GRPO, Clip-Higher, and DPPO and prevents the
-  late collapse of TIS 3.}
+  \caption{Testing the predicted regime change in Qwen3-30B-A3B RLVR.  Each
+  panel compares a static update rule with the corresponding ESS-conditional
+  variant using the same threshold, $0.1$.  The legend reports step-200
+  AIME-2024 mean@16.  Conditional protection improves the endpoint under GRPO,
+  Clip-Higher, and DPPO and prevents the late collapse of TIS 3.}
   \label{fig:llm-main}
 \end{figure}
 
-\begin{table}[H]
+\begin{table}[htbp]
 \centering
 \small
 \caption{Step-200 AIME-2024 mean@16 read from the reported trajectories.
-Gain is the ESS-gated score minus its static counterpart in percentage points.}
+Gain is the ESS-conditional score minus its static counterpart in percentage points.}
 \label{tab:llm-main}
 \begin{tabular}{lrrr}
 \toprule
-Update family & Static & ESS gated & Gain \\
+Update family & Static & ESS conditional & Gain \\
 \midrule
 GRPO, band $0.2/0.2$ & $26.2$ & $38.5$ & $+12.3$ \\
 GRPO Clip-Higher, band $0.2/0.28$ & $37.9$ & $44.8$ & $+6.9$ \\
@@ -1062,20 +999,20 @@ TIS 3 & $0.4$ & $44.8$ & $+44.4$ \\
 \end{tabular}
 \end{table}
 
-\subsection{The gate acts when effective support deteriorates}
+\subsection{Observed behavior}
 
 Figure~\ref{fig:llm-main} gives a consistent trajectory-level result.  The
-ESS-conditional variants improve the GRPO, Clip-Higher, and DPPO endpoints by
+ESS-conditional runs improve the GRPO, Clip-Higher, and DPPO endpoints by
 $6.9$ to $12.3$ percentage points.  The TIS comparison isolates the stability
-failure most clearly: without the gate, TIS 3 improves early but finishes at
-$0.4\%$; with the gate, it finishes at $44.8\%$.  ESS therefore transfers as a
-decision coordinate across safeguards rather than defining a new clipping
-formula.
+failure most clearly: the static TIS 3 run improves early but finishes at
+$0.4\%$, whereas the conditional run finishes at $44.8\%$.  ESS therefore
+transfers as a reliability coordinate across safeguards rather than defining a
+new clipping formula or optimization objective.
 
-\begin{figure}[H]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/gate/overall.pdf}
-  \caption{What the ESS gate measures and when it intervenes.  Normalized
+  \caption{When the ESS-conditioned intervention activates.  Normalized
   sequence ESS decreases during training (left), while the fraction of clipped
   updates increases (right).  The rule therefore applies little protection
   while effective support is broad and progressively activates each safeguard
@@ -1091,14 +1028,13 @@ reported in Appendix~\ref{app:llm-diagnostics}.
 
 \appendix
 
-\section{Contextual-bandit protocol and additional results}
+\section{Compact contextual-bandit protocol and supporting results}
 \label{app:bandit}
 
-This appendix defines every quantity used in the contextual-bandit study.  We
-first map the finite verifier task to an RLVR update, then derive the population
-gradient, specify the rollout and minibatch order, and finally report the full
-diagnostic and optimization results supporting Figures~\ref{fig:ess-validation}
-and \ref{fig:formula-oracle}.
+This appendix records the task, exact oracle, RLVR-style update loop, frozen-state
+diagnostics, and supporting results.  The sequence is sufficient to interpret
+and reproduce Figures~\ref{fig:ess-validation} and
+\ref{fig:formula-oracle} without repeating derivations from the main theory.
 
 \subsection{Task and correspondence to RLVR}
 
@@ -1194,132 +1130,72 @@ $p_{j\ell}=p_{\theta,\ell}(x_j)$.  The finite-population objective is
 
 \subsection{Exact gradient and group-relative advantage}
 
-The finite population makes the target gradient available in closed form.  For
-token position $\ell$, define the probability assigned to its correct bit as
-$h_{j\ell}=c_{j\ell}p_{j\ell}+(1-c_{j\ell})(1-p_{j\ell})$.  The Bernoulli score
-identity gives
-\begin{align}
-  \nabla_{\theta_\ell}q_j(\theta)
-  &=q_j(\theta)\nabla_{\theta_\ell}\log q_j(\theta)
-    \label{eq:optdigits-gradient-proof-1}\\
-  &=q_j(\theta)\nabla_{\theta_\ell}\log h_{j\ell}
-    \label{eq:optdigits-gradient-proof-2}\\
-  &=q_j(\theta)\{c_{j\ell}-p_{j\ell}\}x_j.
-    \label{eq:optdigits-gradient-proof-3}
-\end{align}
-The second line holds because $\theta_\ell$ appears only in token head $\ell$.
-For $c_{j\ell}=1$, the last derivative is
-$\nabla\log p_{j\ell}=(1-p_{j\ell})x_j$; for $c_{j\ell}=0$, it is
-$\nabla\log(1-p_{j\ell})=-p_{j\ell}x_j$.  Both cases equal
-$(c_{j\ell}-p_{j\ell})x_j$.  Averaging
-Equation~\eqref{eq:optdigits-gradient-proof-3} over all prompts yields
+The Bernoulli score identity gives the exact finite-population gradient
 \begin{equation}
   \nabla_{\theta_\ell}V(\theta)
   =\frac1M\sum_{j=1}^{M}
     q_j(\theta)\{c_{j\ell}-p_{j\ell}\}x_j.
   \label{eq:optdigits-gradient}
 \end{equation}
-Thus the oracle is a deterministic sum over all 5,620 prompts at the current
-policy parameters, not a Monte Carlo estimate from a larger rollout.  For every
-recorded minibatch update, we compare the sampled gradient and this oracle at
-the same pre-update parameter value.  Their squared Frobenius error is
+where $q_j(\theta)$ is the correct-sequence probability,
+$c_{j\ell}$ is its bit at position $\ell$, and $p_{j\ell}$ is the policy
+probability of bit one.  The oracle enumerates all 5,620 contexts at the current
+pre-update policy.  We measure a sampled estimator by
 \begin{equation}
   E_t=\|\widehat g_t-\nabla V(\theta_t)\|_F^2,
   \label{eq:optdigits-gradient-error}
 \end{equation}
-which sums squared coordinate error across all $16\times65=1{,}040$ policy
-parameters.  This quantity is the gradient MSE reported in the figure after
-averaging $E_t$ within each fixed ESS bin.
+and report its mean within each fixed ESS interval.
 
-For prompt $i$, let $Y_{ig}$ be complete response
-$g\in\{1,\ldots,G\}$ and let $R_{ig}=R(x_i,Y_{ig})$ be its verifier reward.  We
-use the leave-one-out group advantage
+For response $g$ to prompt $i$, we use the leave-one-out advantage
 \begin{equation}
   A_{ig}=R_{ig}-\frac1{G-1}\sum_{h\ne g}R_{ih}
   =\frac{G}{G-1}(R_{ig}-\bar R_i).
   \label{eq:loo-group-advantage}
 \end{equation}
-It has the same sign as the group-centered advantage used in GRPO
-\citep{shao2024deepseekmath}.  We omit group standard-deviation scaling so that
-all minibatches target the same population gradient.  To verify that the
-leave-one-out baseline preserves this target, let
-$B_{i,-g}=(G-1)^{-1}\sum_{h\ne g}R_{ih}$ and define
-\begin{equation}
-  W_{ig}=\frac{P_\theta(Y_{ig}\mid x_i)}{Q(Y_{ig}\mid x_i)},
-  \qquad
-  S_{ig}=\nabla_\theta\log P_\theta(Y_{ig}\mid x_i).
-  \label{eq:loo-weight-score}
-\end{equation}
-Conditional on the prompt, $B_{i,-g}$ is independent of the focal response.
-Therefore,
-\begin{align}
-  &\E_Q[W_{ig}A_{ig}S_{ig}\mid x_i]
-    \label{eq:loo-unbiased-proof-1}\\
-  &\quad=\E_Q[W_{ig}R_{ig}S_{ig}\mid x_i]
-  -\E_Q[B_{i,-g}\mid x_i]\E_Q[W_{ig}S_{ig}\mid x_i]
-    \label{eq:loo-unbiased-proof-2}\\
-  &\quad=\E_{P_\theta}[R_{ig}S_{ig}\mid x_i]
-  -\E_Q[B_{i,-g}\mid x_i]\E_{P_\theta}[S_{ig}\mid x_i]
-    \label{eq:loo-unbiased-proof-3}\\
-  &\quad=\nabla_\theta\E_{P_\theta}[R_{ig}\mid x_i].
-  \label{eq:loo-unbiased-proof}
-\end{align}
-Equation~\eqref{eq:loo-unbiased-proof-2} uses independence of the focal response
-and leave-one-out baseline.  Equation~\eqref{eq:loo-unbiased-proof-3} changes
-measure from $Q$ to $P_\theta$.  The final line uses the zero-mean score identity
-for the baseline term and the score-function identity for the reward term.  If
-every response in a group has the same reward, all group advantages are zero.
+It has the sign of the group-centered GRPO advantage
+\citep{shao2024deepseekmath}; standard-deviation scaling is omitted so every
+minibatch targets the same population gradient.  The baseline excludes the
+focal response and is therefore independent of it conditional on the prompt.
+Importance weighting and the zero-mean score identity then preserve the target
+in Equation~\eqref{eq:optdigits-gradient}.
 
 \subsection{Rollout and minibatch procedure}
 
-Each replication begins from the same $\theta_0$ and processes eight newly
-generated rollout batches.  For rollout $r$, the testbed executes the
-following operations in order.
+\begin{algorithm}[htbp]
+\caption{RLVR-style OptDigits policy optimization}
+\label{alg:bandit-loop}
+\centering
+\fbox{\begin{minipage}{0.92\linewidth}
+\small
+\textbf{Input:} initial policy $\theta_0$; eight rollouts; 128 prompts per
+rollout; $G=16$ responses per prompt; 16 minibatches; step size $3$.
 \begin{enumerate}
-  \item Set the rollout policy $Q_r=P_{\theta_{r,0}}$ and sample 128 distinct
-  prompts uniformly from the finite population.
-  \item For each prompt, sample $G=16$ complete responses from $Q_r$, compute
-  the binary verifier rewards, and compute Equation
-  \eqref{eq:loo-group-advantage} once.
-  \item Randomly permute the 128 prompt groups and partition them into 16
-  minibatches.  Each minibatch contains eight intact groups, hence $N=128$
-  complete responses.
-  \item For minibatch $t=1,\ldots,16$, compute the current sequence ratio
-  \begin{equation}
-    W_{ig,t}
-    =\frac{P_{\theta_{r,t-1}}(Y_{ig}\mid x_i)}
-    {Q_r(Y_{ig}\mid x_i)}
-    =\prod_{\ell=1}^{16}
-    \frac{P_{\theta_{r,t-1}}(Y_{ig\ell}\mid x_i)}
-    {Q_r(Y_{ig\ell}\mid x_i)},
-    \label{eq:simulation-sequence-ratio}
-  \end{equation}
-  then compute raw ESS, choose the method-specific gradient, and update
-  $\theta_{r,t}=\theta_{r,t-1}+3\widehat g_{r,t}$.
-  \item After the sixteenth minibatch, set
-  $\theta_{r+1,0}=\theta_{r,16}$ and generate a new rollout batch from that
-  updated policy.
+  \item Set the rollout policy $Q\leftarrow P_\theta$.  Sample prompts and
+  grouped responses, then compute verifier rewards and leave-one-out advantages.
+  \item Randomly partition the intact prompt groups into 16 minibatches, each
+  containing eight groups and $N=128$ complete responses.
+  \item For each minibatch, recompute
+  $W=P_\theta(Y\mid x)/Q(Y\mid x)$, policy scores, and sample ESS.  Form the
+  designated raw, PPO-masked, or conditional estimator and update
+  $\theta\leftarrow\theta+3\widehat g$.
+  \item After all 16 updates, discard the rollout and repeat from the new policy.
 \end{enumerate}
-Every sampled response enters exactly one update.  Within a rollout, verifier
-rewards, advantages, and rollout log probabilities remain fixed.  Current
-probabilities, ratios, scores, ESS, and the gate decision are recomputed before
-each minibatch update.  This order matches grouped RLVR: generate responses from
-the old policy, optimize sequential minibatches, and only then collect a new
-rollout from the updated policy.
+\end{minipage}}
+\end{algorithm}
 
-Sixteen minibatches are needed to expose the failure regime rather than to
-increase the apparent gain.  Across the diagnostic trajectories, no update in
-positions 1 through 4 has ESS below $0.1$.  The low-ESS frequency is at most 5\%
-in positions 5 through 8 and reaches 10\% at position 16.  A four- or
-eight-minibatch design would therefore make the gate nearly identical to the
-permissive method and would not test the regime it is designed to detect.
+Every response enters one update.  Within a rollout, responses, rewards,
+advantages, and rollout probabilities remain fixed, whereas current
+probabilities, ratios, scores, and ESS are recomputed before each update.
+Sixteen minibatches are used because the first four never reach ESS below $0.1$
+in the diagnostic runs; a shorter traversal would not expose the regime under
+study.
 
-\subsection{Estimators, gate, and diagnostics}
+\subsection{Estimators and diagnostics}
 
 Let $S_{ig,t}=\nabla_\theta\log
-P_{\theta_{r,t-1}}(Y_{ig}\mid x_i)$.  Each minibatch contains eight prompt groups
-and 16 responses per group, so $N=128$.  Summing over these 128 complete
-responses, the permissive and PPO-masked gradients are
+P_{\theta_{r,t-1}}(Y_{ig}\mid x_i)$.  For each $N=128$ minibatch, the
+permissive and PPO-masked gradients are
 \begin{align}
   \widehat g_{\mathrm{raw},t}
   &=\frac1N\sum_{i,g}W_{ig,t}A_{ig}S_{ig,t},
@@ -1332,7 +1208,7 @@ where $M_{ig,t}$ is the advantage-sign mask in
 Proposition~\ref{prop:ppo-mask} with $\epsilon=0.2$.  This is gradient masking,
 not numerical ratio truncation.  The third method uses
 \begin{equation}
-  \widehat g_{\mathrm{gate},t}
+  \widehat g_{\mathrm{cond},t}
   =\begin{cases}
     \widehat g_{\mathrm{raw},t},&\widehat\rho_t\ge0.1,\\
     \widehat g_{\mathrm{PPO},t},&\widehat\rho_t<0.1,
@@ -1343,56 +1219,31 @@ not numerical ratio truncation.  The third method uses
   {N\sum_{i,g}W_{ig,t}^2}.
   \label{eq:simulation-gate}
 \end{equation}
-The threshold is fixed before the runs and is not selected from any reported
-outcome.  It is an operational heuristic for this $N=128$ update, not the
-theoretical crossover threshold.
+The $0.1$ threshold is fixed before the runs and is not selected from a reported
+outcome.  All methods share the initialization, prompt draws, response-sampling
+uniforms, and group permutations within each of 100 paired replications; the
+master seed is 73.
 
-All three methods use identical initial weights and are paired on prompt draws,
-response-sampling uniforms, and group permutations.  Their policies diverge
-after the first update, but applying a shared uniform draw to each method's own
-token probability remains a valid coupling and reduces comparison noise.  The
-master seed is 73.  We run 100 independent replications, each with
-$8\times16=128$ updates.
-
-Panels (a) and (b) use every minibatch from the first 20 ESS-gated
-replications, yielding $20\times8\times16=2{,}560$ diagnostic observations.  At
-each pre-update policy, we compute Equation~\eqref{eq:optdigits-gradient} and
-record $\|\widehat g_{\mathrm{raw},t}-\nabla V(\theta_t)\|_F^2$.  We then evaluate
-two counterfactual one-step policies, one updated by the sampled permissive
-gradient and the other by the oracle gradient, without changing the actual
-training trajectory.  Their outcomes isolate whether a harmful sampled step is
-caused by estimation error or by an unfavorable population gradient.
-
-Before running the experiment, we fixed seven ESS intervals:
+The first 20 conditional replications provide 2,560 pre-update diagnostics.  At
+each state, we evaluate the raw gradient against
+Equation~\eqref{eq:optdigits-gradient} and compare its counterfactual reward
+step with the exact-gradient step.  Results use seven prespecified ESS intervals:
 \[
   \begin{gathered}
     \relax[0,0.03),\ [0.03,0.1),\ [0.1,0.2),\ [0.2,0.4),\\
     [0.4,0.6),\ [0.6,0.8),\ [0.8,1].
   \end{gathered}
 \]
-Panels (a) and (b) report the within-bin mean and its standard error.
-Panel (c) uses all 100 replications and reports
-\begin{equation}
-  \Delta_r^{\mathrm{rel}}
-  =100\frac{V(\theta_{r,0})-V(\theta_{0,0})}
-  {V(\theta_{0,0})}.
-  \label{eq:relative-improvement}
-\end{equation}
-after each rollout.  The plotted line is the replication mean and the band is
-the mean plus or minus $1.96$ standard errors.  Response counts include every
-complete response sent to the verifier; one rollout therefore costs
-$128\times16=2{,}048$ verifier responses.  A method reaches the doubling target
-at the first post-rollout checkpoint for which its mean relative improvement
-exceeds 100\%.
+Within-bin error bars are standard errors.  Optimization curves use all 100
+replications and report relative population-reward improvement from the common
+initial policy with 95\% confidence intervals.  One rollout costs 2,048
+verifier responses.
 
 \subsection{Fixed-checkpoint crossover diagnostic}
 
-The trajectory diagnostic above averages one realized squared error over
-changing policy states.  To estimate conditional MSE directly, we freeze both
-the rollout policy and the current policy at selected pre-update checkpoints
-and resample independent minibatches from the frozen rollout policy.  This
-separate diagnostic changes neither the selected gradient nor the training
-trajectory.
+To estimate conditional MSE rather than one realized error, we freeze the
+rollout and current policies at selected pre-update checkpoints and redraw
+independent minibatches.  This diagnostic does not change training.
 
 The finite Bernoulli policy also makes population sequence ESS exact.  For
 prompt $x$ and token position $\ell$, let $q_{x\ell}$ and $p_{x\ell}$ denote
@@ -1412,32 +1263,14 @@ the rollout and current probabilities of token one.  Independence across the
   \right\}^{-1}.
     \label{eq:simulation-population-ess}
 \end{align}
-The identity uses $\E_Q[W]=1$.  Unlike the sample statistic in
-Equation~\eqref{eq:simulation-gate}, Equation~\eqref{eq:simulation-population-ess}
-contains no minibatch noise.
-
-We compute $\rho_{\mathrm{pop}}$ at all 2,560 checkpoints from the first 20
-ESS-gated replications.  Using the seven intervals fixed above, we sample eight
-checkpoints without replacement from each interval, for 56 frozen states in
-total.  Checkpoint selection uses seed 99,246.  At each state, a fresh base
-minibatch draws eight prompts without replacement from the 5,620-image
-population and 16 responses independently from the frozen rollout policy for
-each prompt.  Group rewards and leave-one-out advantages are recomputed from
-these responses.  The diagnostic random stream uses seed 271,901.
-
-For each frozen state, we construct 32 paired raw and PPO-masked estimates at
-two sizes.  The $N=128$ estimate uses one base minibatch.  The $N=512$ estimate
-averages four independent base-minibatch gradients; prompts may therefore
-repeat across the four base minibatches.  The first base minibatch is shared by
-the two sizes, and raw and PPO estimators always use exactly the same prompts
-and responses.  Because responses within one prompt share a leave-one-out
-advantage, they are not independent contributions.  The independent unit for
-the batch-size comparison is therefore the complete base-minibatch block.  The
-move from $N=128$ to $N=512$ averages four independent blocks, dividing the
-block-level covariance by four while leaving estimator bias unchanged.  We
-retain $N$ as the number of sequences because that is the optimizer convention,
-but interpret Corollary~\ref{cor:batch-crossover} at this block level.  For
-checkpoint $c$, estimator $e$, and size $N$, we report
+These equations use $\E_Q[W]=1$ and contain no minibatch noise.  We evaluate
+eight checkpoints from each of the seven ESS intervals, giving 56 frozen states
+selected from the 2,560 trajectory checkpoints.  At each state, 32 paired
+redraws compare raw and PPO-masked estimates.  One independent block contains
+eight prompts and 16 responses per prompt, hence $N=128$ sequences; the
+$N=512$ estimate averages four blocks.  The block is the independent unit
+because responses within a prompt share an advantage.  For checkpoint $c$,
+estimator $e$, and size $N$, we report
 \begin{equation}
   \widehat{\operatorname{MSE}}_{c,e,N}
   =\frac1{32}\sum_{s=1}^{32}
@@ -1446,17 +1279,12 @@ checkpoint $c$, estimator $e$, and size $N$, we report
     \right\|_F^2.
   \label{eq:simulation-crossover-mse}
 \end{equation}
-The exact gradient is recomputed once at each frozen current policy.  We first
-average redraws within a checkpoint, then average the eight checkpoint MSEs in
-each population-ESS interval.  Standard errors are computed across the eight
-checkpoints, not across the 32 redraws.  Panel (b) of
-Figure~\ref{fig:ess-crossover} reports the checkpoint mean of
+We average redraws within a state and states within an ESS interval; standard
+errors use the eight states as independent units.  PPO reduction is
 $100(\widehat{\operatorname{MSE}}_{\mathrm{raw}}-
 \widehat{\operatorname{MSE}}_{\mathrm{PPO}})/
-\widehat{\operatorname{MSE}}_{\mathrm{raw}}$; positive values favor PPO
-masking.  The released redraw file also records both counterfactual one-step
-reward changes, although Figure~\ref{fig:ess-crossover} focuses on the gradient
-risk required by Theorem~\ref{thm:crossover}.
+\widehat{\operatorname{MSE}}_{\mathrm{raw}}$.  Positive values favor masking.
+State selection and redraw seeds are 99,246 and 271,901, respectively.
 
 \begin{figure}[htbp]
   \centering
@@ -1472,123 +1300,36 @@ risk required by Theorem~\ref{thm:crossover}.
 
 \subsection{Formula calibration and held-out decision test}
 
-The direct diagnostic establishes a crossover but uses no decision rule.  We
-therefore split the eight checkpoints in every population-ESS interval into
-four threshold-fit states and four test states.  The split is stratified by ESS
-interval and fixed with seed 161,876.  This gives 28 fit states and 28 test
-states with identical interval counts.
-
-At every state, we draw $M=100$ independent base-minibatch blocks, each
-containing 128 sequences.  Let $g$ be the exact finite-population gradient,
-$G_{W,j}$ the raw gradient from block $j$, and $G_{C,j}$ its paired PPO-masked
-gradient.  We estimate the block-level raw covariance trace by
-\begin{equation}
-  \widehat V_W
-  :=\frac1M\sum_{j=1}^M\|G_{W,j}-g\|_F^2.
-  \label{eq:formula-raw-variance}
-\end{equation}
-The raw block is unbiased, so no bias term is added.  For PPO, define
-\begin{align}
-  \overline G_C
-  &:=\frac1M\sum_{j=1}^M G_{C,j},
-  \label{eq:formula-ppo-mean}\\
-  \widehat V_C
-  &:=\frac1{M-1}\sum_{j=1}^M
-    \|G_{C,j}-\overline G_C\|_F^2,
-  \label{eq:formula-ppo-variance}\\
-  \widehat B_C
-  &:=\max\left\{0,
-    \|\overline G_C-g\|_F^2-\frac{\widehat V_C}{M}\right\}.
-  \label{eq:formula-ppo-bias}
-\end{align}
-The subtraction in Equation~\eqref{eq:formula-ppo-bias} removes the sampling
-variance of the estimated mean; truncation at zero enforces a nonnegative
-squared-bias estimate.  Averaging $K\in\{1,2,4,8\}$ independent blocks gives
-$N=128K$ sequences and the estimated risks
+We split the eight states in each ESS interval into four calibration and four
+test states, yielding 28 of each; seed 161,876 fixes the split.  At every state,
+100 paired $N=128$ blocks estimate the raw covariance trace $\widehat V_W$, the
+PPO covariance trace $\widehat V_C$, and the PPO squared bias $\widehat B_C$.
+The squared-bias estimate subtracts the sampling variance of the estimated mean
+and is truncated at zero.  Averaging $K\in\{1,2,4,8\}$ independent blocks gives
 \begin{equation}
   \widehat R_W(K):=\frac{\widehat V_W}{K},
   \qquad
   \widehat R_C(K):=\widehat B_C+\frac{\widehat V_C}{K}.
   \label{eq:formula-risks}
 \end{equation}
-These are the two sides of Theorem~\ref{thm:crossover} at block level.
+These are the two sides of Theorem~\ref{thm:crossover} at block level.  For each
+$K$, we choose the ESS midpoint that minimizes fitted risk while applying PPO
+below the threshold and raw above it.  The only interior calibration solution is
+$K=4$, or $N=512$, with threshold $0.417$.
 
-For each $K$, the fitted rule applies PPO when
-$\rho_{\mathrm{pop}}<\tau_K$ and the raw estimator otherwise.  Candidate
-thresholds are zero, the midpoints between adjacent fit-state ESS values, and a
-sentinel just above one.  We choose the candidate minimizing the mean of
-$\widehat R_C(K)$ or $\widehat R_W(K)$ selected across the 28 fit states.  The
-informative estimator size is then chosen using the fit states alone: it must
-have $0<\tau_K<1$, so that the rule selects both estimators.  This criterion
-selects $K=4$, hence $N=512$.  For comparison, the effective-count transfer
-anchors the $K=1$ fit and uses
-\begin{equation}
-  \tau_K^{\mathrm{count}}:=\min\{1,\tau_1/K\},
-  \label{eq:count-transfer}
-\end{equation}
-which holds the boundary in $N\rho$ fixed.
+Held-out evaluation uses 100 paired redraws at each test state and seed 271,974.
+The fitted threshold never sees test-state errors; standard errors use the 28
+states as independent units.  The subsequent optimization study freezes that
+threshold, uses 512 sequences per update, traverses each rollout for four epochs,
+and runs eight rollout cycles in 100 paired replications.  Sample ESS, rather
+than population ESS, determines the training intervention; master seed 424,315
+fixes the optimization stream.
 
-Held-out evaluation uses an independent stream with seed 271,974.  At each test
-state, each of 100 redraws generates eight paired base blocks.  Prefix averages
-of one, two, four, and eight blocks form the four estimator sizes, so comparisons
-across $N$ share their initial randomness.  Raw and PPO gradients within every
-block use the same prompts, responses, rewards, and advantages.  We average
-squared gradient error across redraws within a state, then average across the 28
-states.  Standard errors use states, not the 2,800 redraws, as the independent
-units.  The state-specific component rule in Figure~\ref{fig:formula-oracle}
-uses Equation~\eqref{eq:formula-risks} as a diagnostic reference.  The fitted
-ESS rule uses the exact population ESS and the threshold learned on the
-disjoint fit states; it never sees the test-state gradient errors.  This choice
-isolates the quality of the decision boundary from plug-in ESS noise.
-
-The optimization test uses that frozen threshold without further fitting.  A
-rollout contains 512 prompts and 16 responses per prompt.  The 512 prompt groups
-are partitioned into 16 minibatches, giving 512 sequences per update.  Each
-rollout is traversed for four epochs in the same minibatch order, then replaced
-by a new rollout; eight rollout cycles produce 512 updates and 65,536 verifier
-responses.  We run 100 paired replications.  Within a replication, every method
-shares rollout prompts, response-sampling uniforms, and minibatch order.  ESS,
-ratios, and the selected gradient are recomputed before every update.  The
-gate now uses the observable sample ESS in
-Equation~\eqref{eq:sample-ess}, so no population statistic enters training.
-The optimization random stream is derived from master seed 424,315.
-
-\subsubsection{On-trajectory shadow diagnostic}
-
-The fixed-$0.1$ run also records a counterfactual diagnostic at every update
-with sample ESS below $0.417$, the largest boundary compared in the
-optimization study.  At the current policy and on the sampled minibatch, we
-compute both the raw gradient and the PPO-masked gradient.  We then enumerate
-the finite bandit population to compute the exact current-policy gradient and
-record the squared error of each sampled estimator.  These shadow gradients do
-not alter the parameter update, which continues to follow the fixed-$0.1$
-rule.  Updates above $0.417$ need not be evaluated because every compared gate
-uses the raw estimator there.
-
-The diagnostic partitions the recorded updates into
-$[0,0.1)$, $[0.1,0.25)$, and $[0.25,0.417)$.  Within each replication, we
-compute the number of updates, each estimator's mean squared error, the
-fraction of updates on which PPO has lower squared error, and PPO's relative
-MSE reduction.  Reported means and standard errors then use the 100
-replications as independent units.  The same records include exact one-step
-reward changes for both shadow gradients, allowing the MSE certificate to be
-distinguished from realized short-step reward.
-
-\subsection{Reproducibility}
-
-The complete implementation is
-\texttt{simulation/ess\_policy\_optimization.py}.  When the dataset is absent,
-the script downloads the official UCI archive.  It writes the full training,
-minibatch, frozen-state, formula-calibration, held-out-evaluation, and
-$N=512$ optimization records as CSV files.  It also writes the complete
-on-trajectory records, bin summaries, and gate summaries to
-\texttt{simulation/results}; exact filenames are listed in the accompanying
-README.  The script also writes
-Figures~\ref{fig:ess-validation}, \ref{fig:ess-crossover}, and
-\ref{fig:formula-oracle} in PDF and PNG formats.  All optimization and exact
-gradient calculations use double-precision NumPy on CPU; Matplotlib only
-renders the saved results.  The command used for the paper is
-\texttt{python simulation/ess\_policy\_optimization.py --replications 100}.
+The fixed-$0.1$ trajectory also records shadow raw and PPO gradients whenever
+sample ESS is below $0.417$.  Comparing each with the exact gradient yields the
+three intervals $[0,0.1)$, $[0.1,0.25)$, and $[0.25,0.417)$.  These shadow
+calculations do not alter training.  Means and standard errors use the 100
+replications as independent units.
 
 \subsection{Results}
 
@@ -1685,44 +1426,16 @@ $512$ & $[0.8,1)$ & $0.004\pm0.001$ & $0.004\pm0.001$ & $-10.5\pm6.5$ \\
 \end{table}
 
 \paragraph{Calibration fixes an oracle reference configuration.}
-Table~\ref{tab:formula-thresholds} reports every candidate $N$.  The fitted
-boundary is above the ESS range for $N=128$ and $N=256$, so these sizes select
-PPO at every fit state.  At $N=1024$, the fitted boundary is zero and therefore
-selects the raw estimator throughout.  Only $N=512$ yields an interior boundary,
-$\tau_4=0.417$, and therefore tests an adaptive rule.  This selection uses no
-held-out gradient errors.
-
-\begin{table}[htbp]
-\centering
-\small
-\caption{ESS boundaries fitted from the 28 calibration states.  ``Static''
-indicates that the fitted boundary chooses one estimator throughout the
-calibration range.}
-\label{tab:formula-thresholds}
-\begin{tabular}{rrrrl}
-\toprule
-$N$ & Blocks $K$ & Fitted $\tau_K$ & Count-transfer $\tau_K$ & Fit-state regime \\
-\midrule
-128  & 1 & $\geq1.00$ & $1.00$ & PPO static \\
-256  & 2 & $\geq1.00$ & $0.50$ & PPO static \\
-512  & 4 & $0.417$ & $0.25$ & Adaptive \\
-1024 & 8 & $0.000$ & $0.125$ & Raw static \\
-\bottomrule
-\end{tabular}
-\end{table}
+The fitted boundary selects PPO throughout at $N=128$ and $N=256$, raw
+throughout at $N=1024$, and both estimators only at $N=512$, where the interior
+boundary is $0.417$.  This choice uses no held-out gradient errors.
 
 \paragraph{The calibrated rule improves held-out gradient risk.}
-Table~\ref{tab:formula-heldout} reports the relative excess MSE at $N=512$.
-The comparison baseline is the better static method on the 28 test states,
-which is PPO masking.  Relative differences are computed within each state and
-then averaged, so no state with a large gradient scale dominates the reported
-percentage.  Both the fitted boundary and the effective-count transfer improve
-on the static baseline.  The fixed-$0.1$ row is included only as a reference:
-this frozen-state test applies population ESS and optimizes held-out gradient
-risk, whereas the heuristic is intended as a sparse trigger based on sample
-ESS along a moving training trajectory.  Its estimate is favorable but
-imprecise here, so the operational test below addresses the question for which
-the heuristic is designed.
+Table~\ref{tab:formula-heldout} reports state-normalized excess MSE at $N=512$.
+The fitted $0.417$ boundary improves on the better static estimator by
+$4.3\%\pm1.1\%$.  The $0.1$ row is only a reference because this frozen-state
+test uses population ESS, whereas the operational test uses sample ESS along a
+moving trajectory.
 
 \begin{table}[htbp]
 \centering
@@ -1783,18 +1496,18 @@ the intended trade-off: masking gives up some immediate permissive progress to
 reduce estimation risk.  The repeated trajectory determines whether that
 trade-off prevents later loss.
 
-\paragraph{The adaptive rule improves repeated optimization.}
+\paragraph{Reliability conditioning improves repeated optimization.}
 Table~\ref{tab:n512-optimization} reports the four-epoch $N=512$ study.  The
-fitted ESS gate has the highest final reward and the smallest uncertainty.  It
+fitted ESS reference has the highest final reward and the smallest uncertainty.  It
 uses the raw estimator for 450.3 of 512 updates on average, which explains its
 fast progress, while its 61.7 PPO-masked updates prevent the late loss observed
 under the static raw estimator.  The fixed-$0.1$ rule gives a complementary
 operating point.  It masks only $3.3\%$ of updates, matches the raw median, and
 raises the tenth-percentile endpoint from $0.352$ to $0.495$.  It ends above
-the fitted gate in 90 of 100 paired runs, although the fitted gate retains the
-higher mean by eliminating a few severe failures that remain under the sparse
-rule.  The comparison supports $0.1$ as an efficient practical heuristic
-without presenting it as the risk-minimizing boundary.
+the fitted reference in 90 of 100 paired runs, although the fitted reference
+retains the higher mean by eliminating a few severe failures that remain under
+the sparse rule.  The comparison supports $0.1$ as a practical heuristic
+without presenting it as the risk-minimizing boundary or a new optimizer.
 
 \begin{table}[htbp]
 \centering
@@ -1816,61 +1529,29 @@ Fixed ESS, $\tau=0.100$ & $0.4940\pm0.0050$ & $0.4998$ & $0.4954$ & $16.9$ \\
 \end{tabular}
 \end{table}
 
-\paragraph{The gate converts reliability into earlier progress.}
-Table~\ref{tab:rlvr-path} reports the full optimization trajectory.  The
-permissive method learns quickly at first but exhibits greater between-run
-uncertainty, whereas PPO masking progresses more slowly through the first half
-of training.  The gate follows the permissive path while ESS remains high and
-masks only $5.17$ of 128 updates on average.  It consequently leads both static
-methods from rollout 3 through rollout 7 and reaches the PPO endpoint at rollout
-8.  Since one rollout costs 2,048 verifier responses, the first checkpoint
-above 100\% relative improvement occurs after 6,144 responses for the gate,
-8,192 for the permissive method, and 10,240 for PPO masking.
+\paragraph{The conditional intervention preserves early progress.}
+Figure~\ref{fig:ess-validation}(c) shows that the intervention follows the
+permissive trajectory while ESS is high, masks $5.17$ of 128 updates on average,
+and reaches twice the initial reward after 6,144 verifier responses, compared
+with 8,192 for raw and 10,240 for PPO masking.  Final exact rewards are
+$0.2826\pm0.0109$, $0.2952\pm0.0014$, and $0.2954\pm0.0098$, respectively.
+The endpoint is not statistically resolved above always masking; the result is
+that reliability conditioning recovers its endpoint after following the faster
+permissive path through the high-ESS regime.
 
-\begin{table}[htbp]
-\centering
-\small
-\caption{Relative population-reward improvement after each new rollout batch,
-reported as mean $\pm$ standard error over 100 paired replications.}
-\label{tab:rlvr-path}
-\begin{tabular}{rrrr}
-\toprule
-Rollout batch & Raw (\%) & PPO mask (\%) & ESS gate (\%) \\
-\midrule
-0 & $0.00\pm0.00$ & $0.00\pm0.00$ & $0.00\pm0.00$ \\
-1 & $46.37\pm2.81$ & $17.94\pm0.40$ & $45.71\pm2.55$ \\
-2 & $81.08\pm4.37$ & $39.95\pm0.65$ & $81.72\pm4.27$ \\
-3 & $99.17\pm7.24$ & $65.55\pm0.88$ & $109.55\pm5.51$ \\
-4 & $129.00\pm7.23$ & $93.88\pm1.18$ & $132.01\pm7.15$ \\
-5 & $136.45\pm9.00$ & $124.21\pm1.35$ & $145.78\pm9.39$ \\
-6 & $170.32\pm9.37$ & $153.98\pm1.45$ & $174.98\pm9.59$ \\
-7 & $189.22\pm9.64$ & $182.20\pm1.46$ & $198.22\pm9.52$ \\
-8 & $195.11\pm11.39$ & $208.25\pm1.51$ & $208.51\pm10.26$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The corresponding final exact rewards are $0.2826\pm0.0109$ for the permissive
-method, $0.2952\pm0.0014$ for PPO masking, and $0.2954\pm0.0098$ for the gate.
-Paired gate differences are $0.0128\pm0.0099$ relative to the permissive method
-and $0.0002\pm0.0100$ relative to PPO.  These endpoints do not establish a
-statistically resolved final-reward advantage over always masking.  They instead
-show that the gate recovers the masked endpoint after following the more
-efficient permissive trajectory through the reliable regime.
-
-\clearpage
 \section{Additional RLVR diagnostics}
 \label{app:llm-diagnostics}
 
-The main text reports evaluation performance and the gate action.  This section
-records the accompanying training dynamics and a second permissive TIS setting.
+The main text reports evaluation performance and when conditional protection
+activates.  This section records the accompanying training dynamics and a
+second permissive TIS setting.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/dynamics/overall.pdf}
-  \caption{Training dynamics for the main comparisons.  The ungated TIS 3 run
+  \caption{Training dynamics for the main comparisons.  The static TIS 3 run
   develops extreme response length and entropy together with a collapse in
-  training reward.  The static safeguards and their ESS-gated variants avoid
+  training reward.  The safeguards and their ESS-conditional variants avoid
   this failure over the reported 200 steps.}
   \label{fig:llm-dynamics}
 \end{figure}
@@ -1878,19 +1559,19 @@ records the accompanying training dynamics and a second permissive TIS setting.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/tis3_dynamics/overall.pdf}
-  \caption{Detailed TIS 3 comparison.  Without a gate, ESS falls below $0.01$
+  \caption{Detailed TIS 3 comparison.  Under static TIS, ESS falls below $0.01$
   after step 77 and the response length and entropy diverge.  The fixed-$0.1$
-  gate increases the clipped fraction as ESS declines and keeps both diagnostics
-  controlled.}
+  intervention increases the clipped fraction as ESS declines and keeps both
+  diagnostics controlled.}
   \label{fig:tis3-dynamics}
 \end{figure}
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/tis5/overall.pdf}
-  \caption{Replication with TIS cap 5.  The ungated trajectory collapses to
-  zero after ESS vanishes, whereas the fixed-$0.1$ gate reaches an AIME-2024
-  mean@16 score of $39.4\%$.}
+  \caption{Replication with TIS cap 5.  The static trajectory collapses to zero
+  after ESS vanishes, whereas the fixed-$0.1$ conditional run reaches an
+  AIME-2024 mean@16 score of $39.4\%$.}
   \label{fig:tis5-replication}
 \end{figure}
 
