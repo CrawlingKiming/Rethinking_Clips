@@ -39,17 +39,17 @@ Clipping is widely treated as necessary for policy optimization, yet it
 can also discard useful learning signal.  This tension is pronounced in
 reinforcement learning with verifiable rewards, where permissive updates learn
 quickly but can fail after the policy moves too far from its rollout data.  We
-ask when clipping becomes useful.  We show that the answer depends jointly on
-the concentration of the importance weights and the number of samples being
-averaged.  We connect this effective support to gradient error and policy
-improvement, then derive when clipping's variance reduction repays its bias.
-An exactly evaluable contextual-bandit testbed recovers the predicted change of
-regime and its dependence on sample size.  Because the exact risk comparison is
-unavailable during training, we derive a conditional guarantee for replacing it
-with an observable ESS gate.  A simple fixed threshold satisfies the required
-low-ESS condition in the testbed, masks only a small fraction of updates, and
-substantially improves lower-tail optimization performance.  These results
-identify ESS as a practical reliability coordinate for deciding when to clip.
+ask when clipping becomes useful.  We show that importance-weight concentration
+governs the reliability of a permissive gradient.  We connect this effective
+support to gradient error and policy improvement, then derive when clipping's
+variance reduction repays its bias.  An exactly evaluable contextual-bandit
+testbed recovers the predicted raw-versus-clipped gradient-error crossover.
+Because the exact comparison is unavailable during training, we derive a
+conditional guarantee for replacing it with an observable ESS gate.  A simple
+fixed threshold selects the low-ESS updates on which clipping reduces gradient
+error, masks only a small fraction of updates, and substantially improves
+lower-tail optimization performance.  These results identify ESS as a
+practical reliability coordinate for deciding when to clip.
 \end{abstract}
 
 \section{Introduction}
@@ -100,24 +100,21 @@ weights across the entire batch.
 
 Sequence effective sample size (ESS) measures this concentration.  ESS is high
 when support is distributed across many responses and low when only a few
-responses carry most of the importance weight.  The amount of usable support
-also depends on how many responses are averaged, so the fundamental quantity
-is the effective sample count rather than normalized ESS alone.  Our central
-thesis is that the absence of clipping is not inherently unstable.  A
-permissive update remains statistically reliable while its effective support
-is sufficient.  Clipping becomes useful when support deteriorates enough that
-the variance it removes justifies the bias it introduces.
+responses carry most of the importance weight.  Our central thesis is that the
+absence of clipping is not inherently unstable.  A permissive update remains
+statistically reliable while its effective support is sufficient.  Clipping
+becomes useful when support deteriorates enough that the variance it removes
+justifies the bias it introduces.
 
 Establishing this thesis requires a bridge from coverage to optimization.  We
-derive the exact mean-squared error of the permissive gradient and separate its
-dependence on batch size, sequence ESS, and the scale of the associated
-gradient contributions.  We then show that gradient error enters a one-step
-policy-improvement guarantee.  Finally, we differentiate the PPO surrogate to
-show that clipping is an advantage-dependent gradient mask, not global ratio
-truncation, and derive the exact bias--variance condition under which a modified
-gradient is preferable.  The result makes the decision conditional: after the
-estimator size is fixed, ESS can locate the reliability regime in which a
-safeguard becomes worthwhile.
+derive the exact mean-squared error of the permissive gradient in terms of
+effective support and gradient scale.  We then show that gradient error enters
+a one-step policy-improvement guarantee.  Finally, we differentiate the PPO
+surrogate to show that clipping is an advantage-dependent gradient mask, not
+global ratio truncation, and derive the exact bias--variance condition under
+which a modified gradient is preferable.  Together, these results make ESS a
+reliability coordinate for locating the regime in which a safeguard becomes
+worthwhile.
 
 We test every link in an exactly evaluable verifier problem before transferring
 the rule to language-model training.  The contextual-bandit study follows the
@@ -126,13 +123,12 @@ reward.
 Across 100 paired runs, ESS predicts both gradient error and the sign of the
 resulting reward change.  Paired redraws at frozen policy states recover the
 predicted estimator crossover: PPO masking has lower MSE when effective support
-is scarce, while averaging more samples exposes the high-ESS regime in which
-the permissive estimator has lower MSE.  A calibration split then identifies
-the estimator size at which both regimes occur, fits an ESS boundary without
-using the held-out outcomes, and improves held-out gradient risk relative to
-both static estimators.  Since that oracle calculation is unavailable in RLVR,
-we prove the conditional MSE guarantee supplied by an observable gate and test
-a prespecified $0.1$ trigger along its own training trajectory.  It selects a
+is scarce, while the permissive estimator has lower MSE when support is broad.
+A disjoint calibration split then fits an oracle reference without using the
+held-out outcomes and improves held-out gradient risk relative to either static
+choice.  Since that oracle calculation is unavailable in RLVR, we prove the
+conditional MSE guarantee supplied by an observable gate and test a
+prespecified $0.1$ trigger along its own training trajectory.  It selects a
 sparse region in which PPO has lower gradient error, preserves the typical
 endpoint of permissive optimization, and sharply improves its lower tail while
 masking only $3.3\%$ of updates.
@@ -164,11 +160,10 @@ then connects that MSE to policy improvement and the clipping crossover.
 \subsection{Contributions}
 
 \begin{enumerate}
-\item We derive an exact connection between estimator batch size, sequence ESS,
+\item We derive an exact connection between sequence ESS, effective support,
 and the mean-squared error of a fixed-rollout policy-gradient estimator.
-\item We connect gradient error to certified policy improvement and show that
-batch size shifts the bias--variance crossover between permissive and clipped
-gradients.
+\item We connect gradient error to certified policy improvement and derive the
+exact bias--variance condition under which clipping improves the estimator.
 \item We derive the conditional guarantee of an observable ESS gate, recover
 the predicted crossover in a contextual-bandit verifier task, and show that a
 sparse fixed threshold improves the lower tail of repeated optimization.
@@ -322,14 +317,13 @@ $\widehat g_W$ is unbiased and
 \end{align}
 \end{theorem}
 
-The factorization identifies the effective sequence count $N\rho_\theta$ as
-the relevant coverage scale.  At fixed $G_{2,\theta}$, doubling $N$ and
-doubling $\rho_\theta$ have the same effect on the upper bound.  Consequently,
-the same normalized ESS can support different gradient reliability at
-different estimator batch sizes.  Neither the number of optimization steps nor
-parameter distance is fundamental in this statement.  They matter when they
-change the ratio concentration or the weighted gradient scale.  The next
-question is whether this statistical error has an optimization consequence.
+The factorization identifies $N\rho_\theta$ as the effective support of the
+gradient estimate.  Within a fixed update construction, declining ESS therefore
+weakens the reliability bound in direct proportion.  The exact expression keeps
+$N$ because it is part of any sample average, but the operational comparison in
+this paper holds that construction fixed and uses ESS to locate the reliability
+regime.  The next question is whether this statistical error has an optimization
+consequence.
 
 \subsection{Why gradient error matters for policy improvement}
 \label{sec:mse-improvement}
@@ -543,7 +537,7 @@ Therefore,
 \end{equation}
 \end{theorem}
 
-\begin{corollary}[Batch size shifts the estimator crossover]
+\begin{corollary}[Bias--variance crossover]
 \label{cor:batch-crossover}
 Let
 \begin{equation}
@@ -565,11 +559,11 @@ estimator has lower MSE for every finite $N$ whenever $\Delta_C>0$.
 \end{corollary}
 
 The crossover condition states the entire reason to clip: the removed
-covariance must exceed the squared bias of the modified gradient, scaled by
-batch size.  Corollary~\ref{cor:batch-crossover} makes the role of $N$
-explicit.  Averaging suppresses both estimators' covariance terms but leaves
-the clipping bias intact, so a larger estimator can move the crossover toward
-lower-variance, more permissive updates.  For PPO, the coefficient is
+covariance must exceed the squared bias of the modified gradient at the given
+update construction.  The corollary records that covariance averages away but
+clipping bias does not.  This distinction is retained for theoretical
+completeness; the practical rule compares updates under the same construction.
+For PPO, the coefficient is
 $C_\theta^{\mathrm{PPO}}=W_\theta M_\epsilon$.
 Its exact bias is
 \begin{align}
@@ -704,12 +698,12 @@ truncation as a separate importance-sampling device.  They do not make it
 equivalent to PPO clipping.
 
 The theory now yields a complete decision logic.  When $G_{2,\theta}$ is
-controlled, the effective count $N\rho_\theta$ governs permissive-gradient
-reliability and its policy-improvement certificate.  Clipping becomes
-preferable only when its covariance reduction exceeds the bias penalty at that
-estimator size.  ESS can therefore locate the crossover after $N$ is fixed,
-while changing $N$ can move the crossover itself.  The final step is to turn
-this population comparison into an observable training rule.
+controlled, effective support governs permissive-gradient reliability and its
+policy-improvement certificate.  Clipping becomes preferable only when its
+covariance reduction exceeds the bias penalty.  Thus, within a fixed training
+configuration, ESS can locate the crossover between permissive and safeguarded
+updates.  The final step is to turn this population comparison into an
+observable training rule.
 
 \subsection{The ESS-guided decision rule}
 \label{sec:practice}
@@ -720,18 +714,11 @@ Population ESS is unavailable during training, but its plug-in estimate is
   :=\frac{(\sum_{i=1}^N W_i)^2}{N\sum_{i=1}^N W_i^2}.
   \label{eq:sample-ess}
 \end{equation}
-Multiplying by the estimator size gives the estimated effective sequence count
-\begin{equation}
-  \widehat N_{\mathrm{eff}}
-  :=N\widehat\rho
-  =\frac{(\sum_{i=1}^N W_i)^2}{\sum_{i=1}^N W_i^2}.
-  \label{eq:sample-effective-count}
-\end{equation}
-Both statistics are computed from raw sequence ratios before clipping or
-truncation.  When $N$ is fixed, thresholding $\widehat\rho$ and thresholding
-$\widehat N_{\mathrm{eff}}$ are equivalent.  When $N$ changes, the same
-normalized ESS represents a different amount of effective support, so its
-threshold should not be transferred unchanged.
+The statistic is computed from raw sequence ratios before clipping or
+truncation.  We keep the update construction and number of valid sequences
+fixed within each reported comparison, so $\widehat\rho$ directly orders the
+reliability of the competing updates.  Appendix~\ref{app:bandit} reports the
+sensitivity to estimator construction.
 
 The theory motivates a reliability gate but does not determine a numerical
 threshold.  The exact boundary also depends on clipping bias, gradient scale,
@@ -755,10 +742,10 @@ must succeed before the rule is transferred to language-model training.
 The purpose of this study is to validate the paper's decision logic, not to
 benchmark contextual-bandit performance.  It asks three questions in the order
 required by the theory.  First, does ESS predict the error and policy consequence
-of a permissive gradient?  Second, after estimator size is fixed, does ESS locate
-the raw-versus-PPO MSE crossover?  Third, can a boundary fitted without test
-outcomes select updates that improve policy optimization?  Answering all three
-turns ESS from a descriptive statistic into a candidate training rule.
+of a permissive gradient?  Second, does ESS locate the raw-versus-PPO MSE
+crossover under a fixed diagnostic setting?  Third, does the observable $0.1$
+gate select high-risk updates and improve policy optimization?  Answering all
+three turns ESS from a descriptive statistic into a candidate training rule.
 
 \subsection{Why a contextual-bandit testbed?}
 
@@ -799,49 +786,41 @@ Appendix Figure~\ref{fig:ess-validation} and
 Table~\ref{tab:rlvr-diagnostics} report the complete result.
 
 The second test evaluates the estimator comparison in
-Theorem~\ref{thm:crossover}.  At 56 frozen policy states, PPO masking has lower
-MSE throughout the observed ESS range when $N=128$.  At $N=512$, the preferred
-estimator changes between the $[0.2,0.4)$ and $[0.4,0.6)$ intervals.  This
-change is the prediction of Corollary~\ref{cor:batch-crossover}: increasing
-$N$ suppresses variance while leaving clipping bias intact.  Appendix
-Figure~\ref{fig:ess-crossover} and Table~\ref{tab:rlvr-crossover} provide the
-paired MSE estimates.
+Theorem~\ref{thm:crossover}.  At 56 frozen policy states under the fixed oracle
+diagnostic, PPO masking has lower MSE at low ESS and the permissive estimator
+has lower MSE at high ESS.  The preference changes between the $[0.2,0.4)$ and
+$[0.4,0.6)$ intervals.  This is the predicted bias--variance crossover:
+clipping is preferred only where its covariance reduction exceeds its bias
+penalty.  Appendix Figure~\ref{fig:ess-crossover} and
+Table~\ref{tab:rlvr-crossover} report the paired MSE estimates and the full
+sensitivity analysis.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/ess_formula_oracle.pdf}
   \caption{From oracle verification to an observable ESS rule.
-  (a) At the calibration-selected $N=512$, the predicted MSE preference changes
-  sign with population ESS.  (b) The fitted boundary moves with $N$; the
-  count-transfer rule holds $N\rho$ fixed, while $0.1$ is the application
-  heuristic.  (c) Along the fixed-$0.1$ trajectory, the bars show how often the
+  (a) Under the fixed diagnostic configuration, the predicted MSE preference
+  changes sign with population ESS.  (b) Along the fixed-$0.1$ trajectory, the
+  bars show how often the
   shadow PPO gradient has lower MSE than the shadow raw gradient in each
-  sample-ESS region.  Labels give updates per run and error bars are standard
-  errors across 100 replications.  (d) Mean relative reward improvement in a
+  sample-ESS region.  The orange bar is the event selected by the gate; blue
+  bars provide nearby context.  Labels give updates per run and error bars are
+  standard errors across 100 replications.  (c) Mean relative reward improvement in a
   four-epoch optimization loop; bands are 95\% confidence intervals over the
   same paired runs.}
   \label{fig:formula-oracle}
 \end{figure}
 
 We next ask whether the oracle crossover can be identified without using its
-evaluation outcomes.  Within each of
-the seven ESS intervals, four frozen states fit the decision boundary and four
-remain for evaluation.  Calibration estimates the bias and covariance terms in
-Theorem~\ref{thm:crossover} for $N\in\{128,256,512,1024\}$.  We designate an
-estimator size as informative only when the fitted ESS boundary is interior, so
-both raw and PPO updates are selected on the calibration states.  This rule
-selects $N=512$ before the held-out redraws are examined.  The smaller sizes
-select PPO throughout, while $N=1024$ selects the raw estimator throughout.
-These boundary cases remain part of the reported result rather than being
-discarded.
-
-The calibration-selected boundary is $0.42$ at $N=512$.  On 100 independent
-redraws of each held-out state, its population-ESS rule reduces MSE by $4.3\%\pm1.1\%$
-relative to the better static estimator.  Holding the fitted effective-count
-boundary fixed and transferring it to $N=512$ yields a $4.9\%\pm1.2\%$
-reduction.  Thus the data recover both parts of the theory before any practical
-heuristic is introduced: the raw estimator fails as effective support
-contracts, and the raw-versus-PPO MSE boundary moves with estimator size.
+evaluation outcomes.  Within each of the seven ESS intervals, four frozen
+states fit the decision boundary and four remain for evaluation.  Calibration
+estimates the bias and covariance terms in Theorem~\ref{thm:crossover} and fixes
+an interior reference configuration before the held-out redraws are examined.
+The resulting ESS boundary is $0.42$.  On 100 independent redraws of each
+held-out state, the rule reduces MSE by $4.3\%\pm1.1\%$ relative to the better
+static estimator.  Thus ESS locates the raw-versus-PPO crossover without using
+test outcomes.  Appendix~\ref{app:bandit} gives the complete selection protocol
+and sensitivity to alternative estimator constructions.
 
 \subsection{A sparse 0.1 heuristic bridges the oracle and RLVR}
 
@@ -856,20 +835,19 @@ relative to always using raw and strengthens its MSE-based improvement
 certificate.  The bandit lets us test that premise before carrying the rule to
 language models.
 
-Panel (c) performs this test along the actual fixed-$0.1$ optimization
-trajectory.  At every update below the largest calibrated boundary, we compute
+Panel (b) performs this test along the actual fixed-$0.1$ optimization
+trajectory.  At every update below the oracle reference boundary, we compute
 shadow raw and PPO gradients against the exact population gradient without
 altering training.  Below $0.1$, PPO has lower MSE on
 $83.7\%\pm1.4\%$ of updates and reduces conditional MSE by
-$53.3\%\pm2.9\%$.  The gate selects only $16.9$ of 512 updates per run, so
+$53.3\%\pm2.9\%$.  The gate selects only $3.3\%$ of optimizer steps, so
 $0.1$ identifies a sparse, high-confidence subset of the failures predicted by
 the oracle analysis.  It is intentionally not a complete reconstruction of the
 $0.42$ testbed-specific crossover.
 
-Panel (d) then asks whether this selective intervention helps repeated policy
-optimization.  Each rollout contains 512 prompts and 16 responses per prompt,
-is divided into 16 minibatches, and is optimized for four epochs.  Across 100
-paired runs, the fixed-$0.1$ gate reaches final reward
+Panel (c) then asks whether this selective intervention helps repeated policy
+optimization.  Across the four-epoch study and 100 paired runs, the fixed-$0.1$
+gate reaches final reward
 $0.4940\pm0.0050$, compared with $0.4606\pm0.0098$ for raw and
 $0.4038\pm0.0005$ for always applying PPO masking.  It matches the raw
 median endpoint to four decimals while increasing the tenth-percentile endpoint
@@ -881,11 +859,11 @@ efficiency-oriented heuristic, whereas the fitted boundary is the stronger
 tail-risk safeguard.
 
 This separation supplies the bridge to the main experiment.  The oracle study
-validates the theoretical crossover and its dependence on $N$.  The
-on-trajectory diagnostic then verifies the conditional MSE premise needed for
-the observable $0.1$ trigger, and repeated optimization shows what that sparse
-intervention buys.  The next section tests the same prespecified trigger in
-RLVR, where only its observable inputs and training consequences remain.
+validates the theoretical crossover.  The on-trajectory diagnostic then
+verifies the conditional MSE premise needed for the observable $0.1$ trigger,
+and repeated optimization shows what that sparse intervention buys.  The next
+section tests the same prespecified trigger in RLVR, where only its observable
+inputs and training consequences remain.
 
 \section{Main experiments: ESS-gated RLVR}
 \label{sec:llm-experiments}
@@ -900,9 +878,8 @@ improving its late stability.
 \subsection{Decision rule and comparison set}
 
 At every policy update, we compute sequence ESS from the raw ratios before any
-masking or truncation.  We hold the number of valid sequences per optimizer
-minibatch fixed across all comparisons, so normalized ESS orders updates at a
-common estimator size.  We then evaluate $0.1$ as a prespecified heuristic:
+masking or truncation.  All methods use the same valid sequences and minibatch
+construction.  We then evaluate $0.1$ as a prespecified heuristic:
 when $\widehat\rho\ge0.1$, the method retains the available learning signal
 using either the fully permissive estimator or the CISPO-style weight-capped
 estimator \citep{minimax2025m1}; when $\widehat\rho<0.1$, it activates one of
@@ -923,9 +900,8 @@ counterparts under identical rollout, optimizer, token-budget, and evaluation
 settings.  This matching separates the value of the ESS decision from the value
 of the safeguard itself.  The threshold is fixed before the reported runs and
 is not retuned by safeguard, model, or benchmark.  It is not claimed to be the
-theoretical crossover.  If filtering or packing changes the number of valid
-sequences, we will additionally report $\widehat N_{\mathrm{eff}}$ and analyze
-the gate conditional on estimator size.
+theoretical crossover.  The number of valid sequences is reported and held
+fixed within every matched comparison.
 
 \subsection{Evaluation protocol}
 
@@ -1528,7 +1504,7 @@ $[0.8,1]$ & 632 & $0.016\pm0.001$ & $2.95\pm0.69$ & $3.49\pm0.12$ \\
 \end{tabular}
 \end{table}
 
-\paragraph{The estimator crossover depends on ESS and sample size.}
+\paragraph{Sensitivity to estimator construction.}
 Table~\ref{tab:rlvr-crossover} reports the direct paired comparison.  With one
 training-size minibatch, PPO masking has lower estimated MSE in every ESS
 interval.  Averaging four minibatches reduces the permissive estimator's
@@ -1538,9 +1514,12 @@ lower mean MSE in the three intervals above $0.4$.  The crossover therefore appe
 only after averaging more independent blocks.  This is the batch-size effect
 predicted by the factor $N\|b_C\|_2^2$ in
 Equation~\eqref{eq:crossover}, applied to the block-level estimator described
-above.  The result supports ESS as a crossover coordinate at fixed estimator
-size, while the absence of a crossover at $N=128$ rejects a universal
-normalized-ESS threshold.
+above.  The result supports ESS as a crossover coordinate within a fixed update
+construction and confirms that the exact oracle boundary is
+configuration-specific.  This sensitivity check is not a batch-size
+prescription for RLVR: an LLM minibatch count need not equal the number of
+independent sampling blocks in the theorem, and the practical $0.1$ rule is
+evaluated through its one-sided low-ESS condition instead.
 
 \begin{table}[htbp]
 \centering
@@ -1573,7 +1552,7 @@ $512$ & $[0.8,1)$ & $0.004\pm0.001$ & $0.004\pm0.001$ & $-10.5\pm6.5$ \\
 \end{tabular}
 \end{table}
 
-\paragraph{Calibration isolates the informative estimator size.}
+\paragraph{Calibration fixes an oracle reference configuration.}
 Table~\ref{tab:formula-thresholds} reports every candidate $N$.  The fitted
 boundary is above the ESS range for $N=128$ and $N=256$, so these sizes select
 PPO at every fit state.  At $N=1024$, the fitted boundary is zero and therefore

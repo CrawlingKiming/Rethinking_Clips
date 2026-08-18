@@ -1993,7 +1993,7 @@ def make_formula_oracle_figure(
     on_trajectory_bin_rows: list[dict[str, float | str]],
     output_base: Path,
 ) -> None:
-    """Render the formula-oracle and N-dependent ESS-rule diagnostic."""
+    """Render the main oracle-to-practical ESS-rule figure."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -2027,8 +2027,7 @@ def make_formula_oracle_figure(
         }
     )
 
-    figure, axes_grid = plt.subplots(2, 2, figsize=(6.5, 4.15))
-    axes = axes_grid.ravel()
+    figure, axes = plt.subplots(1, 3, figsize=(6.5, 2.25))
     colors = ("#0072B2", "#E69F00", "#009E73", "#CC79A7")
     markers = ("o", "s", "D", "^")
     linestyles = ("-", "--", "-.", ":")
@@ -2051,7 +2050,7 @@ def make_formula_oracle_figure(
             in informative_multipliers
         ]
     )
-    x_lower = max(1e-4, float(np.min(all_ess)) * 0.72)
+    x_lower = max(1e-3, float(np.min(all_ess)) * 0.72)
     for index, multiplier in enumerate(informative_multipliers):
         x_values: list[float] = []
         means: list[float] = []
@@ -2086,7 +2085,6 @@ def make_formula_oracle_figure(
             elinewidth=0.8,
             markeredgecolor="white",
             markeredgewidth=0.4,
-            label=f"$N={128 * multiplier}$",
             zorder=3,
         )
     axes[0].axhline(0.0, color="#8A8A8A", linewidth=0.7)
@@ -2096,59 +2094,14 @@ def make_formula_oracle_figure(
     axes[0].xaxis.set_minor_formatter(NullFormatter())
     axes[0].set_xlabel("Population normalized ESS")
     axes[0].set_ylabel("Predicted PPO MSE reduction (%)")
-    axes[0].set_title("(a) Predicted crossover at informative $N$", loc="left", pad=5)
-    axes[0].legend(loc="best", handlelength=2.0)
-
-    threshold_rows = sorted(
-        threshold_rows,
-        key=lambda row: float(row["sequences_per_estimator"]),
-    )
-    sequence_counts = np.asarray(
-        [float(row["sequences_per_estimator"]) for row in threshold_rows]
-    )
-    axes[1].plot(
-        sequence_counts,
-        [
-            min(1.0, float(row["fitted_ess_threshold"]))
-            for row in threshold_rows
-        ],
-        color="#0072B2",
-        marker="o",
-        label="Fitted for each $N$",
-    )
-    axes[1].plot(
-        sequence_counts,
-        [
-            min(1.0, float(row["effective_count_threshold"]))
-            for row in threshold_rows
-        ],
-        color="#009E73",
-        marker="D",
-        linestyle="--",
-        label=r"Transfer fixed $N\rho$",
-    )
-    axes[1].axhline(
-        0.1,
-        color="#D55E00",
-        linewidth=1.1,
-        linestyle=":",
-        label="Fixed 0.1",
-    )
-    axes[1].set_xscale("log", base=2)
-    axes[1].set_xticks(sequence_counts)
-    axes[1].set_xticklabels([str(int(value)) for value in sequence_counts])
-    axes[1].set_ylim(-0.02, 1.05)
-    axes[1].set_xlabel("Sequences per estimator $N$")
-    axes[1].set_ylabel("ESS decision threshold")
-    axes[1].set_title("(b) The boundary moves with $N$", loc="left", pad=5)
-    axes[1].legend(loc="best", handlelength=2.0)
+    axes[0].set_title("(a) ESS predicts MSE preference", loc="left", pad=5)
 
     on_trajectory_bin_rows = sorted(
         on_trajectory_bin_rows,
         key=lambda row: float(row["ess_bin_lower"]),
     )
     positions = np.arange(len(on_trajectory_bin_rows))
-    bars = axes[2].bar(
+    bars = axes[1].bar(
         positions,
         [float(row["ppo_mse_win_rate_pct"]) for row in on_trajectory_bin_rows],
         yerr=[
@@ -2161,22 +2114,29 @@ def make_formula_oracle_figure(
         linewidth=0.0,
         zorder=3,
     )
-    axes[2].axhline(
+    axes[1].axhline(
         50.0,
         color="#6F6F6F",
         linewidth=0.8,
         linestyle="--",
-        label="No predictive value",
     )
-    axes[2].set_xticks(positions)
-    axes[2].set_xticklabels(("$<0.1$", "$0.1$--$0.25$", "$0.25$--$0.42$"))
-    axes[2].set_xlabel("Sample normalized ESS")
-    axes[2].set_ylabel("Updates where PPO has lower MSE (%)")
-    axes[2].set_ylim(45.0, 100.0)
-    axes[2].set_title("(c) The 0.1 gate selects high-risk updates", loc="left", pad=5)
-    axes[2].legend(loc="lower left", handlelength=1.8)
+    axes[1].set_xticks(positions)
+    axes[1].set_xticklabels(("$<0.1$", "$0.1$--$0.25$", "$0.25$--$0.42$"))
+    axes[1].set_xlabel("Sample normalized ESS")
+    axes[1].set_ylabel("PPO has lower MSE (%)")
+    axes[1].set_ylim(45.0, 100.0)
+    axes[1].set_title("(b) 0.1 satisfies the gate premise", loc="left", pad=5)
+    axes[1].text(
+        2.43,
+        50.8,
+        "Chance",
+        color="#6F6F6F",
+        ha="right",
+        va="bottom",
+        fontsize=6.5,
+    )
     for bar, row in zip(bars, on_trajectory_bin_rows):
-        axes[2].text(
+        axes[1].text(
             bar.get_x() + bar.get_width() / 2.0,
             min(98.5, bar.get_height() + 2.0),
             f'{float(row["mean_updates_per_replication"]):.0f} updates',
@@ -2189,7 +2149,6 @@ def make_formula_oracle_figure(
         "Raw": ("#0072B2", "--", "o", "Raw"),
         "PPO masked": ("#6F6F6F", "-.", "^", "PPO"),
         "ESS fitted": ("#56B4E9", "-", "s", "Fitted ESS"),
-        "ESS count transfer": ("#009E73", "-", "D", "$N\\rho$ transfer"),
         "ESS fixed 0.1": ("#D55E00", "-", "o", "Fixed 0.1"),
     }
     for method, (color, linestyle, marker, label) in trajectory_styles.items():
@@ -2207,7 +2166,7 @@ def make_formula_oracle_figure(
         interval = 1.96 * np.asarray(
             [float(row["relative_improvement_pct_se"]) for row in rows]
         )
-        axes[3].plot(
+        axes[2].plot(
             x,
             mean,
             color=color,
@@ -2218,7 +2177,7 @@ def make_formula_oracle_figure(
             label=label,
             zorder=3,
         )
-        axes[3].fill_between(
+        axes[2].fill_between(
             x,
             mean - interval,
             mean + interval,
@@ -2226,11 +2185,11 @@ def make_formula_oracle_figure(
             alpha=0.11,
             linewidth=0.0,
         )
-    axes[3].axhline(100.0, color="#8A8A8A", linewidth=0.7, linestyle=":")
-    axes[3].set_xlabel("Verifier responses ($\\times10^3$)")
-    axes[3].set_ylabel("Reward improvement (%)")
-    axes[3].set_title("(d) Four-epoch optimization at $N=512$", loc="left", pad=5)
-    axes[3].legend(loc="lower right", ncol=1, handlelength=1.8)
+    axes[2].axhline(100.0, color="#8A8A8A", linewidth=0.7, linestyle=":")
+    axes[2].set_xlabel("Verifier responses ($\\times10^3$)")
+    axes[2].set_ylabel("Reward improvement (%)")
+    axes[2].set_title("(c) Selective masking improves reward", loc="left", pad=5)
+    axes[2].legend(loc="lower right", ncol=1, handlelength=1.8)
 
     for axis in axes:
         axis.spines["top"].set_visible(False)
@@ -2239,12 +2198,11 @@ def make_formula_oracle_figure(
         axis.grid(axis="x", visible=False)
         axis.tick_params(axis="both", which="major", pad=2)
     figure.subplots_adjust(
-        left=0.08,
+        left=0.075,
         right=0.995,
-        bottom=0.115,
-        top=0.94,
-        wspace=0.31,
-        hspace=0.48,
+        bottom=0.22,
+        top=0.86,
+        wspace=0.42,
     )
     output_base.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_base.with_suffix(".pdf"))
