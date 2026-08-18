@@ -844,16 +844,18 @@ lower error under a fixed construction.
   (b) A conservative $0.1$ event selects updates on which PPO masking usually
   has lower MSE.  Labels give updates per run; error bars are standard errors
   across 100 replications.  (c) The same sparse intervention preserves
-  permissive progress while reducing late failures in repeated optimization;
-  bands are 95\% confidence intervals.}
+  permissive progress while reducing late failures across eight rollout cycles,
+  with four optimization epochs per fixed rollout.  The horizontal axis reports
+  cumulative optimization epochs; bands are 95\% confidence intervals.}
   \label{fig:formula-oracle}
 \end{figure}
 
 Finally, we evaluate the deliberately conservative rule
 $\widehat\rho<0.1$.  It selects only $3.3\%$ of updates; within that event, PPO
 has lower MSE on $83.7\%\pm1.4\%$ of updates and reduces
-conditional MSE by $53.3\%\pm2.9\%$.  In the four-epoch test, the resulting
-trajectory reaches $0.4940\pm0.0050$ final reward, compared with
+conditional MSE by $53.3\%\pm2.9\%$.  Across eight rollout cycles, each with four
+optimization epochs over its fixed batch, the resulting trajectory reaches
+$0.4940\pm0.0050$ final reward, compared with
 $0.4606\pm0.0098$ for always permissive and $0.4038\pm0.0005$ for always
 masked.  The sparse trigger therefore captures the low-ESS side of the
 theoretical crossover with an observable training statistic.
@@ -1455,7 +1457,8 @@ reduce estimation risk.  The repeated trajectory determines whether that
 trade-off prevents later loss.
 
 \paragraph{Reliability conditioning improves repeated optimization.}
-Table~\ref{tab:n512-optimization} reports the four-epoch $N=512$ study.  The
+Table~\ref{tab:n512-optimization} reports the $N=512$ study with eight rollout
+cycles and four optimization epochs per fixed rollout.  The
 fitted ESS reference has the highest final reward and the smallest uncertainty.  It
 uses the raw estimator for 450.3 of 512 updates on average, which explains its
 fast progress, while its 61.7 PPO-masked updates prevent the late loss observed
@@ -1464,14 +1467,15 @@ operating point.  It masks only $3.3\%$ of updates, matches the raw median, and
 raises the tenth-percentile endpoint from $0.352$ to $0.495$.  It ends above
 the fitted reference in 90 of 100 paired runs, although the fitted reference
 retains the higher mean by eliminating a few severe failures that remain under
-the sparse rule.  The comparison supports $0.1$ as a practical heuristic
-without presenting it as the risk-minimizing boundary or a new optimizer.
+the sparse rule.  The comparison supports $0.1$ as a conservative practical
+heuristic and shows the additional robustness available from calibration.
 
 \begin{table}[htbp]
 \centering
 \small
-\caption{Four-epoch optimization with 512 sequences per update.  Mean final
-reward is reported with its standard error over 100 paired replications;
+\caption{Optimization over eight rollout cycles, with four epochs per fixed
+rollout and 512 sequences per update.  Mean final reward is reported with its
+standard error over 100 paired replications;
 median and tenth percentile are computed across the same final outcomes.}
 \label{tab:n512-optimization}
 \begin{tabular}{lrrrr}

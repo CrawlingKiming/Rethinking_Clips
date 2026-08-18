@@ -1992,6 +1992,7 @@ def make_formula_oracle_figure(
     scaled_path_rows: list[dict[str, float | str]],
     on_trajectory_bin_rows: list[dict[str, float | str]],
     output_base: Path,
+    optimization_epochs_per_rollout: int = 4,
 ) -> None:
     """Render the main oracle-to-practical ESS-rule figure."""
     import matplotlib
@@ -2156,9 +2157,11 @@ def make_formula_oracle_figure(
             [row for row in scaled_path_rows if row["method"] == method],
             key=lambda row: float(row["rollout_batch"]),
         )
-        responses_per_rollout = float(rows[0]["responses_per_rollout"])
         x = np.asarray(
-            [float(row["rollout_batch"]) * responses_per_rollout / 1000.0 for row in rows]
+            [
+                float(row["rollout_batch"]) * optimization_epochs_per_rollout
+                for row in rows
+            ]
         )
         mean = np.asarray(
             [float(row["mean_relative_improvement_pct"]) for row in rows]
@@ -2186,7 +2189,13 @@ def make_formula_oracle_figure(
             linewidth=0.0,
         )
     axes[2].axhline(100.0, color="#8A8A8A", linewidth=0.7, linestyle=":")
-    axes[2].set_xlabel("Verifier responses ($\\times10^3$)")
+    max_epochs = max(
+        float(row["rollout_batch"]) * optimization_epochs_per_rollout
+        for row in scaled_path_rows
+    )
+    axes[2].set_xticks(np.arange(0.0, max_epochs + 0.5, 4.0))
+    axes[2].set_xlim(-0.8, max_epochs + 0.8)
+    axes[2].set_xlabel("Cumulative optimization epochs")
     axes[2].set_ylabel("Reward improvement (%)")
     axes[2].set_title("(c) Selective masking improves reward", loc="left", pad=5)
     axes[2].legend(loc="lower right", ncol=1, handlelength=1.8)
