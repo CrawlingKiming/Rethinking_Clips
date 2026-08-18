@@ -61,6 +61,10 @@ nonpositive term $-\|g\|_2^2/N$.
 
 \subsection{Proof of Theorem~\ref{thm:mse-improvement}}
 
+The argument starts from the policy-improvement form of the smoothness lemma in
+Theorem~7 of \citet{papini2022smoothing} and makes the gradient-error term
+explicit.
+
 \begin{proof}
 Apply \eqref{eq:smooth-policy-improvement} with
 $d=\eta\widehat g$:
@@ -117,6 +121,11 @@ positive.
 \end{proof}
 
 \subsection{Proof of Corollary~\ref{cor:finite-time-mse}}
+
+This is the standard smooth nonconvex policy-gradient telescoping argument used
+by \citet{yuan2022general} and \citet{kallus2020efficient}.  We provide every
+step because the retained realized error is the quantity later replaced by the
+ESS bound.
 
 \begin{proof}
 Apply \eqref{eq:pointwise-improvement} at each update $t$:

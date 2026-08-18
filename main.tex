@@ -108,8 +108,8 @@ justifies the bias it introduces.
 Establishing this thesis requires a bridge from coverage to optimization.  We
 derive the exact mean-squared error of the permissive gradient in terms of
 effective support and gradient scale.  We then show that gradient error controls
-both one-step policy improvement and finite-time convergence to a stationary
-region.  Finally, we differentiate the PPO
+both one-step policy improvement and finite-time convergence to a first-order
+stationary neighborhood.  Finally, we differentiate the PPO
 surrogate to show that clipping is an advantage-dependent gradient mask, not
 global ratio truncation, and derive the exact bias--variance condition under
 which a modified gradient is preferable.  Together, these results make ESS a
@@ -164,7 +164,7 @@ crossover.
 \begin{enumerate}
 \item We derive an exact connection between sequence ESS, effective support,
 and the mean-squared error of a fixed-rollout policy-gradient estimator.
-\item We connect gradient error to one-step improvement and finite-time
+\item We connect gradient error to finite-time convergence to first-order
 stationarity, then derive the exact bias--variance condition under which
 clipping improves the estimator.
 \item We derive the conditional guarantee of an observable ESS gate, recover
@@ -187,7 +187,10 @@ the rollout policy explicit throughout.
 
 \subsection{Population target and sampled update}
 
-Let $X\sim\nu$ be a prompt, let $Q(\cdot\mid X)$ be the rollout policy, and let
+Let $\theta\in\Theta\subseteq\mathbb R^d$ denote the policy parameter.  The
+analysis permits the unconstrained choice $\Theta=\mathbb R^d$; if $\Theta$ is
+constrained, every parameter segment used below must remain in $\Theta$.  Let
+$X\sim\nu$ be a prompt, let $Q(\cdot\mid X)$ be the rollout policy, and let
 $R(X,Y)$ be the terminal verifier reward of a complete response.  During the
 optimization phase, the policy of interest is $P_\theta$, with objective
 $J(\theta):=\E_{P_\theta}[R]$.  Assuming $P_\theta\ll Q$, this target can be
@@ -278,7 +281,8 @@ change the preferred policy update.
 Section~\ref{sec:setting} reduced fixed-rollout optimization to a sampled
 importance-weighted gradient and a measure of its effective support.  This
 section determines when that gradient is reliable, how its error controls
-finite-time policy optimization, and when clipping can reduce that error.  The
+one-step improvement and finite-time convergence, and when clipping can reduce
+that error.  The
 argument follows one causal chain: poor coverage raises gradient error, gradient
 error enlarges the certified stationary region, and clipping becomes preferable
 only when its variance reduction repays its bias.  This chain gives ESS an
@@ -331,7 +335,7 @@ this paper holds that construction fixed and uses ESS to locate the reliability
 regime.  The next question is whether this statistical error has an optimization
 consequence.
 
-\subsection{From gradient MSE to finite-time policy optimization}
+\subsection{From gradient MSE to finite-time convergence}
 \label{sec:mse-improvement}
 
 Smoothness turns gradient reliability into an optimization guarantee.
@@ -371,11 +375,17 @@ Consequently, $\E\|\widehat g-g\|_2^2<\|g\|_2^2$ is sufficient for positive
 expected policy improvement.
 \end{theorem}
 
-The one-step statement extends directly to an entire optimization path.  This
-extension matters because policy-gradient convergence is typically assessed
-through first-order stationarity, not improvement of a single update.
+The one-step statement extends to a finite-time convergence result.  Since the
+policy objective is nonconcave in general, the standard target is first-order
+stationarity rather than a global optimum: a random iterate $\theta_U$ is
+$\varepsilon$-stationary in mean square when
+$\E\|\nabla J(\theta_U)\|_2^2\le\varepsilon^2$.  This is the convergence notion
+used in established vanilla and off-policy policy-gradient analyses
+\citep{yuan2022general,kallus2020efficient}.  The next result specializes their
+smoothness-and-telescoping argument while retaining the realized gradient error
+needed for our estimator comparison.
 
-\begin{corollary}[Finite-time stationarity under gradient error]
+\begin{corollary}[Finite-time convergence to first-order stationarity]
 \label{cor:finite-time-mse}
 Fix $\theta_0$, and let $\theta_{t+1}=\theta_t+\eta\widehat g_t$ for
 $t=0,\ldots,T-1$, and let $g_t=\nabla J(\theta_t)$.  Suppose the conditions of
@@ -394,21 +404,56 @@ expectation in \eqref{eq:finite-time-mse} gives the corresponding bound on
 $\E\|\nabla J(\theta_U)\|_2^2$ in terms of the average gradient MSE.
 \end{corollary}
 
-The first term in \eqref{eq:finite-time-mse} vanishes with the optimization
-horizon, while the average gradient error determines the certified stationary
-region.  Within this guarantee, reducing average gradient MSE by $\delta$
-tightens the estimator-dependent term by the same $\delta$, without requiring
-the estimator to be unbiased.  This structure agrees with established analyses.
-Theorem~11 of
-\citet{kallus2020efficient} bounds the average squared policy gradient by an
-initial objective gap plus squared off-policy gradient-estimation error.
-Corollary~4.6 of \citet{yuan2022general} similarly retains a stochastic
-variance term in a conventional policy-gradient guarantee.  Theorem~20 and
-Remark~21 of \citet{driggs2022biased} further show that biased-gradient
-convergence can depend on bias through MSE, so an estimator may improve the
-guarantee when its variance reduction exceeds the cost of its bias.
-Corollary~\ref{cor:finite-time-mse} isolates this common principle in the form
-needed to compare clipping rules.
+Corollary~\ref{cor:finite-time-mse} states precisely what converges.  Define
+\begin{equation}
+  \overline e_T
+  :=\frac1T\sum_{t=0}^{T-1}
+    \E\|\widehat g_t-g_t\|_2^2,
+  \qquad
+  \Delta_0:=J^\star-J(\theta_0).
+  \label{eq:average-gradient-error}
+\end{equation}
+For any $\varepsilon>0$, choosing
+$T\ge2\Delta_0/(\eta\varepsilon^2)$ yields
+\begin{equation}
+  \E\|\nabla J(\theta_U)\|_2^2
+  \le \varepsilon^2+\overline e_T.
+  \label{eq:finite-time-complexity}
+\end{equation}
+Thus exact gradients recover the usual $O(1/T)$ convergence of the average
+squared gradient, and vanishing average MSE implies convergence to first-order
+stationarity.  A persistent MSE level instead certifies only a stationary
+neighborhood whose size is set by that error.  The result does not
+claim that the parameter sequence converges, nor does it claim convergence to a
+global optimum.
+
+This distinction also clarifies what is inherited from prior work.  Corollary
+4.6 of \citet{yuan2022general} proves finite-time stationarity for vanilla policy
+gradient under smoothness and a second-moment condition.  Theorem~11 of
+\citet{kallus2020efficient} gives the analogous average-gradient structure with
+off-policy estimation error.  Theorem~20 and Remark~21 of
+\citet{driggs2022biased} show more generally that biased-gradient convergence
+can depend on bias through MSE.  Our contribution is not a new generic
+nonconvex convergence theorem.  It preserves the full gradient MSE in the
+standard argument so that clipping rules can be compared and ESS can enter the
+estimator-dependent term.
+
+No bounded parameter set or projection is required by
+Corollary~\ref{cor:finite-time-mse}.  It instead assumes that every update is
+feasible, that $J$ is smooth along the realized update segments, that the
+gradient errors have finite second moments, and that $J$ is upper bounded along
+the path.  In RLVR with rewards in $[0,1]$, the last condition holds with
+$J^\star\le1$.  Bounded rewards alone do not guarantee policy smoothness or
+finite importance-weight moments.  The smoothing-policy conditions of
+\citet{papini2022smoothing}, or the expected score and log-policy-Hessian bounds
+in Assumption~4.1 of \citet{yuan2022general}, are sufficient routes to the
+required smoothness.  A projection can make such a bound uniform by keeping the
+iterates in a controlled region, but the proof does not require a bound on
+$\|\theta_t\|_2$ when pathwise smoothness already holds.  By contrast, if an
+active projection onto a constrained parameter set is part of the algorithm,
+the appropriate convergence measure is a projected gradient mapping.  The
+Euclidean-gradient statement above does not cover that case; projected policy
+gradient requires a separate analysis such as \citet{xiao2022convergence}.
 
 The ESS factorization now supplies a coverage-dependent convergence guarantee.
 To state it without hiding a dependence assumption, let each gradient batch be
@@ -441,9 +486,13 @@ along the path, then
 \end{equation}
 \end{corollary}
 
-The result gives effective support a finite-time meaning: at controlled
-gradient scale, weak coverage enlarges the certified upper bound on
-stationarity error for a permissive policy-gradient path.  For a single update,
+The result gives effective support a finite-time convergence meaning.  At
+controlled gradient scale, weak coverage enlarges the certified stationary
+neighborhood for a permissive policy-gradient path.  With fixed $N$ and a
+nonzero bound $\overline G_2/(N\underline\rho)$, the certificate does not imply
+exact stationarity as $T\to\infty$.  For this certificate to imply exact
+convergence, the average estimation term must vanish, for example through
+growing effective support or a decreasing weighted gradient scale.  For a single update,
 the exact MSE identity
 also shows that
 \begin{equation}
