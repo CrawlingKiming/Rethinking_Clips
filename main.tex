@@ -81,8 +81,7 @@ zero.  The absence of clipping is therefore not itself the instability.
   \caption{Empirical motivation in Qwen3-30B-A3B RLVR.  With TIS caps of 3
   and 5, AIME-2024 mean@16 initially improves without PPO clipping but later
   collapses as normalized sequence ESS vanishes.  The dotted line marks the
-  prespecified $0.1$ threshold studied below.  Each panel shows the available
-  training trajectory; multi-seed uncertainty is not shown.}
+  prespecified $0.1$ threshold studied below.}
   \label{fig:llm-motivation}
 \end{figure}
 
@@ -1129,7 +1128,7 @@ in Equation~\eqref{eq:optdigits-gradient}.
 \fbox{\begin{minipage}{0.92\linewidth}
 \small
 \textbf{Input:} initial policy $\theta_0$; eight rollouts; 128 prompts per
-rollout; $G=16$ responses per prompt; 16 minibatches; step size $3$.
+rollout; $G=16$ responses per prompt; 16 minibatches.
 \begin{enumerate}
   \item Set the rollout policy $Q\leftarrow P_\theta$.  Sample prompts and
   grouped responses, then compute verifier rewards and leave-one-out advantages.
@@ -1137,8 +1136,7 @@ rollout; $G=16$ responses per prompt; 16 minibatches; step size $3$.
   containing eight groups and $N=128$ complete responses.
   \item For each minibatch, recompute
   $W=P_\theta(Y\mid x)/Q(Y\mid x)$, policy scores, and sample ESS.  Form the
-  designated raw, PPO-masked, or conditional estimator and update
-  $\theta\leftarrow\theta+3\widehat g$.
+  designated raw, PPO-masked, or conditional estimator and update.
   \item After all 16 updates, discard the rollout and repeat from the new policy.
 \end{enumerate}
 \end{minipage}}
@@ -1181,8 +1179,7 @@ not numerical ratio truncation.  The third method uses
 \end{equation}
 The $0.1$ threshold is fixed before the runs and is not selected from a reported
 outcome.  All methods share the initialization, prompt draws, response-sampling
-uniforms, and group permutations within each of 100 paired replications; the
-master seed is 73.
+uniforms, and group permutations within each of 100 paired replications.
 
 The first 20 conditional replications provide 2,560 pre-update diagnostics.  At
 each state, we evaluate the raw gradient against
@@ -1244,7 +1241,6 @@ errors use the eight states as independent units.  PPO reduction is
 $100(\widehat{\operatorname{MSE}}_{\mathrm{raw}}-
 \widehat{\operatorname{MSE}}_{\mathrm{PPO}})/
 \widehat{\operatorname{MSE}}_{\mathrm{raw}}$.  Positive values favor masking.
-State selection and redraw seeds are 99,246 and 271,901, respectively.
 
 \begin{figure}[htbp]
   \centering
@@ -1261,7 +1257,7 @@ State selection and redraw seeds are 99,246 and 271,901, respectively.
 \subsection{Formula calibration and held-out decision test}
 
 We split the eight states in each ESS interval into four calibration and four
-test states, yielding 28 of each; seed 161,876 fixes the split.  At every state,
+test states, yielding 28 of each.  At every state,
 100 paired $N=128$ blocks estimate the raw covariance trace $\widehat V_W$, the
 PPO covariance trace $\widehat V_C$, and the PPO squared bias $\widehat B_C$.
 The squared-bias estimate subtracts the sampling variance of the estimated mean
@@ -1277,13 +1273,12 @@ $K$, we choose the ESS midpoint that minimizes fitted risk while applying PPO
 below the threshold and raw above it.  The only interior calibration solution is
 $K=4$, or $N=512$, with threshold $0.417$.
 
-Held-out evaluation uses 100 paired redraws at each test state and seed 271,974.
+Held-out evaluation uses 100 paired redraws at each test state.
 The fitted threshold never sees test-state errors; standard errors use the 28
 states as independent units.  The subsequent optimization study freezes that
 threshold, uses 512 sequences per update, traverses each rollout for four epochs,
 and runs eight rollout cycles in 100 paired replications.  Sample ESS, rather
-than population ESS, determines the training intervention; master seed 424,315
-fixes the optimization stream.
+than population ESS, determines the training intervention.
 
 The fixed-$0.1$ trajectory also records shadow raw and PPO gradients whenever
 sample ESS is below $0.417$.  Comparing each with the exact gradient yields the
