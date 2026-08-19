@@ -383,36 +383,6 @@ $1-\delta$,
 \end{equation}
 \end{theorem}
 
-The theorem is the direct role of current ESS.  It controls transfer from the
-finite current-policy improvement estimate to population improvement using only
-bounded verifier reward.  No assumption on $\|S_{\theta_k}\|$, no
-tail-weighted gradient moment, and no claim that ESS determines gradient MSE is
-required.  The penalty is zero at $P_{\theta_k}=Q$ and grows with the exact
-Rényi-2 identity $\rho_k^{-1}-1=\chi^2(P_{\theta_k}\|Q)$.
-This is a per-update conditional statement.  Simultaneous certification across
-$K$ updates requires, for example, using failure levels $\delta_k$ with
-$\sum_k\delta_k\le\delta$; the theorem alone is not an optional-stopping
-guarantee.
-
-\subsection{A fresh-minibatch certificate for the realized update}
-\label{sec:mse-improvement}
-
-Current ESS certifies $Q\to P_{\theta_k}$; it does not by itself certify the
-increment $P_{\theta_k}\to P_{\theta_{k+1}}$.  After $\mathcal B_k$ produces
-$\theta_{k+1}$, both endpoints are measurable with respect to
-$\mathcal F_k$.  The next unused minibatch $\mathcal B_{k+1}$ is independent of
-that realized update.  Define
-\begin{align}
-  G_k&:=J(\theta_{k+1})-J(\theta_k),
-  \label{eq:realized-population-gain}\\
-  \widehat G_{k+1}
-  &:=\frac1m\sum_{Z_i\in\mathcal B_{k+1}}
-  (W_{k+1,i}-W_{k,i})R_i,
-  \label{eq:fresh-one-step-estimator}\\
-  \Xi_k&:=\E_Q[(W_{k+1}-W_k)^2\mid\mathcal F_k].
-  \label{eq:ratio-displacement}
-\end{align}
-
 \begin{theorem}[Fresh-minibatch certificate for a realized update]
 \label{thm:mse-improvement}
 For $k<K$, assume $0\le R\le R_{\max}$ and $\Xi_k<\infty$.  Conditional on
