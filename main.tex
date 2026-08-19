@@ -47,11 +47,9 @@ explanation.  We identify the effective support of the rollout data, measured
 by effective sample size (ESS), as the missing link.  We prove that effective
 support controls the gap between finite-batch and population policy improvement
 for the current learner, without assuming a bounded policy-gradient norm.  A
-smoothness lemma characterizes when the optimizer's realized displacement
-ascends its empirical surrogate, and the next unused minibatch certifies whether
-that update improves population reward.  The resulting uncertainty depends on
-an exact ratio-displacement moment rather than endpoint ESS.  This analysis
-shows why permissive optimization can be reliable
+smoothness argument then characterizes when the optimizer's realized
+displacement raises the selected sampled objective, without requiring a global
+argmax argument.  This analysis shows why permissive optimization can be reliable
 while rollout coverage is broad and why a bounded full-sequence estimator can
 give a stronger conservative certificate after coverage concentrates.  An
 exactly evaluable contextual bandit measures associated ESS, gradient-error,
@@ -96,7 +94,7 @@ Existing approaches mainly change the intervention rather than explain this
 change of regime.  A clipping threshold specifies how to alter an individual
 sample, an update count measures time spent on a rollout, and a divergence
 summarizes policy movement \citep{qi2026dppo}.  None directly answers whether
-the fixed rollout still supports an accurate gradient for the current policy.
+the fixed rollout still supports reliable evidence about the current policy.
 Without that reliability variable, conservative and permissive objectives remain a
 collection of useful but objective-specific heuristics.
 
@@ -114,11 +112,11 @@ We establish this explanation through one theoretical chain.  First, the
 one-epoch disjoint-minibatch structure makes the current unused minibatch a
 valid estimator of current population improvement.  Bounded verifier reward
 then yields a confidence radius proportional to
-$\sqrt{(\rho_k^{-1}-1)/m}$, with no score-norm assumption.  Second, the next
-minibatch is optimized: a smoothness lower bound explains its empirical ascent,
-and the following unused minibatch certifies whether the realized update
-improves population reward.  The uncertainty is governed by the exact ratio
-displacement $\E_Q[(W_{k+1}-W_k)^2]$.  Third, we separate PPO/GRPO gradient
+$\sqrt{(\rho_k^{-1}-1)/m}$, with no score-norm assumption.  Second, the bound
+ranks the reliability of alternative estimators at the current policy.  Because
+a practical optimizer does not globally maximize the selected random objective,
+a smoothness inequality certifies the sampled gain of its realized displacement.
+Third, we separate PPO/GRPO gradient
 masking, CISPO token-coefficient capping, and full-sequence ratio truncation;
 only the last directly inherits the bounded objective-estimator certificate.
 
@@ -142,7 +140,7 @@ final AIME-2024 score under GRPO, Clip-Higher, DPPO, and TIS comparisons, and
 prevents the late TIS collapse shown in Figure~\ref{fig:llm-motivation}.  These
 trajectory-level results test the operational implication in the setting where
 the true gradient is no longer observable; they do not directly validate the
-fresh-minibatch confidence bounds.
+current-policy confidence bound.
 
 \subsection{Related perspectives}
 
@@ -164,26 +162,28 @@ Importance-sampling analyses use second moments and ESS to quantify coverage
 weight concentration, ESS, or sequence-level mismatch
 \citep{zheng2025m2po,shen2026vespo,huang2026vcpo,fakoor2026p3o}.  Our analysis
 provides the missing theoretical link: current sequence ESS controls the
-finite-to-population gap for current policy improvement, while incremental
-updates require the ratio-displacement cross moment.
+finite-to-population gap for current policy improvement.  We then connect this
+objective-level guarantee to local policy optimization without introducing a
+bounded score norm.
 
 Published policy-gradient analyses use quadratic smoothness bounds to translate
 a gradient step into guaranteed performance gain
 \citep{pirotta2013adaptive,papini2022smoothing}; broader stochastic policy-gradient
 analyses study how gradient estimation affects optimization
 \citep{yuan2022general,kallus2020efficient,driggs2022biased}.  In our chain,
-smoothness establishes ascent of the empirical surrogate that proposes the
-update, and the next unused minibatch transfers the realized update to a
-population-reward statement.
+smoothness establishes ascent of the sampled reward objective for the realized
+update.  Current ESS supplies the separate finite-to-population criterion used
+to select which sampled estimator is reliable at that update.
 
 \subsection{Contributions}
 
 \begin{enumerate}
 \item We derive a current-ESS certificate for finite-to-population policy
 improvement in one-epoch RLVR without a bounded score or gradient norm.
-\item We connect a smooth empirical-ascent lemma to a fresh-minibatch
-population-improvement certificate and identify the required
-ratio-displacement cross moment.
+\item We use a smooth empirical-ascent lemma to replace a global argmax
+argument: after current ESS identifies the reliable estimator regime, the lemma
+certifies when the realized optimizer displacement raises the selected sampled
+objective.
 \item We distinguish PPO/GRPO masking, CISPO coefficient capping, and
 full-sequence ratio truncation, and show that only the last directly yields a
 bounded conservative objective-estimation certificate.
@@ -209,9 +209,9 @@ the rollout policy explicit throughout.
 Let $\theta\in\mathbb R^d$ denote the policy parameter.  Let $X\sim\nu$ be a
 prompt, let $Q(\cdot\mid X)$ be the rollout policy, and let
 $R(X,Y)$ be the terminal verifier reward of a complete response.  During the
-optimization phase, the policy of interest is $P_\theta$, with objective
-$J(\theta):=\E_{P_\theta}[R]$.  Assuming $P_\theta\ll Q$, this target can be
-evaluated from rollout data using the sequence likelihood ratio
+optimization phase, the policy of interest is $P_\theta$, with population
+reward $J(\theta):=\E_{P_\theta}[R]$.  Assuming $P_\theta\ll Q$, define the
+sequence likelihood ratio
 \begin{equation}
   W_\theta(X,Y)
   :=\frac{P_\theta(Y\mid X)}{Q(Y\mid X)},
@@ -220,24 +220,39 @@ evaluated from rollout data using the sequence likelihood ratio
   \label{eq:weight}
 \end{equation}
 
-The central statistical object is policy improvement relative to the rollout
-policy.  Assuming $0\le R\le R_{\max}$, change of measure gives
+The importance-weighted population objective is not a surrogate for $J$; it is
+exactly $J$:
+\begin{equation}
+  L_Q(\theta):=\E_Q[W_\theta R]
+  =\E_{P_\theta}[R]
+  =J(\theta).
+  \label{eq:population-objective-identity}
+\end{equation}
+The only gap studied below is therefore the statistical gap between this
+population objective and its finite-sample estimate.  In particular, assuming
+$0\le R\le R_{\max}$, improvement relative to the rollout policy satisfies
 \begin{equation}
   \Delta(\theta;Q)
   :=J(\theta)-J(Q)
   =\E_Q[(W_\theta-1)R].
   \label{eq:population-improvement}
 \end{equation}
-For an evaluation sample $\mathcal E$ of $n$ responses from $Q$, its centered
-importance-sampling estimator is
+For an evaluation sample $\mathcal E$ of $n$ responses from $Q$, define
+\begin{equation}
+  \widehat L_{\mathcal E}(\theta)
+  :=\frac1n\sum_{Z_i\in\mathcal E}W_{\theta,i}R_i.
+  \label{eq:empirical-reward-objective}
+\end{equation}
+Its centered improvement estimator is
 \begin{equation}
   \widehat\Delta_{\mathcal E}(\theta;Q)
   :=\frac1n\sum_{Z_i\in\mathcal E}(W_{\theta,i}-1)R_i.
   \label{eq:empirical-improvement}
 \end{equation}
-Centering at $Q$ is essential: the estimator and its uncertainty both vanish
-when $P_\theta=Q$.  The theory below studies when this finite estimate can be
-trusted as a statement about population policy improvement.
+Centering at $Q$ is essential for the reliability statement: the estimator and
+its uncertainty both vanish when $P_\theta=Q$.  Equations
+\eqref{eq:population-objective-identity}--\eqref{eq:empirical-improvement}
+establish the population--sample relationship used throughout the theory.
 
 The policy gradient is obtained by differentiating the corresponding finite
 objective.  Let $b(X)$ be a detached prompt-only baseline, set $A=R-b(X)$, and
@@ -289,7 +304,9 @@ population ESS by
   =\exp\{-D_2(P_\theta\|Q)\}.
   \label{eq:population-ess}
 \end{equation}
-Because $\E_Q[W_\theta]=1$, its relation to ratio dispersion is exact:
+Here $D_2(P_\theta\|Q)$ is the order-2 R\'enyi divergence between complete
+prompt-response distributions, so the identity is sequence-level.  Because
+$\E_Q[W_\theta]=1$, its relation to ratio dispersion is exact:
 \begin{align}
   \E_Q[(W_\theta-1)^2]
   &=\E_Q[W_\theta^2]-2\E_Q[W_\theta]+1
@@ -315,14 +332,15 @@ MSE is retained only as a separate empirical diagnostic.
 \section{Theoretical analysis}
 \label{sec:theory}
 
-At update $k$, fixed-rollout optimization poses two successive questions.
-First, does the current learner $P_{\theta_k}$ still have reliably measured
-improvement over the rollout policy $Q$?  Second, does the update proposed from
-the current minibatch improve population reward further?  The one-epoch
-disjoint-minibatch structure answers these questions in sequence.  Current ESS
-controls the first finite-to-population transfer.  Smoothness then explains why
-the optimizer proposes an ascending step, and the next unused minibatch
-certifies whether that realized step transfers to population reward.
+The theory follows one objective through population evaluation, finite-sample
+estimation, and local optimization.  Equation
+\eqref{eq:population-objective-identity} gives the starting point:
+$L_Q(\theta)=J(\theta)$ for raw full-sequence importance sampling.  Thus there is
+no population surrogate gap to bridge.  The two genuine questions are whether a
+finite rollout minibatch estimates this objective reliably and whether the
+optimizer's realized step raises the sampled objective selected at the current
+policy.  Current sequence ESS answers the first question.  A smoothness bound
+answers the second without assuming a bounded score or gradient norm.
 
 \subsection{Current policy improvement from an unused minibatch}
 \label{sec:raw}
@@ -350,18 +368,22 @@ Define the current full-sequence ratio and population ESS by
   =\exp\{-D_2(P_{\theta_k}\|Q)\}.
   \label{eq:current-ess}
 \end{equation}
-The unused minibatch estimates the accumulated improvement of the current
-policy over the rollout policy:
+For any policy $P_\theta$ evaluated on $\mathcal B_k$, define
+\begin{equation}
+  \widehat\Delta_k(\theta)
+  :=\frac1m\sum_{Z_i\in\mathcal B_k}(W_{\theta,i}-1)R_i.
+  \label{eq:minibatch-improvement-function}
+\end{equation}
+The current policy is independent of this unused minibatch, so write
 \begin{equation}
   \Delta_k:=J(\theta_k)-J(Q),
   \qquad
-  \widehat\Delta_k
-  :=\frac1m\sum_{Z_i\in\mathcal B_k}(W_{k,i}-1)R_i.
+  \widehat\Delta_k:=\widehat\Delta_k(\theta_k).
   \label{eq:current-improvement-estimator}
 \end{equation}
 
 \begin{theorem}[Current-ESS population-improvement certificate]
-\label{thm:raw-mse}
+\label{thm:current-ess}
 Assume $0\le R\le R_{\max}$ and $\E_Q[W_k^2\mid\mathcal F_{k-1}]<\infty$.
 Under Equation~\eqref{eq:disjoint-minibatches},
 \begin{align}
@@ -383,28 +405,58 @@ $1-\delta$,
 \end{equation}
 \end{theorem}
 
-Equation~\eqref{eq:current-ess-certificate} answers the first question.  The
-current policy has certified improvement over $Q$ whenever its empirical gain
-exceeds the ESS-dependent uncertainty radius.  This radius is exactly zero at
-$P_{\theta_k}=Q$ and grows with
-$\rho_k^{-1}-1=\chi^2(P_{\theta_k}\|Q)$.  Because the argument acts directly on
-bounded reward, it does not require a bounded policy score or gradient norm.
-The remaining question is whether the update computed from $\mathcal B_k$
-improves upon this current policy.
+Define the current-ESS confidence penalty
+\begin{equation}
+  \mathfrak r_{\delta,m}(\rho)
+  :=R_{\max}\sqrt{
+    \frac{1-\delta}{\delta m}(\rho^{-1}-1)
+  }.
+  \label{eq:ess-confidence-penalty}
+\end{equation}
+Theorem~\ref{thm:current-ess} states that
+\begin{equation}
+  J(\theta_k)
+  \ge
+  J(Q)+\widehat\Delta_k-\mathfrak r_{\delta,m}(\rho_k)
+  \label{eq:current-reward-lcb}
+\end{equation}
+with conditional probability at least $1-\delta$.  The right-hand side is a
+lower confidence bound on the population reward of the current learner.  It is
+exact at $P_{\theta_k}=Q$ and becomes less informative as
+$\rho_k^{-1}-1=\chi^2(P_{\theta_k}\|Q)$ grows.  The dependence is entirely on
+bounded reward and the second moment of the sequence ratio, not on a bound for
+$\|\nabla_\theta\log P_\theta\|$ or $\|\nabla J(\theta)\|$.
 
-\subsection{From smooth empirical ascent to population improvement}
+\subsection{From the current certificate to the realized optimizer step}
 \label{sec:mse-improvement}
 
-The optimizer first uses $\mathcal B_k$ to propose an update.  Let
-$\widehat L_k(\theta)$ be the differentiable minibatch surrogate with sampled
-rewards, advantages, and baselines held fixed, and write
+The current-policy lower bounds determine whether the raw estimator or
+full-sequence truncation provides the stronger reward certificate at update
+$k$.  Let $e_k\in\{W,c\}$ denote the estimator selected by this current
+comparison.  Its sampled reward objective is
+\begin{equation}
+  \widehat L_k(\theta)
+  :=\frac1m\sum_{Z_i\in\mathcal B_k}
+  \phi_{e_k}(W_{\theta,i})R_i,
+  \qquad
+  \phi_W(w)=w,
+  \quad
+  \phi_c(w)=\min\{w,c\}.
+  \label{eq:selected-sampled-objective}
+\end{equation}
+To analyze the finite step actually taken, write
 \begin{equation}
   \widehat g_k:=\nabla\widehat L_k(\theta_k),
   \qquad d_k:=\theta_{k+1}-\theta_k.
   \label{eq:minibatch-objective}
 \end{equation}
 
-\begin{lemma}[Smooth empirical ascent]
+The current confidence radius has completed its role once the estimator is
+selected at $\theta_k$; it is not a second quantity for the optimizer to predict
+or differentiate.  The remaining optimization question is whether the realized
+displacement ascends $\widehat L_k$.
+
+\begin{lemma}[Smooth sampled-objective ascent]
 \label{lem:smooth-empirical-ascent}
 If $\widehat L_k$ is $L_k$-smooth on the segment from $\theta_k$ to
 $\theta_{k+1}$, then
@@ -426,86 +478,126 @@ For the plain-gradient update $d_k=\eta\widehat g_k$,
 \end{lemma}
 
 Lemma~\ref{lem:smooth-empirical-ascent} is the standard quadratic lower bound
-for a smooth objective.  Its use in policy optimization has direct published
-precedent.  \citet[Lemma~3.2 and Theorem~3.3]{pirotta2013adaptive} use a Taylor
-lower bound along a policy-gradient step to derive a performance-improvement
-bound.  \citet[Proposition~3, Lemma~6, and
-Theorem~7]{papini2022smoothing} state the quadratic smoothness bound, establish
-smoothness of policy performance for smoothing policies, and obtain the
-corresponding bound for an arbitrary parameter update.
+for a smooth objective, used here as a local replacement for an unavailable
+global argmax argument.  This use has direct precedent in policy optimization.
+\citet[Lemma~3.2 and Theorem~3.3]{pirotta2013adaptive} apply a Taylor lower bound
+along a policy-gradient step to obtain a performance-improvement bound.
+\citet[Proposition~3, Lemma~6, and Theorem~7]{papini2022smoothing} state the
+quadratic smoothness bound, establish smoothness of policy performance for their
+policy class, and derive the corresponding result for an arbitrary parameter
+update.  In our setting, the lemma certifies the sampled objective actually used
+to construct the update.
 
-The lemma explains the optimization step: a displacement satisfying
-$\langle\widehat g_k,d_k\rangle>(L_k/2)\|d_k\|_2^2$ ascends the empirical
-surrogate.  This includes the usual plain-gradient step when
-$0<\eta<2/L_k$, while Equation~\eqref{eq:general-smoothness-gain} also describes
-the realized displacement of an adaptive optimizer.  Population improvement
-requires one additional transfer because $d_k$ was selected using
-$\mathcal B_k$.
-
-After $\mathcal B_k$ produces $\theta_{k+1}$, the next unused minibatch
-$\mathcal B_{k+1}$ evaluates that fixed, realized update.  Define
-\begin{align}
-  G_k&:=J(\theta_{k+1})-J(\theta_k),
-  \label{eq:realized-population-gain}\\
-  \widehat G_{k+1}
-  &:=\frac1m\sum_{Z_i\in\mathcal B_{k+1}}
-  (W_{k+1,i}-W_{k,i})R_i,
-  \label{eq:fresh-one-step-estimator}\\
-  \Xi_k&:=\E_Q[(W_{k+1}-W_k)^2\mid\mathcal F_k].
-  \label{eq:ratio-displacement}
-\end{align}
-
-\begin{theorem}[Fresh-minibatch certificate for a realized update]
-\label{thm:mse-improvement}
-For $k<K$, assume $0\le R\le R_{\max}$ and $\Xi_k<\infty$.  Conditional on
-$\mathcal F_k$,
-\begin{align}
-  \E[\widehat G_{k+1}\mid\mathcal F_k]&=G_k,
-  \label{eq:one-step-unbiased}\\
-  \Var(\widehat G_{k+1}\mid\mathcal F_k)
-  &\le\frac{R_{\max}^2}{m}\Xi_k.
-  \label{eq:one-step-variance}
-\end{align}
-Hence, with conditional probability at least $1-\delta$,
+This is the optimization conclusion that replaces a global argmax.  Any
+realized displacement satisfying
 \begin{equation}
-  G_k\ge\widehat G_{k+1}
-  -R_{\max}\sqrt{\frac{1-\delta}{\delta m}\Xi_k}.
-  \label{eq:fresh-one-step-certificate}
+  \langle\widehat g_k,d_k\rangle
+  >\frac{L_k}{2}\|d_k\|_2^2
+  \label{eq:realized-ascent-condition}
 \end{equation}
-\end{theorem}
+strictly raises the selected sampled objective.  For a plain-gradient step,
+$0<\eta<2/L_k$ is sufficient; Equation~\eqref{eq:general-smoothness-gain} also
+applies directly to the displacement produced by an adaptive optimizer.
 
-Equation~\eqref{eq:fresh-one-step-certificate} supplies the desired conclusion:
-if the fresh estimate $\widehat G_{k+1}$ exceeds its uncertainty radius, then
-the realized update improves population reward with probability at least
-$1-\delta$.  The complete argument is therefore
+Theorem~\ref{thm:current-ess} and Lemma~\ref{lem:smooth-empirical-ascent} have
+separate roles at the same update.  The theorem measures how reliably the
+current rollout estimates population reward and therefore which current
+estimator has the stronger lower bound.  The lemma verifies that the optimizer
+actually ascends the sampled objective selected by that comparison.  The full
+theoretical chain is consequently
 \[
-\text{current-ESS reliability}
-\ \longrightarrow\
-\text{smooth empirical ascent}
-\ \longrightarrow\
-\text{fresh population-gain certificate}.
+  \text{current-policy ESS reliability}
+  \ \longrightarrow\
+  \text{current estimator selection}
+  \ \longrightarrow\
+  \text{smooth realized ascent}.
 \]
-
-The exact transfer quantity contains an endpoint cross moment:
-\begin{equation}
-  \Xi_k
-  =\rho_{k+1}^{-1}+\rho_k^{-1}
-  -2\E_Q[W_{k+1}W_k\mid\mathcal F_k].
-  \label{eq:ratio-displacement-expansion}
-\end{equation}
-Therefore neither current nor post-update ESS alone determines incremental
-reliability.  Only for an update starting at the rollout policy,
-$P_{\theta_k}=Q$, does
-$\Xi_k=\rho_{k+1}^{-1}-1$.  The final minibatch has no unused successor and
-requires a held-out sample or a new rollout for the same certificate.
+The next subsection makes the estimator-selection step explicit.
 
 \subsection{Three interventions with different mathematical objects}
 \label{sec:clipping}
 
-The objective-level certificates above concern raw full-sequence importance
-sampling.  PPO/GRPO masking, CISPO coefficient capping, and full-sequence ratio
-truncation modify different objects.  Only the third directly produces a
-bounded version of Equation~\eqref{eq:empirical-improvement}.
+The confidence analysis is estimator-specific.  If an estimator has population
+target $L_e(\theta)$, empirical value $\widehat L_e(\theta)$, concentration
+radius $r_e(\theta)$, and a one-sided mismatch bound
+$\beta_e(\theta)\ge[L_e(\theta)-J(\theta)]_+$, where
+$[u]_+:=\max\{u,0\}$, then its generic reward lower
+bound has the form
+\begin{equation}
+  J(\theta)
+  \ge \widehat L_e(\theta)-r_e(\theta)-\beta_e(\theta).
+  \label{eq:estimator-specific-lcb}
+\end{equation}
+Raw full-sequence importance sampling has zero mismatch by
+Equation~\eqref{eq:population-objective-identity} and pays the ESS radius.
+Full-sequence truncation lies below $J$, so its one-sided penalty
+$\beta_e$ is also zero, and it pays a uniform bounded-variable radius.
+PPO/GRPO and CISPO alter token-gradient contributions;
+without a separate bound on their population surrogate mismatch, neither can be
+inserted into Equation~\eqref{eq:current-reward-lcb}.
+
+\subsubsection{Full-sequence truncation gives a conservative reward bound}
+\label{sec:ratio-truncation}
+
+For $c\ge1$, define
+\begin{equation}
+  U_c(W):=\min\{W,c\},
+  \qquad
+  \widehat\Delta_{c,k}
+  :=\frac1m\sum_{Z_i\in\mathcal B_k}(U_c(W_{k,i})-1)R_i.
+  \label{eq:upper-truncation}
+\end{equation}
+Because $R\ge0$, truncation produces a population lower bound rather than an
+uncontrolled surrogate:
+\begin{equation}
+  \E_Q[(U_c(W_k)-1)R\mid\mathcal F_{k-1}]-\Delta_k
+  =-\E_Q[(W_k-c)_+R\mid\mathcal F_{k-1}]\le0.
+  \label{eq:cap-bias}
+\end{equation}
+
+\begin{corollary}[Full-sequence truncation certificate]
+\label{cor:upper-truncation}
+Under Theorem~\ref{thm:current-ess}, with conditional probability at least
+$1-\delta$,
+\begin{equation}
+  \Delta_k
+  \ge\widehat\Delta_{c,k}
+  -cR_{\max}\sqrt{\frac{\log(1/\delta)}{2m}}.
+  \label{eq:cap-objective-certificate}
+\end{equation}
+\end{corollary}
+
+The raw and truncated certificates now give a precise objective-level answer to
+when truncation helps.  Allocate failure probability $\delta/2$ to each bound
+and define their empirical lower bounds, excluding the common $J(Q)$ term, by
+\begin{align}
+  \mathsf B_{W,k}
+  &:=\widehat\Delta_k-\mathfrak r_{\delta/2,m}(\rho_k),
+  \label{eq:raw-empirical-lcb}\\
+  \mathsf B_{c,k}
+  &:=\widehat\Delta_{c,k}
+  -cR_{\max}\sqrt{\frac{\log(2/\delta)}{2m}}.
+  \label{eq:truncated-empirical-lcb}
+\end{align}
+At a common simultaneous confidence level, truncation gives the stronger
+population-reward floor exactly when
+\begin{align}
+  &\mathfrak r_{\delta/2,m}(\rho_k)
+  -cR_{\max}\sqrt{\frac{\log(2/\delta)}{2m}}
+  \nonumber\\
+  &\quad>
+  \widehat\Delta_k-\widehat\Delta_{c,k}
+  =\frac1m\sum_{Z_i\in\mathcal B_k}(W_{k,i}-c)_+R_i.
+  \label{eq:objective-crossover}
+\end{align}
+The left-hand side is the reduction in uncertainty; the right-hand side is the
+sampled reward signal discarded by truncation.  High ESS favors the raw
+objective because its uncertainty is already small.  Low ESS enlarges the raw
+radius until the bounded conservative estimator can provide the stronger lower
+bound.  This device appears in ACER with bias correction
+\citep{wang2017acer}, in the V-trace correction used by IMPALA
+\citep{espeholt2018impala}, and in recent LLM methods that control extreme weight
+moments \citep{zheng2025m2po,fakoor2026p3o}.
 
 \subsubsection{PPO clipping as an advantage-sign gradient mask}
 
@@ -564,6 +656,15 @@ beyond the PPO boundary \citep{minimax2025m1}.  This coefficient capping is
 neither PPO/GRPO masking nor truncation of the full response ratio
 $W_\theta=\prod_t r_t$.
 
+The distinction is consequential for the theory.  PPO can set a token-gradient
+contribution to zero while leaving a large negative-advantage ratio active.
+CISPO bounds a detached token coefficient but retains the token score.
+Full-sequence truncation instead changes the scalar response-level estimator
+whose expectation is compared directly with $J$.  Only the last operation has
+the one-sided reward bias in Equation~\eqref{eq:cap-bias}; the first two require
+an additional surrogate-mismatch analysis before they receive an objective-level
+certificate.
+
 Gradient MSE remains a useful diagnostic, but it is not a policy-improvement
 criterion.  To record that diagnostic without conflating the interventions, let
 $X_W:=W_\theta H_\theta$ be the permissive per-response contribution and let
@@ -606,55 +707,10 @@ Therefore the modified contribution has lower gradient MSE exactly when
 This decomposition does not say which update improves reward.  For example, a
 zero estimator can have lower MSE than a high-variance unbiased estimator while
 producing no learning.  The contextual-bandit MSE experiments therefore test a
-supporting statistical mechanism, not a sufficient decision rule.  PPO and
-CISPO also have different surrogate-mismatch terms relative to the exact
-full-sequence objective, which the MSE identity does not remove.
-
-\subsubsection{Ratio truncation bias trade-off}
-\label{sec:ratio-truncation}
-
-Full-sequence truncation changes the scalar importance estimator itself.  For
-$c\ge1$, define
-\begin{equation}
-  U_c(W):=\min\{W,c\},
-  \qquad
-  \widehat\Delta_{c,k}
-  :=\frac1m\sum_{Z_i\in\mathcal B_k}(U_c(W_{k,i})-1)R_i.
-  \label{eq:upper-truncation}
-\end{equation}
-Because $R\ge0$, its population bias is one-sided:
-\begin{equation}
-  \E_Q[(U_c(W_k)-1)R\mid\mathcal F_{k-1}]-\Delta_k
-  =-\E_Q[(W_k-c)_+R\mid\mathcal F_{k-1}]\le0.
-  \label{eq:cap-bias}
-\end{equation}
-
-\begin{corollary}[Full-sequence truncation certificate]
-\label{cor:upper-truncation}
-Under Theorem~\ref{thm:raw-mse}, with conditional probability at least
-$1-\delta$,
-\begin{equation}
-  \Delta_k
-  \ge\widehat\Delta_{c,k}
-  -cR_{\max}\sqrt{\frac{\log(1/\delta)}{2m}}.
-  \label{eq:cap-objective-certificate}
-\end{equation}
-\end{corollary}
-
-Corollary~\ref{cor:upper-truncation} yields a bounded conservative alternative
-to Equation~\eqref{eq:current-ess-certificate}.  The raw certificate preserves
-the full empirical signal but pays an ESS-dependent radius; the truncated
-certificate lowers the empirical signal but has a radius controlled by $c$.
-At a common simultaneous confidence level, the larger lower bound gives the
-stronger population-improvement certificate.  This is a reward-objective
-comparison: nonnegative verifier reward makes the truncation bias one-sided.
-
-This estimator device appears in ACER with bias correction
-\citep{wang2017acer}, in the V-trace correction used by IMPALA
-\citep{espeholt2018impala}, and in recent LLM methods that control extreme weight
-moments \citep{zheng2025m2po,fakoor2026p3o}.  Full-sequence ratio truncation
-bounds $\min\{W_\theta,c\}$; CISPO caps detached token coefficients while
-retaining token scores; PPO/GRPO applies an advantage-sign mask.
+supporting statistical mechanism, not a sufficient decision rule.  The
+objective crossover in Equation~\eqref{eq:objective-crossover}, rather than the
+gradient-MSE crossover alone, is the theoretical comparison relevant to a
+population-reward lower bound.
 
 \subsection{An observable test of the theory}
 \label{sec:practice}
@@ -667,18 +723,20 @@ Population ESS is unavailable during training, but its plug-in estimate is
 \end{equation}
 The statistic is computed from raw sequence ratios before any intervention.
 It is a plug-in diagnostic, not the population $\rho_k$ in
-Theorem~\ref{thm:raw-mse}.  In a heavy-tailed regime, a finite minibatch may
-miss rare high-ratio responses and overstate coverage.  It also omits the cross
-moment in Equation~\eqref{eq:ratio-displacement-expansion}, so it cannot certify
-an incremental update by itself.
+Theorem~\ref{thm:current-ess}.  In a heavy-tailed regime, a finite minibatch may
+miss rare high-ratio responses and overstate coverage.  We therefore use sample
+ESS as an observable regime coordinate and test its decisions empirically,
+rather than substituting it into the theorem as an exact confidence radius.
 
 We use $\widehat\rho=0.1$ as a prespecified empirical trigger and test whether
 it selects a regime in which conservative interventions improve observed
 training outcomes.  No theorem identifies $0.1$ as a universal boundary or
-proves that the same gate ranks PPO, CISPO, and sequence truncation.  Recent LLM
-RL methods likewise adapt
+proves that the same gate ranks PPO, CISPO, and sequence truncation.  For the
+first two, the gate is motivated by the common coverage problem but remains an
+empirical intervention because their estimator-specific mismatch is not bounded
+by the sequence-ESS theorem.  Recent LLM RL methods likewise adapt
 updates using ESS, weight moments, or sequence reshaping
-\cite{zheng2025m2po,shen2026vespo,huang2026vcpo,fakoor2026p3o}.
+\citep{zheng2025m2po,shen2026vespo,huang2026vcpo,fakoor2026p3o}.
 
 Section~\ref{sec:simulation} measures adjacent reliability diagnostics with an
 exact population oracle and then evaluates the observable trigger in an
@@ -693,9 +751,9 @@ policy improvement, and whether masked and permissive gradient estimators
 exchange their MSE ordering as effective support deteriorates.  The first two
 questions are adjacent diagnostics for the objective-level mechanism; the third
 is explicitly a supporting diagnostic rather than a sufficient rule for
-choosing an update.  The reported study does not measure coverage of
-Equation~\eqref{eq:current-ess-certificate} or estimate the ratio-displacement
-moment in Equation~\eqref{eq:ratio-displacement}.
+choosing an update.  The reported study does not measure empirical coverage of
+Equation~\eqref{eq:current-ess-certificate} or directly evaluate the
+confidence-bound crossover in Equation~\eqref{eq:objective-crossover}.
 
 \subsection{Testbed and oracle}
 
@@ -714,7 +772,7 @@ The optimization loop follows grouped RLVR
 epochs of 16 sequential minibatch updates.  Ratios and ESS are recomputed before
 every update, and a new rollout is collected only afterward.  This repeated-epoch
 trajectory is a stress test beyond the one-epoch freshness condition in
-Theorem~\ref{thm:raw-mse}; only the first traversal has the required disjoint
+Theorem~\ref{thm:current-ess}; only the first traversal has the required disjoint
 freshness, and the frozen-policy redraws provide an independent estimator
 diagnostic.  We run 100 paired replications; Appendix~\ref{app:bandit}
 gives the compact protocol and full result tables.
@@ -875,26 +933,28 @@ Appendix~\ref{app:llm-diagnostics}.
 \section{Conclusion}
 
 The role of conservative intervention changes as fixed rollout data cease to
-represent the current learner.  The theory follows the full path of one update.
-Current sequence ESS first controls the gap between unused-minibatch and
-population improvement over the rollout policy.  Smoothness then guarantees
-empirical ascent for a suitably aligned update, and the next unused minibatch
-certifies the realized population gain through
-$\E_Q[(W_{k+1}-W_k)^2]$.  This final ratio-displacement moment explains why
-endpoint ESS alone is insufficient.
+represent the current learner.  The theory follows one reward objective across
+that change.  Raw full-sequence importance sampling satisfies
+$L_Q(\theta)=J(\theta)$ exactly, while current sequence ESS controls the gap
+between its unused-minibatch estimate and population improvement over the
+rollout policy.  Smoothness then certifies the sampled gain of the optimizer's
+realized displacement after the current-policy certificate selects the
+estimator regime.  Thus current ESS supplies the population-reliability
+criterion, while smoothness supplies the local optimization conclusion.  This
+argument needs neither a bounded score norm nor a global argmax assumption.
 
 The intervention analysis also separates three objects that are often called
 clipping.  PPO/GRPO masks selected token gradients, CISPO caps detached token
 coefficients while retaining their scores, and full-sequence truncation changes
 the scalar importance estimator.  Only full-sequence truncation directly
-inherits the bounded conservative objective certificate.  The contextual
-bandit and language-model trajectories show that sample ESS is an informative
-operational diagnostic, but they do not turn the plug-in threshold into a
-universal guarantee.  They also do not yet report empirical coverage of the
-current-improvement bound or the incremental $\Xi_k$ certificate.  Direct tests
-should evaluate both quantities on a strictly disjoint one-epoch traversal.  A
-further step is a selection-valid gate based on fresh evaluation or a uniform
-confidence result for token-local surrogates.
+inherits the bounded conservative objective certificate.  Its comparison with
+the raw estimator is explicit: truncation is preferable when the reduction in
+confidence radius exceeds the sampled reward signal it discards.  The
+contextual-bandit and language-model trajectories show that sample ESS is an
+informative operational diagnostic, but they do not turn the plug-in threshold
+into a universal guarantee.  Direct tests should next measure empirical
+coverage of the current-policy bound and the raw-versus-truncated confidence
+crossover on a strictly disjoint one-epoch traversal.
 
 \appendix
 
@@ -1056,7 +1116,7 @@ rollout; $G=16$ responses per prompt; 16 minibatches; four optimization epochs.
 Every response enters one update per optimization epoch.  Within a rollout,
 responses, rewards, advantages, and rollout probabilities remain fixed, whereas
 current probabilities, ratios, scores, and ESS are recomputed before each
-update.  Theorem~\ref{thm:raw-mse} applies to the first disjoint traversal; later
+update.  Theorem~\ref{thm:current-ess} applies to the first disjoint traversal; later
 epochs deliberately test behavior after sample reuse.  Sixteen minibatches are
 used because the first four never reach ESS below $0.1$ in the diagnostic runs;
 a shorter traversal would not expose the regime under study.
@@ -1460,7 +1520,7 @@ second permissive TIS setting.
 This appendix gives every algebraic step omitted from the main theoretical
 development.  The order follows Section~\ref{sec:theory}.
 
-\subsection{Proof of Theorem~\ref{thm:raw-mse}}
+\subsection{Proof of Theorem~\ref{thm:current-ess}}
 
 Condition on $\mathcal F_{k-1}$.  The current parameter is fixed and the units
 in $\mathcal B_k$ are independent draws from $Q$.  Change of measure gives
@@ -1514,30 +1574,6 @@ $d_k=\eta\widehat g_k$ gives
   \|\widehat g_k\|_2^2,
 \end{align}
 which proves Equation~\eqref{eq:empirical-smoothness-gain}.
-
-\subsection{Proof of Theorem~\ref{thm:mse-improvement}}
-
-Condition on $\mathcal F_k$.  Both $\theta_k$ and $\theta_{k+1}$ are fixed,
-whereas $\mathcal B_{k+1}$ is fresh.  Change of measure gives
-\begin{align}
-  \E[\widehat G_{k+1}\mid\mathcal F_k]
-  &=\E_Q[(W_{k+1}-W_k)R\mid\mathcal F_k]\\
-  &=J(\theta_{k+1})-J(\theta_k)\\
-  &=G_k.
-\end{align}
-For $Z_{k+1}=(W_{k+1}-W_k)R$,
-\begin{align}
-  \Var(\widehat G_{k+1}\mid\mathcal F_k)
-  &=\frac1m\Var_Q(Z_{k+1}\mid\mathcal F_k)\\
-  &\le\frac1m\E_Q[Z_{k+1}^2\mid\mathcal F_k]\\
-  &\le\frac{R_{\max}^2}{m}
-    \E_Q[(W_{k+1}-W_k)^2\mid\mathcal F_k]\\
-  &=\frac{R_{\max}^2}{m}\Xi_k.
-\end{align}
-Applying conditional Cantelli as in the preceding proof establishes
-Equation~\eqref{eq:fresh-one-step-certificate}.  Finally, expanding the square
-and using $\E_Q[W_j^2]=\rho_j^{-1}$ proves
-Equation~\eqref{eq:ratio-displacement-expansion}.
 
 \subsection{Proof of Proposition~\ref{prop:ppo-mask}}
 
