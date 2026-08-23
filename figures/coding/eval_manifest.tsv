@@ -1,0 +1,24 @@
+# Eval sweep manifest — Section A (baselines) + Section B1 (ESS -> clip)
+# Consumed by runs/eval_sweep_checkpoints.sh. TAB-separated: name <TAB> task_id <TAB> exp_dir
+#   exp_dir = artifact path of the run's checkpoint FOLDER, relative to the task's artifacts/
+#             (i.e. ckpt/<project>/<exp>).  The driver appends /global_step_${STEP}/actor/model/huggingface.
+# All entries verified: HF export present, global_step_{150,175,200} retained (keep=3), step 200 complete.
+#
+# NOT INCLUDED (checkpoints unrecoverable — saved to ephemeral /mnt/system_runtime, never streamed to S3):
+#   q5ec38ysrs  GRPO conventional (orig)      -> use re-run udg7vbgfsn
+#   vdt83kasxx  GRPO clip-higher / DAPO (orig)-> use re-run t82djeyx43
+#   q3cfydj8eu  GSPO                           -> NO recovered checkpoint (only run; would need retrain)
+#
+# --- Section A: baselines (no ESS gate) ---
+grpo_rerun	udg7vbgfsn	ckpt/verl_grpo_qwen3_30b_run/qwen3_30b_a3b_grpo_20260810_201650
+dapo_rerun	t82djeyx43	ckpt/verl_dapo_qwen3_30b_run/qwen3_30b_a3b_dapo_20260810_202901
+cispo_hi5_nogate_COLLAPSED	ayv2ajeuqk	ckpt/verl_spo_qwen3_30b_run/qwen3_30b_cispo_hi5_essno_20260805_122138
+dppo_pure	z95e8ih6mr	ckpt/verl_spo_qwen3_30b_run/qwen3_30b_dppo_tv_20260810_200404
+# --- Section B1: ESS gate -> clip ---
+cispo3_ess_dapoclip_shaped_STAR	328rfu6eb2	ckpt/verl_spo_qwen3_30b_run/qwen3_30b_cispo3_ess_dapoclip_shaped_20260806_143157
+noclip_ess_dppolatch	52iya9e2hr	ckpt/verl_spo_qwen3_30b_run/qwen3_30b_noclip_ess_dppolatch_20260810_160621
+cispo3_esclip_lo2hi28_raw	g7smhurn55	ckpt/verl_spo_qwen3_30b_run/qwen3_30b_cispo3_ess_cliplatch_20260805_172619
+cispo3_esclip_lo2hi2_raw	ircyhpdmku	ckpt/verl_spo_qwen3_30b_run/qwen3_30b_cispo3_ess_cliplatch_20260805_172700
+cispo3_esclip_lo2hi2_ess05_shaped	zt5vuurkyw	ckpt/verl_spo_qwen3_30b_run/qwen3_30b_cispo3_ess_cliplatch_20260806_133931
+cispo3_esclip_lo2hi2_shaped	hvv2nimrr6	ckpt/verl_spo_qwen3_30b_run/qwen3_30b_cispo3_ess_cliplatch_20260806_133912
+noclip_esclip_lo2hi2_raw	q2m6j822id	ckpt/verl_spo_qwen3_30b_run/qwen3_30b_noclip_ess_cliplatch_20260806_141010
