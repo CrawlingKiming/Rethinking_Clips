@@ -41,20 +41,20 @@ Effective Sample Size and Gradient Reliability in RLVR}
 \begin{abstract}
 Permissive policy optimization in reinforcement learning with verifiable rewards
 can exhibit a delayed failure: training improves for many updates on a fixed
-rollout and then collapses abruptly.  Existing policy-deviation guarantees
+rollout and then collapses abruptly. Existing policy-deviation guarantees
 explain why large changes can be unsafe, but they do not directly characterize
 when a finite rollout stops supporting an accurate update for the current
-learner.  We develop an effective-support framework for this transition.  By
+learner. We develop an effective-support framework for this transition. By
 viewing the policy gradient as a vector-valued importance-sampling estimator, we
 show that its mean-squared error is controlled by normalized sequence effective
-sample size.  A smoothness argument then converts estimator reliability into a
-one-step population-improvement guarantee.  The resulting theorem explains why
+sample size. A smoothness argument then converts estimator reliability into a
+one-step population-improvement guarantee. The resulting theorem explains why
 permissive updates can remain effective for an extended period and why their
-reliability can deteriorate sharply after effective support collapses.  We
+reliability can deteriorate sharply after effective support collapses. We
 further characterize when clipping can recover a positive improvement
-certificate: its variance reduction must outweigh the bias it introduces.  An
+certificate: its variance reduction must outweigh the bias it introduces. An
 exactly evaluable contextual bandit verifies the predicted relations among
-effective support, gradient error, and harmful updates.  Large-model experiments
+effective support, gradient error, and harmful updates. Large-model experiments
 show the same delayed transition and demonstrate that selective safeguards can
 preserve early learning while preventing late failure.
 
@@ -63,19 +63,19 @@ preserve early learning while preventing late failure.
 \section{Introduction}
 
 Reinforcement learning with verifiable rewards repeatedly generates a batch of
-responses and then improves the model using that batch.  In many large-model
+responses and then improves the model using that batch. In many large-model
 runs, a permissive update rule works surprisingly well: performance rises
-quickly, remains stable for many updates, and then fails abruptly.  Figure~\ref{fig:llm-motivation}
-shows this pattern.  The same batch supports useful learning for a long period,
+quickly, remains stable for many updates, and then fails abruptly. Figure~\ref{fig:llm-motivation}
+shows this pattern. The same batch supports useful learning for a long period,
 yet near the end of the run the update becomes unstable and performance
 collapses.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/motivation/overall.pdf}
-  \caption{A delayed failure in Qwen3-30B-A3B training.  The permissive runs
+  \caption{A delayed failure in Qwen3-30B-A3B training. The permissive runs
   improve for many updates and fail only after the fixed rollout is effectively
-  supported by very few responses.  This transition is the phenomenon studied
+  supported by very few responses. This transition is the phenomenon studied
   in the paper.}
   \label{fig:llm-motivation}
 \end{figure}
@@ -83,34 +83,34 @@ collapses.
 Classical theory explains why moving too far from the model that generated the
 data can be dangerous \citep{schulman2015trpo,schulman2017ppo,qi2026dppo}.
 That explanation is essential, but it does not tell us why the transition in
-Figure~\ref{fig:llm-motivation} is delayed.  It does not track how much
+Figure~\ref{fig:llm-motivation} is delayed. It does not track how much
 information in a finite batch remains useful for the model after each successive
-update.  As a result, it offers no direct answer to the practical question
+update. As a result, it offers no direct answer to the practical question
 raised by the figure: why does a permissive rule remain effective for many steps
 and then suddenly stop being reliable?
 
 Our starting point is that the relevant object is not distance alone, but
-support.  As the model changes, more of the batch may become irrelevant to the
-direction in which the model now needs to move.  The nominal batch size can
+support. As the model changes, more of the batch may become irrelevant to the
+direction in which the model now needs to move. The nominal batch size can
 therefore remain unchanged while the amount of useful information shrinks
-dramatically.  We develop a theory that measures this loss and connects it to
+dramatically. We develop a theory that measures this loss and connects it to
 the quality of the next update.
 
-The framework has two parts.  First, it quantifies how accurately the fixed
-batch estimates the direction that would improve the current model.  Second, it
+The framework has two parts. First, it quantifies how accurately the fixed
+batch estimates the direction that would improve the current model. Second, it
 shows how that accuracy determines whether the next step is guaranteed to
-improve the true objective.  Together, these results predict a clear
+improve the true objective. Together, these results predict a clear
 transition: permissive updates are reliable while the batch retains broad
 support, and become vulnerable only after that support has substantially
 deteriorated.
 
 A conservative safeguard is not automatically beneficial once this transition
-begins.  It helps only when the noise it removes is larger than the useful signal
-it suppresses.  Our theory therefore separates two questions: when a permissive
+begins. It helps only when the noise it removes is larger than the useful signal
+it suppresses. Our theory therefore separates two questions: when a permissive
 update loses reliability, and when a safeguard can recover it.
 
 We test the framework in a controlled task where the exact update direction and
-true performance are known, and then in large-model training.  Across both
+true performance are known, and then in large-model training. Across both
 settings, the proposed support measure tracks the rise in update error, the
 onset of harmful steps, and the point at which selective protection becomes
 useful.
@@ -131,388 +131,284 @@ useful.
 \paragraph{Policy-deviation guarantees.}
 Trust-region and proximal methods control policy movement to obtain stable
 improvement guarantees or practical update rules
-\citep{schulman2015trpo,schulman2017ppo,qi2026dppo}.  These analyses provide the
-standard explanation for why large policy changes can be unsafe.  Our framework
+\citep{schulman2015trpo,schulman2017ppo,qi2026dppo}. These analyses provide the
+standard explanation for why large policy changes can be unsafe. Our framework
 is complementary: it studies when a fixed finite rollout ceases to provide a
-reliable estimate of the current policy gradient.  The distinction is between a
+reliable estimate of the current policy gradient. The distinction is between a
 population-level approximation guarantee and a finite-sample reliability
 question.
 
 \paragraph{Importance sampling and effective support.}
 Importance-sampling policy optimization uses likelihood-ratio moments and
 R\'enyi divergence to quantify the reliability of off-policy estimators
-\citep{metelli2018pois,metelli2020is}.  In these results, effective rather than
-nominal sample size controls estimation error.  We apply the same principle
+\citep{metelli2018pois,metelli2020is}. In these results, effective rather than
+nominal sample size controls estimation error. We apply the same principle
 directly to the vector-valued policy-gradient estimator and use normalized
 sequence ESS as the regime coordinate.
 
 \paragraph{Reliable policy-gradient updates.}
 Smoothness-based analyses translate the error of a finite gradient estimate into
 a lower bound on policy improvement and use this relation to choose step sizes
-or sample sizes \citep{pirotta2013adaptive,papini2022smoothing}.  We combine
+or sample sizes \citep{pirotta2013adaptive,papini2022smoothing}. We combine
 this optimization argument with an ESS-dependent off-policy reliability bound.
 
 \paragraph{Stability in RLVR.}
 Recent methods alter ratio boundaries, sequence weights, divergence controls,
 or update rules to improve the stability of large-model reinforcement learning
 \citep{yu2025dapo,park2025clipping,minimax2025m1,zheng2025m2po,shen2026vespo,
-huang2026vcpo,fakoor2026p3o}.  Rather than proposing another static boundary,
+huang2026vcpo,fakoor2026p3o}. Rather than proposing another static boundary,
 we study the statistical transition that makes a permissive update unreliable
 and then ask when an intervention can recover reliability.
 
 \section{Preliminaries}
 \label{sec:setting}
 
-\subsection{Policy-gradient estimation in fixed-rollout RLVR}
+\subsection{Policy-gradient estimation from a fixed rollout}
 
-Let $X\sim\nu$ be a prompt, let $Q(\cdot\mid X)$ be the rollout policy, and let
-$P_\theta(\cdot\mid X)$ be the current policy.  A complete response is denoted
-by $Y=(Y_1,\ldots,Y_T)$, and $R(X,Y)$ is its verifier reward.  The population
-objective is $J(\theta):=\E_{P_\theta}[R]$. Consider $P_\theta(\cdot\mid X)\ll Q(\cdot\mid X)$ and define the complete-response
-likelihood ratio and policy-gradient contribution by
-\begin{equation}
-  W_\theta(X,Y)
-  :=\frac{P_\theta(Y\mid X)}{Q(Y\mid X)},
-  \qquad
-  f_\theta(X,Y)
-  :=\{R(X,Y)-b(X)\}\nabla_\theta\log P_\theta(Y\mid X),
-  \label{eq:weight-and-contribution}
-\end{equation}
-where $b(X)$ is a detached prompt-level baseline. The standard score
-identity and change of measure give
-\begin{equation}
-  g(\theta):=\nabla J(\theta)
-  =\E_Q[W_\theta f_\theta],
-  \qquad
-  \widehat g_N(\theta)
-  :=\frac1N\sum_{i=1}^N W_{\theta,i}f_{\theta,i}.
-  \label{eq:true-gradient}
-\end{equation}
-Thus the policy gradient itself is a vector-valued importance-sampling
-estimand, and $\widehat g_N(\theta)$ is its estimate from the rollout data.
+Let $X\sim\nu$ denote a prompt, let $Q(\cdot\mid X)$ be the rollout policy, and let $P_\theta(\cdot\mid X)$ be the current policy. A complete response is denoted by $Y=(Y_1,\ldots,Y_T)$, the joint sample is $Z=(X,Y)\in\mathcal Z$, and $R(Z)$ is its verifier reward. The population objective is $J(\theta):=\E_{P_\theta}[R]$.
 
-We analyze one optimization phase.  Before optimization, the rollout batch is
-randomly partitioned into disjoint minibatches, and each minibatch is used at
-most once in the theoretical traversal.  At update $k$, condition on all
-previous updates.  The current policy is then fixed, while the unused minibatch
-is a fresh sample from $Q$.  This is the only role of the one-pass construction
-in the theory.  When several responses share a prompt or a group-relative
-baseline, the intact prompt group is treated as one independent sampling unit;
-Appendix~\ref{app:proofs} gives the corresponding extension.
+In RLVR, responses are generated under $Q$ and then reused while the learner changes from $Q$ to $P_\theta$. The objective and the available data are therefore defined under different policies. Assuming $P_\theta(\cdot\mid X)\ll Q(\cdot\mid X)$, this mismatch is corrected by the complete-response likelihood ratio
+\begin{equation}
+ W_\theta(Z):=\frac{P_\theta(Y\mid X)}{Q(Y\mid X)}.
+ \label{eq:sequence-ratio}
+\end{equation}
+Let $b(X)$ be a detached prompt-level baseline and define the policy-gradient contribution
+\begin{equation}
+ f_\theta(Z):=\{R(Z)-b(X)\}\nabla_\theta\log P_\theta(Y\mid X).
+ \label{eq:gradient-contribution}
+\end{equation}
+The score identity and change of measure then give
+\begin{equation}
+ g(\theta):=\nabla J(\theta)=\E_Q[W_\theta f_\theta],
+ \qquad
+ \widehat g_N(\theta):=\frac1N\sum_{i=1}^N W_{\theta,i}f_{\theta,i}.
+ \label{eq:true-gradient}
+\end{equation}
+Thus the policy gradient is itself a vector-valued importance-weighted mean, and $\widehat g_N(\theta)$ is its finite-rollout estimate.
+
+This representation makes the statistical difficulty explicit. For a fixed policy, $\widehat g_N(\theta)$ targets the correct gradient, but its finite-sample accuracy depends on how unevenly the likelihood ratios distribute mass across responses. When a few responses carry most of the weight, the nominal batch size $N$ can greatly overstate the amount of information supporting the current update.
+
+We analyze one optimization phase. The rollout batch is randomly partitioned into disjoint minibatches, and each minibatch is used at most once in the theoretical traversal. At update $k$, we condition on all previous updates and suppress this conditioning in the notation. The current policy is then fixed and the unused minibatch consists of independent draws from $Q$. When several responses share a prompt or a group-relative baseline, the intact prompt group is treated as one independent sampling unit. Appendix~\ref{app:proofs} gives this extension.
+
+The remaining question is how to quantify the effective support that the rollout provides to the current policy. Since the estimation error is driven by moments of $W_\theta$, we next introduce a divergence that records these moments and the corresponding normalized effective sample size.
 
 \subsection{R\'enyi divergence and normalized effective sample size}
 
-[What is Renyi alpha divergence, intuitively explain,]
-
-For $\alpha>1$, define the R\'enyi divergence
-$D_\alpha(P_\theta\|Q):=(\alpha-1)^{-1}\log\E_Q[W_\theta^\alpha]$ and its
-exponentiated form $d_\alpha(P_\theta\|Q):=\exp\{D_\alpha(P_\theta\|Q)\}$.
-
-[The special relation ship with the \alpha-2 and the ESS,]
-
-At order two, $d_2(P_\theta\|Q)=\E_Q[W_\theta^2]$.  Following
-importance-sampling policy optimization \citep{metelli2018pois,metelli2020is},
-we define normalized sequence ESS by
+R\'enyi divergence is a family of measures indexed by a moment order $\alpha>1$. For the current and rollout policies, define
 \begin{equation}
-  \rho_\theta
-  :=\frac{1}{d_2(P_\theta\|Q)}
-  =\frac{1}{\E_Q[W_\theta^2]}
-  =\exp\{-D_2(P_\theta\|Q)\}.
-  \label{eq:population-ess}
+ D_\alpha(P_\theta\|Q)
+ :=\frac{1}{\alpha-1}\log\E_Q[W_\theta^\alpha],
+ \qquad
+ d_\alpha(P_\theta\|Q):=\exp\{D_\alpha(P_\theta\|Q)\}.
+ \label{eq:renyi-divergence}
 \end{equation}
+Larger values of $\alpha$ place progressively more emphasis on rare, large likelihood ratios. The order-two case is especially relevant here because the mean-squared error of an importance-weighted mean is governed by the second moment of its weight.
 
-[The Ess has revealed to be critical to the importance weighted mean...]
+At $\alpha=2$, $d_2(P_\theta\|Q)=\E_Q[W_\theta^2]$. Following importance-sampling analyses for policy optimization \citep{metelli2018pois,metelli2020is}, we define the normalized sequence effective sample size by
+\begin{equation}
+ \rho_\theta
+ :=\frac{1}{d_2(P_\theta\|Q)}
+ =\frac{1}{\E_Q[W_\theta^2]}
+ =\exp\{-D_2(P_\theta\|Q)\}.
+ \label{eq:population-ess}
+\end{equation}
+The quantity $\rho_\theta$ lies in $(0,1]$, and $N\rho_\theta$ is the corresponding effective sequence count. When $P_\theta=Q$, every sequence is fully effective and $\rho_\theta=1$. As the second moment of the likelihood ratio grows, $\rho_\theta$ decreases and the effective count contracts. Since $\E_Q[W_\theta]=1$, the identity $\E_Q[(W_\theta-1)^2]=\rho_\theta^{-1}-1$ shows that $\rho_\theta$ is exactly the inverse second-moment measure of ratio dispersion.
 
-The effective sequence count in a batch of size $N$ is $N\rho_\theta$.  When
-$P_\theta=Q$, $\rho_\theta=1$ and the full batch is effective.  As the current
-policy separates from the rollout policy, $\rho_\theta$ decreases.  Since
-$\E_Q[W_\theta]=1$, the identity
-$\E_Q[(W_\theta-1)^2]=\rho_\theta^{-1}-1$ shows that normalized ESS is exactly
-the inverse second-moment measure of sequence-ratio concentration.
+Importance-sampling theory makes this quantity operational. For a bounded integrand, the estimation error scales with $d_2(P_\theta\|Q)/N$, or equivalently with $1/(N\rho_\theta)$. Normalized ESS therefore measures the part of estimator reliability that is lost through policy mismatch. The next section formalizes this relation for the policy-gradient estimator and then connects it to policy improvement.
 
 \section{Theoretical analysis}
 \label{sec:theory}
 
-Figure~\ref{fig:llm-motivation} raises a specific question: when does the update becomes unreliable? Answering this question requires two links. We first connect
-normalized sequence ESS to the error of the finite-batch policy-gradient
-estimate. We then connect that error to the population improvement produced by
-the next update.
+The preliminaries identify normalized sequence ESS as the effective-support coordinate of the fixed rollout. Figure~\ref{fig:llm-motivation} asks when a decline in this support makes a permissive update unreliable. We answer the question in two steps. First, we convert $\rho_k$ into a high-probability bound on the error of the sampled policy gradient. Second, we show how that error controls the improvement produced by the next update.
 
-At update $k$, condition on the preceding history and write
-$W_k:=W_{\theta_k}$, $f_k:=f_{\theta_k}$,
-$g_k:=g(\theta_k)$, $\widehat g_k:=\widehat g_N(\theta_k)$, and
-$\rho_k:=\rho_{\theta_k}$.  Throughout this section, suppose that the current
-gradient contribution is bounded,
-$\|f_k\|_\infty:=\sup_z\|f_k(z)\|_2<\infty$.  This condition fixes the scale of
-one response contribution, while $\rho_k$ captures the additional loss of
-reliability caused by policy mismatch.
+At update $k$, write $W_k:=W_{\theta_k}$, $f_k:=f_{\theta_k}$, $g_k:=g(\theta_k)$, $\widehat g_k:=\widehat g_N(\theta_k)$, and $\rho_k:=\rho_{\theta_k}$. As stated above, the current policy is fixed after conditioning on the preceding updates, and the $N$ unused sampling units are independent draws from $Q$. We use the standard bounded-integrand condition $\|f_k\|_\infty:=\sup_{z\in\mathcal Z}\|f_k(z)\|_2<\infty$. This condition fixes the scale of one response contribution, while $\rho_k$ records the additional loss of reliability caused by policy mismatch.
 
-\paragraph{From normalized ESS to a gradient-error radius}
-Consider $N$ units of independent draws from $Q$ after conditioning on the history.  Change of measure therefore gives
+\subsection{From normalized ESS to a gradient-error radius}
+\label{sec:raw}
+
+Change of measure gives $\E[\widehat g_k]=g_k$. A standard sample-mean calculation then gives $\E\|\widehat g_k-g_k\|_2^2=N^{-1}\{\E_Q[W_k^2\|f_k\|_2^2]-\|g_k\|_2^2\}$. Using $\|f_k(z)\|_2\le\|f_k\|_\infty$ and $\rho_k^{-1}=\E_Q[W_k^2]$ yields
 \begin{equation}
-  \E[\widehat g_k\mid\mathcal F_{k-1}]=g_k.
-  \label{eq:gradient-unbiasedness}
+ \E\|\widehat g_k-g_k\|_2^2
+ \le
+ \frac{\|f_k\|_\infty^2}{N\rho_k}.
+ \label{eq:rho-gradient-mse-bound}
 \end{equation}
-Independence then reduces the squared error of the sample average to the
-second moment of one centered contribution:
-\begin{equation}
-  \E\!\left[
-    \|\widehat g_k-g_k\|_2^2
-    \mid\mathcal F_{k-1}
-  \right]
-  =\frac1N
-  \left\{
-    \E_Q[W_k^2\|f_k\|_2^2\mid\mathcal F_{k-1}]
-    -\|g_k\|_2^2
-  \right\}.
-  \label{eq:rho-gradient-mse}
-\end{equation}
-The bounded contribution condition and the definition
-$\rho_k^{-1}=\E_Q[W_k^2\mid\mathcal F_{k-1}]$ now give
-\begin{equation}
-  \E\!\left[
-    \|\widehat g_k-g_k\|_2^2
-    \mid\mathcal F_{k-1}
-  \right]
-  \le
-  \frac{\|f_k\|_\infty^2}{N\rho_k}.
-  \label{eq:rho-gradient-mse-bound}
-\end{equation}
-Equation~\eqref{eq:rho-gradient-mse-bound} identifies the average scale of the
-estimation error.  The actual update, however, is computed from one realized
-minibatch, so we need an event-level statement.  Applying Markov's inequality
-to the squared error yields the following conclusion.
+Equation~\eqref{eq:rho-gradient-mse-bound} describes the average size of the estimation error. The actual update, however, is computed from one realized minibatch. We therefore convert the mean-square bound into an event-level guarantee.
 
 \begin{lemma}[Normalized ESS controls the gradient-error radius]
 \label{lem:rho-gradient-reliability}
-For every $\delta\in(0,1)$,
+Let $P_{\theta_k}$ and $Q$ be probability measures on $\mathcal Z$ such that $P_{\theta_k}\ll Q$ and $d_2(P_{\theta_k}\|Q)<\infty$. Let $Z_1,\ldots,Z_N$ be independent samples from $Q$, and let $f_k:\mathcal Z\to\mathbb R^d$ satisfy $\|f_k\|_\infty<\infty$. Define $\widehat g_k=N^{-1}\sum_{i=1}^N W_k(Z_i)f_k(Z_i)$, $g_k=\E_Q[W_kf_k]$, and $\rho_k=d_2(P_{\theta_k}\|Q)^{-1}$. Then, for any $0<\delta\le1$, with probability at least $1-\delta$, it holds that
 \begin{equation}
-  \Pr\!\left(
-    \|\widehat g_k-g_k\|_2
-    \le
-    \frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}
-    \,\middle|\,
-    \mathcal F_{k-1}
-  \right)
-  \ge 1-\delta.
-  \label{eq:rho-gradient-concentration}
+ \|\widehat g_k-g_k\|_2
+ \le
+ \frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}.
+ \label{eq:rho-gradient-concentration}
 \end{equation}
 \end{lemma}
 
-Lemma~\ref{lem:rho-gradient-reliability} turns normalized ESS into a directly
-interpretable uncertainty radius.  The
-radius grows as $\rho_k^{-1/2}$; equivalently, the nominal batch size is reduced
-to the effective sequence count $N\rho_k$. 
+Lemma~\ref{lem:rho-gradient-reliability} turns normalized ESS into a directly interpretable uncertainty radius. For fixed $N$ and $\|f_k\|_\infty$, the radius grows as $\rho_k^{-1/2}$. Equivalently, policy mismatch replaces the nominal batch size $N$ by the effective sequence count $N\rho_k$.
 
-\paragraph{From gradient accuracy to reliable improvement}
+\subsection{From gradient accuracy to policy improvement}
 \label{sec:mse-improvement}
 
-The previous lemma tells us when the sampled direction is close to the true
-gradient.  To determine whether that accuracy is sufficient, we must translate
-a gradient-error radius into a change in the population objective.  Smoothness
-provides this second link: an estimated direction that lies within radius
-$\varepsilon$ of the true gradient must retain a controlled component in an
-ascent direction.  Optimizing the resulting quadratic lower bound gives the
-next lemma.
+The first lemma tells us when the sampled gradient is close to the population gradient. To determine whether that accuracy is sufficient, we must translate an error radius into a change in the population objective. The next lemma performs this step using smoothness.
 
-\begin{lemma}[A reliable direction yields policy improvement]
+\begin{lemma}[A reliable gradient estimate yields policy improvement]
 \label{lem:gradient-error-progress}
-Let $g=\nabla J(\theta)$ and suppose that
-$\|\widetilde g-g\|_2\le\varepsilon$.  If $J$ is $L$-smooth along the update
-segment, define
-$\alpha=L^{-1}(1-\varepsilon/\|\widetilde g\|_2)_+$, with $\alpha=0$ when
-$\widetilde g=0$.  Then
+Let $\widehat g$ be an estimate of $g=\nabla J(\theta)$ satisfying $\|\widehat g-g\|_2\le\varepsilon$. Suppose $J$ is $L$-smooth along the update segment, and define $\alpha=L^{-1}(1-\varepsilon/\|\widehat g\|_2)_+$, with $\alpha=0$ when $\widehat g=0$. Then
 \begin{equation}
-  J(\theta+\alpha\widetilde g)-J(\theta)
-  \ge
-  \frac{1}{2L}
-  \left(\|\widetilde g\|_2-\varepsilon\right)_+^2.
-  \label{eq:gradient-error-progress}
+ J(\theta+\alpha\widehat g)-J(\theta)
+ \ge
+ \frac{1}{2L}
+ \left(\|\widehat g\|_2-\varepsilon\right)_+^2.
+ \label{eq:gradient-error-progress}
 \end{equation}
 \end{lemma}
 
-The lower bound increases as the error radius decreases.  Thus estimator
-reliability is not merely a diagnostic quantity: it determines both whether a
-nonzero step can be certified and how large that certificate can be.  This is
-the same smoothness mechanism used in safe policy-gradient analyses
-\citep{pirotta2013adaptive,papini2022smoothing}.
+The lower bound increases as the error radius decreases. Estimator reliability therefore determines both whether a nonzero step can be certified and how large the certificate can be. This is the same smoothness mechanism used in safe policy-gradient analyses \citep{pirotta2013adaptive,papini2022smoothing}.
 
 \subsection{When does a permissive update remain reliable?}
 
-Lemma~\ref{lem:rho-gradient-reliability} supplies an ESS-dependent error radius
-for the current minibatch.  Lemma~\ref{lem:gradient-error-progress} converts any
-such radius into population improvement.  Substituting the first conclusion
-into the second yields the central result.
+Lemma~\ref{lem:rho-gradient-reliability} supplies an ESS-dependent error radius for the current minibatch. Lemma~\ref{lem:gradient-error-progress} converts any valid radius into population improvement. Applying the second lemma on the event supplied by the first gives the central result.
 
 \begin{theorem}[When a permissive update remains reliable]
 \label{thm:permissive-reliability}
-For $\delta\in(0,1)$, let
-$r_k(\delta):=\|f_k\|_\infty/\sqrt{\delta N\rho_k}$ and define
-$\alpha_k:=L_k^{-1}(1-r_k(\delta)/\|\widehat g_k\|_2)_+$, with
-$\alpha_k=0$ when $\widehat g_k=0$.  If $J$ is $L_k$-smooth along the update
-segment, then, conditional on $\mathcal F_{k-1}$, with probability at least
-$1-\delta$,
+Under the conditions of Lemma~\ref{lem:rho-gradient-reliability}, suppose that $J$ is $L_k$-smooth along the update segment. For any $0<\delta\le1$, define $\alpha_k=L_k^{-1}\{1-\|f_k\|_\infty/(\|\widehat g_k\|_2\sqrt{\delta N\rho_k})\}_+$, with $\alpha_k=0$ when $\widehat g_k=0$. Then, with probability at least $1-\delta$, it holds that
 \begin{equation}
-  J(\theta_k+\alpha_k\widehat g_k)-J(\theta_k)
-  \ge
-  \frac{1}{2L_k}
-  \left(
-    \|\widehat g_k\|_2
-    -\frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}
-  \right)_+^2.
-  \label{eq:permissive-reliability}
+ J(\theta_k+\alpha_k\widehat g_k)-J(\theta_k)
+ \ge
+ \frac{1}{2L_k}
+ \left(
+ \|\widehat g_k\|_2
+ -\frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}
+ \right)_+^2.
+ \label{eq:permissive-reliability}
 \end{equation}
 \end{theorem}
 
-The certificate is positive exactly when the observed gradient norm exceeds its
-ESS-dependent uncertainty radius.  This comparison explains why failure can be
-delayed: the same rollout can support many useful updates while $N\rho_k$
-remains large, and only becomes statistically inconclusive after effective
-support has sufficiently deteriorated.
+The certificate is positive exactly when the observed gradient norm exceeds its ESS-dependent uncertainty radius. This comparison explains why failure can be delayed. The same rollout can support many useful updates while $N\rho_k$ remains large, and the certificate becomes inconclusive only after effective support has sufficiently deteriorated.
 
+\begin{remark}[Interpretation of the reliability boundary]
+\label{rem:rho-interpretation}
+Theorem~\ref{thm:permissive-reliability} identifies a loss of certification, not a deterministic collapse point. A zero lower bound means that the rollout no longer certifies the sampled direction at the chosen confidence level. The realized update may still improve.
 
+The result complements policy-deviation guarantees. Those guarantees study population-level consequences of changing the policy. The present result studies whether a fixed finite rollout still estimates the current policy gradient accurately enough. Both effects may matter, but they answer different questions.
 
+For fixed $N$, contribution scale, confidence level, and observed gradient signal, all mismatch-dependent degradation enters through $\rho_k$. No universal numerical threshold follows because the required value also depends on those other quantities.
+\end{remark}
 
-The theorem diagnoses when the permissive estimator loses a useful guarantee,
-but it does not prescribe what should replace it.  That distinction leads to a
-separate question: can a more conservative estimator recover reliability after
-the permissive certificate disappears?
+The theorem diagnoses when the unmodified estimator loses a useful guarantee, but it does not imply that clipping will repair the problem. A modification can help only if the reduction in sampling error is large enough to compensate for the bias it introduces. We now state this comparison without committing to one particular clipping implementation.
 
 \subsection{When can clipping recover reliability?}
 \label{sec:clipping-recovery}
 
-[Z_k, superscript P.. is not needed, and 
-
-Let $Z_k^{\mathrm P}:=W_k f_k$ be the per-unit permissive contribution and let
-$Z_k^{\mathrm C}$ be the contribution produced by a chosen clipping rule.  For
-$e\in\{\mathrm P,\mathrm C\}$, define
-$\widehat g_k^e:=N^{-1}\sum_{i=1}^N Z_{k,i}^e$ and its total conditional risk
-$m_k^e:=\E[\|\widehat g_k^e-g_k\|_2^2\mid\mathcal F_{k-1}]$.  Write the bias and 
-$b_k^{\mathrm C}:=\E[Z_k^{\mathrm C}\mid\mathcal F_{k-1}]-g_k$ and variance of the estimator as:
-$v_k^e:=\E[\|Z_k^e-\E Z_k^e\|_2^2\mid\mathcal F_{k-1}]$.  Independence gives
+Let $\phi_k:\mathcal Z\to\mathbb R^d$ be any integrable transformation of one rollout sample, and define the corresponding estimator by
 \begin{equation}
-  m_k^{\mathrm P}=\frac{v_k^{\mathrm P}}{N},
-  \qquad
-  m_k^{\mathrm C}=\|b_k^{\mathrm C}\|_2^2+\frac{v_k^{\mathrm C}}{N}.
-  \label{eq:clipping-risk-decomposition}
+ \widehat g_{\phi,k}:=\frac1N\sum_{i=1}^N\phi_k(Z_i).
+ \label{eq:general-modified-estimator}
+\end{equation}
+The unmodified importance-weighted estimator is recovered by setting $\phi_k(z)=W_k(z)f_k(z)$. For a general modification, define its bias $b_{\phi,k}:=\E_Q[\phi_k]-g_k$ and per-sample variance $v_{\phi,k}:=\E_Q\|\phi_k-\E_Q[\phi_k]\|_2^2$. Let $v_k:=\E_Q\|W_kf_k-g_k\|_2^2$ denote the corresponding per-sample variance of the unmodified estimator. Independence gives
+\begin{equation}
+ m_k:=\E\|\widehat g_k-g_k\|_2^2=\frac{v_k}{N},
+ \qquad
+ m_{\phi,k}:=\E\|\widehat g_{\phi,k}-g_k\|_2^2
+ =\|b_{\phi,k}\|_2^2+\frac{v_{\phi,k}}{N}.
+ \label{eq:clipping-risk-decomposition}
 \end{equation}
 
-To compare these risks with policy improvement, take expectation in the
-polarized smoothness bound for a common step size $0<\eta_k\le1/L_k$.  For
-either estimator does this require unbiasedness, and it gives
-\begin{equation}
-  \E\!\left[
-    J(\theta_k+\eta_k\widehat g_k^e)-J(\theta_k)
-    \mid\mathcal F_{k-1}
-  \right]
-  \ge
-  \frac{\eta_k}{2}
-  \left(\|g_k\|_2^2-m_k^e\right).
-  \label{eq:expected-risk-progress}
-\end{equation}
-The lower bound becomes stronger exactly when total estimation risk decreases.
-Substituting Equation~\eqref{eq:clipping-risk-decomposition} therefore reduces
-the comparison to a single bias--variance condition.
+\begin{remark}[Per-token coefficient truncation and PPO clipping]
+\label{rem:token-truncation-vs-clipping}
+Write $r_{k,t}$ for the token likelihood ratio and $s_{k,t}:=\nabla_\theta\log P_{\theta_k}(Y_t\mid X,Y_{<t})$ for the token score. A detached per-token coefficient truncation with a bounded function $u$ uses the response contribution $A_k\sum_t u(r_{k,t})s_{k,t}$. For example, an upper truncation uses $u(r)=\min\{r,c\}$.
 
-\begin{proposition}[Bias-variance condition for clipping]
+PPO clipping defines a different estimator. Away from the clipping boundary, its response contribution is $A_k\sum_t r_{k,t}M_\epsilon(r_{k,t},A_k)s_{k,t}$, where $M_\epsilon(r,A)=\mathbf 1\{A\ge0,\ r\le1+\epsilon\}+\mathbf 1\{A<0,\ r\ge1-\epsilon\}$. Thus coefficient truncation caps the magnitude of a token contribution while generally retaining a nonzero gradient, whereas PPO clipping removes the gradient in an advantage-dependent region. Neither operation is the same as truncating the complete-response weight $W_k=\prod_t r_{k,t}$. They define different choices of $\phi_k$ and therefore different biases and variances.
+\end{remark}
+
+For any estimator with total risk $m$, the fixed-step smoothness argument gives the expected-improvement lower bound $\eta_k(\|g_k\|_2^2-m)/2$ for every $0<\eta_k\le1/L_k$. Hence a modified estimator has a stronger lower bound exactly when its total risk is smaller. Substituting Equation~\eqref{eq:clipping-risk-decomposition} reduces this comparison to one condition.
+
+\begin{proposition}[When clipping lowers gradient risk]
 \label{prop:clipping-crossover}
-The clipped estimator has lower total gradient risk than the permissive
-estimator if and only if
+For a common sample size $N$, the modified estimator $\widehat g_{\phi,k}$ has lower total gradient risk than $\widehat g_k$ if and only if
 \begin{equation}
-  v_k^{\mathrm P}-v_k^{\mathrm C}
-  >N\|b_k^{\mathrm C}\|_2^2.
-  \label{eq:crossover}
+ v_k-v_{\phi,k}
+ >N\|b_{\phi,k}\|_2^2.
+ \label{eq:crossover}
 \end{equation}
 \end{proposition}
 
-Proposition~\ref{prop:clipping-crossover} says that variance reduction alone is
-not enough: it must exceed the squared bias introduced by the clipping rule.  A
-lower risk is also weaker than recovery, because both estimators may still have
-errors larger than the underlying gradient signal.  Clipping is needed in the
-narrower regime where only the clipped estimator retains a positive lower
-bound.
+Proposition~\ref{prop:clipping-crossover} says that variance reduction alone is insufficient. It must exceed the squared bias introduced by the modification. Lower risk is still weaker than recovery because both estimators may have errors larger than the population-gradient signal. This observation leads to the narrower recovery condition.
 
 \begin{corollary}[When clipping recovers the certificate]
 \label{cor:clipping-needed}
-Under Equation~\eqref{eq:expected-risk-progress}, the clipped estimator has a
-positive expected-improvement certificate while the permissive estimator does
-not exactly when
+For a common step size $0<\eta_k\le1/L_k$, the modified estimator has a positive expected-improvement certificate while the unmodified estimator does not exactly when
 \begin{equation}
-  m_k^{\mathrm C}<\|g_k\|_2^2\le m_k^{\mathrm P}.
-  \label{eq:clipping-needed}
+ m_{\phi,k}<\|g_k\|_2^2\le m_k.
+ \label{eq:clipping-needed}
 \end{equation}
 \end{corollary}
 
-[Add remark for the ordinary PPO, clipping rule and why in high ESS case it might not be necessary]
+\begin{remark}[Why high normalized ESS favors the unmodified estimator]
+\label{rem:high-ess-clipping}
+Equation~\eqref{eq:rho-gradient-mse-bound} shows that the risk bound of the unmodified estimator decreases as $\rho_k$ increases. In the high-ESS regime, there is therefore less sampling variance available for a clipping rule to remove, while any clipping bias remains. A high value of $\rho_k$ does not prove that every unmodified update is optimal, but it weakens the statistical case for clipping. Conversely, a low value of $\rho_k$ only identifies a vulnerable regime. A particular clipping rule is justified only if it satisfies Proposition~\ref{prop:clipping-crossover} and, when recovery is required, Corollary~\ref{cor:clipping-needed}.
+\end{remark}
 
-[Add remark for the weight truncation, and say why it is mildly okish]
-
-
-
-A small $\rho_k$ therefore explains why the permissive estimator becomes
-vulnerable, but it does not justify every clipping rule.  Recovery occurs only
-when the chosen rule lowers total error enough to cross the gradient-signal
-level.  If neither estimator crosses that level, the framework points to a new
-rollout rather than stronger modification of the same data.
-
-The intuitive conclusion therefore says that high ESS means that clipping is not necessary.. \emph{and the clipping rule should consider the ESS as the criterion}. 
-
-To validate this intuition, in later experiments we check the simple heuristics rule: ESS < \tau clip yes ESS > \tau clip no
-
-
-
-
+The theoretical quantity $\rho_k$ is a population object. During training, we use the standard normalized plug-in estimate
+\begin{equation}
+ \widehat\rho_k
+ :=\frac{(\sum_{i=1}^N W_{k,i})^2}{N\sum_{i=1}^N W_{k,i}^2}.
+ \label{eq:sample-ess}
+\end{equation}
+It is computed from the complete-response ratios before any modification is applied. A finite batch can miss rare, large ratios and can therefore overstate population support, so $\widehat\rho_k$ is an observable diagnostic rather than an exact replacement for $\rho_k$ in the theorem. The numerical value $0.1$ used below is a prespecified operational threshold, not a universal constant derived from the theory.
 
 \section{Contextual-bandit validation of the framework}
 \label{sec:simulation}
 
-The contextual bandit tests three predictions of the theory.  First, normalized
+The contextual bandit tests three predictions of the theory. First, normalized
 sequence ESS should track the error of the permissive policy-gradient estimator.
 Second, harmful updates should become more frequent as this reliability
-deteriorates.  Third, a clipped estimator should recover reliability only when
+deteriorates. Third, a clipped estimator should recover reliability only when
 its reduction in variance compensates for its bias, as characterized by
-Proposition~\ref{prop:clipping-crossover}.  Because the finite population exposes
+Proposition~\ref{prop:clipping-crossover}. Because the finite population exposes
 both the exact gradient and the exact reward, all three quantities can be
-measured directly.  The experiment does not estimate the worst-case contribution
+measured directly. The experiment does not estimate the worst-case contribution
 scale in Theorem~\ref{thm:permissive-reliability}; instead, it tests the
 predicted ordering of observable errors and update outcomes.
 
 \subsection{Testbed and oracle}
 
 We use the standard reduction from classification to a contextual bandit on Optdigits
-\citep{wang2017adaptive,alpaydin1998optdigits}.  Each handwritten-digit image is
+\citep{wang2017adaptive,alpaydin1998optdigits}. Each handwritten-digit image is
 a context, the policy emits a 16-token binary encoding of the digit, and an
-exact-match verifier supplies reward.  Because the dataset is a finite
-population, we can enumerate the exact reward and policy gradient.  The
+exact-match verifier supplies reward. Because the dataset is a finite
+population, we can enumerate the exact reward and policy gradient. The
 sequence action still produces the product importance ratios that drive ESS in
 RLVR, so the testbed removes language-model complexity without removing the
 statistical mechanism of interest.
 
 The optimization loop follows grouped RLVR
-\citep{shao2024deepseekmath,yu2025dapo}.  Each rollout samples 128 prompts and
+\citep{shao2024deepseekmath,yu2025dapo}. Each rollout samples 128 prompts and
 16 responses per prompt, computes leave-one-out advantages, and supplies four
-epochs of 16 sequential minibatch updates.  Ratios and ESS are recomputed before
-every update, and a new rollout is collected only afterward.  This repeated-epoch
+epochs of 16 sequential minibatch updates. Ratios and ESS are recomputed before
+every update, and a new rollout is collected only afterward. This repeated-epoch
 trajectory is a stress test beyond the one-epoch freshness condition in
 Theorem~\ref{thm:permissive-reliability}; only the first traversal has the required disjoint
 freshness, and the frozen-policy redraws provide an independent estimator
-diagnostic.  We run 100 paired replications; Appendix~\ref{app:bandit}
+diagnostic. We run 100 paired replications; Appendix~\ref{app:bandit}
 gives the compact protocol and full result tables.
 
 \subsection{The predicted regime change appears}
 
-ESS first predicts the reliability of the permissive gradient.  Its MSE rises
+ESS first predicts the reliability of the permissive gradient. Its MSE rises
 from $1.6\times10^{-2}$ above ESS $0.8$ to $1.31\times10^{-1}$ between $0.03$
-and $0.1$, and to $4.77\times10^{-1}$ below $0.03$.  In the same two low-ESS
+and $0.1$, and to $4.77\times10^{-1}$ below $0.03$. In the same two low-ESS
 regions, permissive steps reduce population reward by $4.0\%$ and $13.3\%$,
-while matched oracle-gradient steps improve reward.  ESS therefore identifies
+while matched oracle-gradient steps improve reward. ESS therefore identifies
 estimation failure rather than the absence of an improving direction.
 
 Frozen-policy redraws then measure the gradient-MSE decomposition in
-Equation~\eqref{eq:crossover}.  With the fixed $N=512$ diagnostic, the
+Equation~\eqref{eq:crossover}. With the fixed $N=512$ diagnostic, the
 sequence-level mask has
 lower MSE below population ESS $0.4$, while the permissive estimator has lower
-MSE above it.  A disjoint calibration split places the crossover at $0.42$ and
+MSE above it. A disjoint calibration split places the crossover at $0.42$ and
 reduces held-out MSE by $4.3\%\pm1.1\%$ relative to the better static estimator.
 Thus ESS predicts which estimator has lower gradient error under this fixed
 construction; it does not establish which update has greater population gain.
@@ -520,55 +416,55 @@ construction; it does not establish which update has greater population gain.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/ess_formula_oracle.pdf}
-  \caption{Controlled tests of the theoretical regime change.  (a) The
+  \caption{Controlled tests of the theoretical regime change. (a) The
   masked-versus-permissive MSE preference changes sign with population ESS.
   (b) A conservative $0.1$ event selects updates on which the sequence mask usually
-  has lower MSE.  Labels give updates per run; error bars are standard errors
-  across 100 replications.  (c) The same sparse intervention preserves
+  has lower MSE. Labels give updates per run; error bars are standard errors
+  across 100 replications. (c) The same sparse intervention preserves
   permissive progress while reducing late failures across eight rollout cycles,
-  with four optimization epochs per fixed rollout.  The horizontal axis reports
+  with four optimization epochs per fixed rollout. The horizontal axis reports
   cumulative optimization epochs; bands are 95\% confidence intervals.}
   \label{fig:formula-oracle}
 \end{figure}
 
 Finally, we evaluate the deliberately conservative rule
-$\widehat\rho<0.1$.  It selects only $3.3\%$ of updates; within that event, PPO
+$\widehat\rho<0.1$. It selects only $3.3\%$ of updates; within that event, PPO
 has lower MSE on $83.7\%\pm1.4\%$ of updates and reduces
-conditional MSE by $53.3\%\pm2.9\%$.  Across eight rollout cycles, each with four
+conditional MSE by $53.3\%\pm2.9\%$. Across eight rollout cycles, each with four
 optimization epochs over its fixed batch, the resulting trajectory reaches
 $0.4940\pm0.0050$ final reward, compared with
 $0.4606\pm0.0098$ for always permissive and $0.4038\pm0.0005$ for always
-masked.  The sparse trigger therefore captures the low-ESS side of the
+masked. The sparse trigger therefore captures the low-ESS side of the
   empirical diagnostic region with an observable training statistic.
 
-The controlled study supports the framework in three ways.  Normalized ESS
+The controlled study supports the framework in three ways. Normalized ESS
 tracks the error of the permissive gradient, harmful updates become more
 frequent as effective support deteriorates, and the relative risk of the
-masked and permissive estimators changes across the same regime.  The study
+masked and permissive estimators changes across the same regime. The study
 does not identify a universal threshold or equate the sequence-level mask
-with token-local clipping.  The next section tests whether the same delayed
+with token-local clipping. The next section tests whether the same delayed
 failure and selective-recovery pattern appears in language-model RLVR.
 
 \section{Language-model evidence for delayed failure and recovery}
 \label{sec:llm-experiments}
 
-The contextual bandit isolates the mechanism with an exact oracle.  We now ask
+The contextual bandit isolates the mechanism with an exact oracle. We now ask
 whether the same delayed transition appears in language-model training, where
-the true gradient and population reward change are unavailable.  The framework
+the true gradient and population reward change are unavailable. The framework
 predicts that permissive learning should remain effective while normalized
 sequence ESS is high, become vulnerable after effective support deteriorates,
-and benefit from a selective safeguard only in the later regime.  The following
+and benefit from a selective safeguard only in the later regime. The following
 experiments test this trajectory-level prediction.
 
 \subsection{A minimal intervention}
 
 At every policy update, we compute sequence ESS from the raw ratios before any
-masking or truncation.  All methods use the same valid sequences and minibatch
-construction.  We then evaluate $0.1$ as a prespecified heuristic:
+masking or truncation. All methods use the same valid sequences and minibatch
+construction. We then evaluate $0.1$ as a prespecified heuristic:
 when $\widehat\rho\ge0.1$, the method retains the permissive update; when
 $\widehat\rho<0.1$, it activates the safeguard associated with the comparison.
 We test conventional GRPO clipping, Clip-Higher \citep{yu2025dapo}, the
-divergence constraint of DPPO \citep{qi2026dppo}.  We also pair conventional
+divergence constraint of DPPO \citep{qi2026dppo}. We also pair conventional
 clipping with a permissive TIS update whose ratio cap is 3.
 
 \begin{equation}
@@ -580,28 +476,28 @@ clipping with a permissive TIS update whose ratio cap is 3.
   \label{eq:llm-gate}
 \end{equation}
 Each conditional run is compared with its always-permissive and
-always-protected counterparts.  This pairing tests the regime prediction while
-holding the safeguard itself fixed.  The threshold is set before the reported
+always-protected counterparts. This pairing tests the regime prediction while
+holding the safeguard itself fixed. The threshold is set before the reported
 runs and is shared across update rules, providing one observable approximation
 to the low-support regime.
 
 \subsection{Evaluation protocol}
 
 We optimize Qwen3-30B-A3B for 200 training steps and evaluate on AIME-2024 with
-mean@16.  The primary comparison is the complete evaluation trajectory and its
-step-200 endpoint.  We also align normalized sequence ESS and the fraction of
+mean@16. The primary comparison is the complete evaluation trajectory and its
+step-200 endpoint. We also align normalized sequence ESS and the fraction of
 clipped updates to the training axis to verify that the rule responds to a loss
-of effective support.  The supplied artifacts report one trajectory per
+of effective support. The supplied artifacts report one trajectory per
 configuration, so we report endpoint differences without uncertainty and treat
 them as trajectory-level evidence.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/curves/overall.pdf}
-  \caption{Testing the predicted regime change in Qwen3-30B-A3B RLVR.  Each
+  \caption{Testing the predicted regime change in Qwen3-30B-A3B RLVR. Each
   panel compares a static update rule with the corresponding ESS-conditional
-  variant using the same threshold, $0.1$.  The legend reports step-200
-  AIME-2024 mean@16.  Conditional protection improves the endpoint under GRPO,
+  variant using the same threshold, $0.1$. The legend reports step-200
+  AIME-2024 mean@16. Conditional protection improves the endpoint under GRPO,
   Clip-Higher, and DPPO and prevents the late collapse of TIS 3.}
   \label{fig:llm-main}
 \end{figure}
@@ -626,19 +522,19 @@ TIS 3 & $0.4$ & $44.8$ & $+44.4$ \\
 
 \subsection{Observed behavior}
 
-Figure~\ref{fig:llm-main} gives a consistent trajectory-level result.  The
+Figure~\ref{fig:llm-main} gives a consistent trajectory-level result. The
 ESS-conditional runs improve the GRPO, Clip-Higher, and DPPO endpoints by
-$6.9$ to $12.3$ percentage points.  The TIS comparison isolates the stability
+$6.9$ to $12.3$ percentage points. The TIS comparison isolates the stability
 failure most clearly: the static TIS 3 run improves early but finishes at
-$0.4\%$, whereas the conditional run finishes at $44.8\%$.  The consistency
+$0.4\%$, whereas the conditional run finishes at $44.8\%$. The consistency
 across safeguards supports ESS as a shared reliability coordinate.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/gate/overall.pdf}
-  \caption{When the ESS-conditioned intervention activates.  Normalized
+  \caption{When the ESS-conditioned intervention activates. Normalized
   sequence ESS decreases during training (left), while the fraction of clipped
-  updates increases (right).  The rule therefore applies little protection
+  updates increases (right). The rule therefore applies little protection
   while effective support is broad and progressively activates each safeguard
   as support deteriorates.}
   \label{fig:llm-gate-action}
@@ -646,7 +542,7 @@ across safeguards supports ESS as a shared reliability coordinate.
 
 The temporal ordering in Figure~\ref{fig:llm-gate-action} is inconsistent with
 adding a fixed amount of regularization throughout training: the intervention
-changes as sample ESS deteriorates.  It does not, from one trajectory per
+changes as sample ESS deteriorates. It does not, from one trajectory per
 configuration, isolate ESS from every time-varying regularization explanation.
 Detailed response-length, entropy, and TIS diagnostics are reported in
 Appendix~\ref{app:llm-diagnostics}.
@@ -655,32 +551,32 @@ Appendix~\ref{app:llm-diagnostics}.
 
 Figure~\ref{fig:llm-motivation} presents a delayed failure: a permissive update
 rule learns successfully from a fixed rollout for many steps and then becomes
-unstable.  Existing policy-deviation guarantees provide an essential account of
+unstable. Existing policy-deviation guarantees provide an essential account of
 why large changes can be unsafe, but they do not directly track when a finite
-batch stops supporting an accurate update for the current learner.  This paper
+batch stops supporting an accurate update for the current learner. This paper
 develops a complementary effective-support framework for that transition.
 
-The central quantity is normalized sequence ESS, $\rho_k$.  Treating the policy
+The central quantity is normalized sequence ESS, $\rho_k$. Treating the policy
 gradient as a vector-valued importance-sampling estimator shows that its
 finite-batch mean-squared error is bounded by the contribution scale divided by
-the effective sequence count $N\rho_k$.  Smoothness then converts this
-reliability statement into a one-step population-improvement bound.  The result
+the effective sequence count $N\rho_k$. Smoothness then converts this
+reliability statement into a one-step population-improvement bound. The result
 explains why permissive optimization can remain reliable for an extended period
 and why the guarantee disappears only after effective support has sufficiently
 deteriorated.
 
-The same framework clarifies the role of clipping.  A low $\rho_k$ diagnoses
+The same framework clarifies the role of clipping. A low $\rho_k$ diagnoses
 vulnerability of the permissive estimator, but it does not automatically make a
-clipped estimator preferable.  Clipping recovers the positive certificate only
+clipped estimator preferable. Clipping recovers the positive certificate only
 when its variance reduction exceeds its induced bias and lowers total estimator
-risk below the gradient signal.  If neither estimator meets this condition, the
+risk below the gradient signal. If neither estimator meets this condition, the
 theory points to fresh data rather than stronger clipping.
 
 The contextual bandit confirms the predicted relation among normalized ESS,
-gradient error, harmful updates, and estimator crossover.  The language-model
+gradient error, harmful updates, and estimator crossover. The language-model
 runs show the same temporal ordering at scale: permissive learning succeeds
 while effective support is broad, and selective protection becomes useful only
-after support deteriorates.  Future work should develop tighter online estimates
+after support deteriorates. Future work should develop tighter online estimates
 of the contribution scale and test whether the resulting reliability boundary
 transfers across models, rollout sizes, and verifier tasks.
 
@@ -690,7 +586,7 @@ transfers across models, rollout sizes, and verifier tasks.
 \label{app:bandit}
 
 This appendix records the task, exact oracle, RLVR-style update loop, frozen-state
-diagnostics, and supporting results.  The sequence is sufficient to interpret
+diagnostics, and supporting results. The sequence is sufficient to interpret
 and reproduce Figures~\ref{fig:formula-oracle} and
 \ref{fig:ess-validation} without repeating derivations from the main theory.
 
@@ -699,9 +595,9 @@ and reproduce Figures~\ref{fig:formula-oracle} and
 The testbed turns supervised classification into a verifier task using the
 standard contextual-bandit reduction of \citet{wang2017adaptive}: an input is
 presented as the context, a policy samples an answer, and reward is one only for
-the correct label.  We replace the single label action with a token sequence and
+the correct label. We replace the single label action with a token sequence and
 embed this task in the grouped rollout and minibatch structure used by RLVR
-\citep{shao2024deepseekmath,yu2025dapo}.  Table
+\citep{shao2024deepseekmath,yu2025dapo}. Table
 \ref{tab:rlvr-correspondence} records the resulting correspondence.
 
 \begin{table}[htbp]
@@ -725,12 +621,12 @@ Optimization phase & Minibatch sequence & Four epochs of 16 updates, then a new 
 \end{tabular}
 \end{table}
 
-The testbed uses a sequence policy, not a language model.  Its token heads are
+The testbed uses a sequence policy, not a language model. Its token heads are
 conditionally independent so that the population gradient remains exact, but
 its response ratio is the same product of token ratios that appears in RLVR.
 During training, the learner observes only sampled responses, rollout log
-probabilities, and verifier rewards.  Labels are used only by the oracle that
-evaluates the finite-population reward and gradient.  This separation preserves
+probabilities, and verifier rewards. Labels are used only by the oracle that
+evaluates the finite-population reward and gradient. This separation preserves
 the RLVR feedback structure while exposing the quantities needed to test the
 theory.
 
@@ -738,18 +634,18 @@ theory.
 
 Optdigits is a handwritten-digit classification benchmark with 5,620 labeled
 examples
-\citep{alpaydin1998optdigits}.  Each original $32\times32$ binary image is
+\citep{alpaydin1998optdigits}. Each original $32\times32$ binary image is
 partitioned into $4\times4$ blocks; foreground counts produce 64 integer
-features in $\{0,\ldots,16\}$.  We concatenate the supplied 3,823 training and
-1,797 test examples, divide each feature by 16, and append an intercept.  This
+features in $\{0,\ldots,16\}$. We concatenate the supplied 3,823 training and
+1,797 test examples, divide each feature by 16, and append an intercept. This
 gives a finite population $\{(x_j,y_j)\}_{j=1}^{M}$ with $M=5{,}620$ and
-$x_j\in\mathbb{R}^{65}$.  The original split is not used because the estimand
+$x_j\in\mathbb{R}^{65}$. The original split is not used because the estimand
 is finite-population policy optimization, not classification generalization.
 
-Each label $y\in\{0,\ldots,9\}$ has a four-bit binary representation.  Let
-$c(y)\in\{0,1\}^{16}$ repeat this code four times.  The repetition changes only
+Each label $y\in\{0,\ldots,9\}$ has a four-bit binary representation. Let
+$c(y)\in\{0,1\}^{16}$ repeat this code four times. The repetition changes only
 the response length, not which answer is correct, and creates a sequence ratio
-that compounds over 16 token probabilities.  The policy has one Bernoulli head
+that compounds over 16 token probabilities. The policy has one Bernoulli head
 per token position,
 \begin{align}
   p_{\theta,\ell}(x)&=\sigma(\theta_\ell^\top x),\nonumber\\
@@ -763,11 +659,11 @@ per token position,
 The verifier reward is
 $R(x_j,a_{1:16})=\mathbf{1}\{a_{1:16}=c(y_j)\}$.
 
-Initialization is deterministic and uses no experimental outcomes.  Starting
+Initialization is deterministic and uses no experimental outcomes. Starting
 from zero, we fit all token heads for 500 full-population logistic-regression
-steps with step size $0.8$ and no regularization.  We then multiply the fitted
+steps with step size $0.8$ and no regularization. We then multiply the fitted
 weights by $0.55$ to keep the initial policy stochastic, which gives exact
-initial reward $V(\theta_0)=0.095766$.  This procedure uses no data split,
+initial reward $V(\theta_0)=0.095766$. This procedure uses no data split,
 minibatching, early stopping, or model selection.
 
 For compactness, define
@@ -780,7 +676,7 @@ For compactness, define
   \label{eq:correct-sequence-probability}
 \end{equation}
 where $c_{j\ell}=c(y_j)_\ell$ and
-$p_{j\ell}=p_{\theta,\ell}(x_j)$.  The finite-population objective is
+$p_{j\ell}=p_{\theta,\ell}(x_j)$. The finite-population objective is
 \begin{equation}
   V(\theta)=\frac1M\sum_{j=1}^{M}q_j(\theta).
   \label{eq:optdigits-value}
@@ -797,8 +693,8 @@ The Bernoulli score identity gives the exact finite-population gradient
 \end{equation}
 where $q_j(\theta)$ is the correct-sequence probability,
 $c_{j\ell}$ is its bit at position $\ell$, and $p_{j\ell}$ is the policy
-probability of bit one.  The oracle enumerates all 5,620 contexts at the current
-pre-update policy.  We measure a sampled estimator by
+probability of bit one. The oracle enumerates all 5,620 contexts at the current
+pre-update policy. We measure a sampled estimator by
 \begin{equation}
   E_t=\|\widehat g_t-\nabla V(\theta_t)\|_F^2,
   \label{eq:optdigits-gradient-error}
@@ -813,7 +709,7 @@ For response $g$ to prompt $i$, we use the leave-one-out advantage
 \end{equation}
 It has the sign of the group-centered GRPO advantage
 \citep{shao2024deepseekmath}; standard-deviation scaling is omitted so every
-minibatch targets the same population gradient.  The baseline excludes the
+minibatch targets the same population gradient. The baseline excludes the
 focal response and is therefore independent of it conditional on the prompt.
 Importance weighting and the zero-mean score identity then preserve the target
 in Equation~\eqref{eq:optdigits-gradient}.
@@ -829,30 +725,30 @@ in Equation~\eqref{eq:optdigits-gradient}.
 \textbf{Input:} initial policy $\theta_0$; eight rollouts; 128 prompts per
 rollout; $G=16$ responses per prompt; 16 minibatches; four optimization epochs.
 \begin{enumerate}
-  \item Set the rollout policy $Q\leftarrow P_\theta$.  Sample prompts and
+  \item Set the rollout policy $Q\leftarrow P_\theta$. Sample prompts and
   grouped responses, then compute verifier rewards and leave-one-out advantages.
   \item Randomly partition the intact prompt groups into 16 minibatches, each
   containing eight groups and $N=128$ complete responses.
-  \item In each of four optimization epochs, traverse all minibatches.  Before
+  \item In each of four optimization epochs, traverse all minibatches. Before
   every update, recompute $W=P_\theta(Y\mid x)/Q(Y\mid x)$, policy scores, and
-  sample ESS.  Form the designated raw, PPO-masked, or conditional estimator.
+  sample ESS. Form the designated raw, PPO-masked, or conditional estimator.
   \item After all 64 updates, discard the rollout and repeat from the new policy.
 \end{enumerate}
 \end{minipage}}
 \end{algorithm}
 
-Every response enters one update per optimization epoch.  Within a rollout,
+Every response enters one update per optimization epoch. Within a rollout,
 responses, rewards, advantages, and rollout probabilities remain fixed, whereas
 current probabilities, ratios, scores, and ESS are recomputed before each
-update.  Theorem~\ref{thm:permissive-reliability} applies to the first disjoint traversal; later
-epochs deliberately test behavior after sample reuse.  Sixteen minibatches are
+update. Theorem~\ref{thm:permissive-reliability} applies to the first disjoint traversal; later
+epochs deliberately test behavior after sample reuse. Sixteen minibatches are
 used because the first four never reach ESS below $0.1$ in the diagnostic runs;
 a shorter traversal would not expose the regime under study.
 
 \subsection{Estimators and diagnostics}
 
 Let $S_{ig,t}=\nabla_\theta\log
-P_{\theta_{r,t-1}}(Y_{ig}\mid x_i)$.  For each $N=128$ minibatch, the
+P_{\theta_{r,t-1}}(Y_{ig}\mid x_i)$. For each $N=128$ minibatch, the
 permissive and PPO-masked gradients are
 \begin{align}
   \widehat g_{\mathrm{raw},t}
@@ -871,9 +767,9 @@ where the experiment uses the response-level analogue
   \label{eq:simulation-sequence-mask}
 \end{equation}
 This construction applies the advantage-sign mask once to the complete-response
-ratio rather than separately to token ratios.  It is therefore a controlled
+ratio rather than separately to token ratios. It is therefore a controlled
 sequence-level masking analogue, not the exact token-local PPO/GRPO gradient and
-not numerical ratio truncation.  The third method uses
+not numerical ratio truncation. The third method uses
 \begin{equation}
   \widehat g_{\mathrm{cond},t}
   =\begin{cases}
@@ -887,33 +783,33 @@ not numerical ratio truncation.  The third method uses
   \label{eq:simulation-gate}
 \end{equation}
 The $0.1$ threshold is fixed before the runs and is not selected from a reported
-outcome.  All methods share the initialization, prompt draws, response-sampling
+outcome. All methods share the initialization, prompt draws, response-sampling
 uniforms, and group permutations within each of 100 paired replications.
 
-The first 20 conditional replications provide 2,560 pre-update diagnostics.  At
+The first 20 conditional replications provide 2,560 pre-update diagnostics. At
 each state, we evaluate the raw gradient against
 Equation~\eqref{eq:optdigits-gradient} and compare its counterfactual reward
-step with the exact-gradient step.  Results use seven prespecified ESS intervals:
+step with the exact-gradient step. Results use seven prespecified ESS intervals:
 \[
   \begin{gathered}
     \relax[0,0.03),\ [0.03,0.1),\ [0.1,0.2),\ [0.2,0.4),\\
     [0.4,0.6),\ [0.6,0.8),\ [0.8,1].
   \end{gathered}
 \]
-Within-bin error bars are standard errors.  Optimization curves use all 100
+Within-bin error bars are standard errors. Optimization curves use all 100
 replications and report relative population-reward improvement from the common
-initial policy with 95\% confidence intervals.  One rollout costs 2,048
+initial policy with 95\% confidence intervals. One rollout costs 2,048
 verifier responses.
 
 \subsection{Fixed-checkpoint crossover diagnostic}
 
 To estimate conditional MSE rather than one realized error, we freeze the
 rollout and current policies at selected pre-update checkpoints and redraw
-independent minibatches.  This diagnostic does not change training.
+independent minibatches. This diagnostic does not change training.
 
-The finite Bernoulli policy also makes population sequence ESS exact.  For
+The finite Bernoulli policy also makes population sequence ESS exact. For
 prompt $x$ and token position $\ell$, let $q_{x\ell}$ and $p_{x\ell}$ denote
-the rollout and current probabilities of token one.  Independence across the
+the rollout and current probabilities of token one. Independence across the
 16 response positions gives
 \begin{align}
   \E_Q[W^2\mid x]
@@ -929,13 +825,13 @@ the rollout and current probabilities of token one.  Independence across the
   \right\}^{-1}.
     \label{eq:simulation-population-ess}
 \end{align}
-These equations use $\E_Q[W]=1$ and contain no minibatch noise.  We evaluate
+These equations use $\E_Q[W]=1$ and contain no minibatch noise. We evaluate
 eight checkpoints from each of the seven ESS intervals, giving 56 frozen states
-selected from the 2,560 trajectory checkpoints.  At each state, 32 paired
-redraws compare raw and PPO-masked estimates.  One independent block contains
+selected from the 2,560 trajectory checkpoints. At each state, 32 paired
+redraws compare raw and PPO-masked estimates. One independent block contains
 eight prompts and 16 responses per prompt, hence $N=128$ sequences; the
-$N=512$ estimate averages four blocks.  The block is the independent unit
-because responses within a prompt share an advantage.  For checkpoint $c$,
+$N=512$ estimate averages four blocks. The block is the independent unit
+because responses within a prompt share an advantage. For checkpoint $c$,
 estimator $e$, and size $N$, we report
 \begin{equation}
   \widehat{\operatorname{MSE}}_{c,e,N}
@@ -946,31 +842,31 @@ estimator $e$, and size $N$, we report
   \label{eq:simulation-crossover-mse}
 \end{equation}
 We average redraws within a state and states within an ESS interval; standard
-errors use the eight states as independent units.  PPO reduction is
+errors use the eight states as independent units. PPO reduction is
 $100(\widehat{\operatorname{MSE}}_{\mathrm{raw}}-
 \widehat{\operatorname{MSE}}_{\mathrm{PPO}})/
-\widehat{\operatorname{MSE}}_{\mathrm{raw}}$.  Positive values favor masking.
+\widehat{\operatorname{MSE}}_{\mathrm{raw}}$. Positive values favor masking.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/ess_estimator_crossover.pdf}
   \caption{Direct raw-versus-sequence-mask gradient-MSE diagnostic at frozen policy
-  states.  (a) At $N=512$, the sequence mask has lower MSE in the low-ESS regime,
-  whereas the raw estimator has lower MSE at high ESS.  (b) PPO MSE reduction
+  states. (a) At $N=512$, the sequence mask has lower MSE in the low-ESS regime,
+  whereas the raw estimator has lower MSE at high ESS. (b) PPO MSE reduction
   relative to the raw estimator for $N=128$ and $N=512$; positive values favor
-  the sequence mask (called PPO in the plot).  Each point averages eight states evaluated with 32 independent
-  redraws.  Error bars are standard errors across states.}
+  the sequence mask (called PPO in the plot). Each point averages eight states evaluated with 32 independent
+  redraws. Error bars are standard errors across states.}
   \label{fig:ess-crossover}
 \end{figure}
 
 \subsection{Formula calibration and held-out decision test}
 
 We split the eight states in each ESS interval into four calibration and four
-test states, yielding 28 of each.  At every state,
+test states, yielding 28 of each. At every state,
 100 paired $N=128$ blocks estimate the raw covariance trace $\widehat V_W$, the
 PPO covariance trace $\widehat V_C$, and the PPO squared bias $\widehat B_C$.
 The squared-bias estimate subtracts the sampling variance of the estimated mean
-and is truncated at zero.  Averaging $K\in\{1,2,4,8\}$ independent blocks gives
+and is truncated at zero. Averaging $K\in\{1,2,4,8\}$ independent blocks gives
 \begin{equation}
   \widehat R_W(K):=\frac{\widehat V_W}{K},
   \qquad
@@ -978,32 +874,32 @@ and is truncated at zero.  Averaging $K\in\{1,2,4,8\}$ independent blocks gives
   \label{eq:formula-risks}
 \end{equation}
 These are the two sides of the diagnostic decomposition in
-Equation~\eqref{eq:crossover} at block level.  For each
+Equation~\eqref{eq:crossover} at block level. For each
 $K$, we choose the ESS midpoint that minimizes fitted risk while applying PPO
-below the threshold and raw above it.  The only interior calibration solution is
+below the threshold and raw above it. The only interior calibration solution is
 $K=4$, or $N=512$, with threshold $0.417$.
 
 Held-out evaluation uses 100 paired redraws at each test state.
 The fitted threshold never sees test-state errors; standard errors use the 28
-states as independent units.  The subsequent optimization study freezes that
+states as independent units. The subsequent optimization study freezes that
 threshold, uses 512 sequences per update, traverses each rollout for four epochs,
-and runs eight rollout cycles in 100 paired replications.  Sample ESS, rather
+and runs eight rollout cycles in 100 paired replications. Sample ESS, rather
 than population ESS, determines the training intervention.
 
 The fixed-$0.1$ trajectory also records shadow raw and PPO gradients whenever
-sample ESS is below $0.417$.  Comparing each with the exact gradient yields the
-three intervals $[0,0.1)$, $[0.1,0.25)$, and $[0.25,0.417)$.  These shadow
-calculations do not alter training.  Means and standard errors use the 100
+sample ESS is below $0.417$. Comparing each with the exact gradient yields the
+three intervals $[0,0.1)$, $[0.1,0.25)$, and $[0.25,0.417)$. These shadow
+calculations do not alter training. Means and standard errors use the 100
 replications as independent units.
 
 \subsection{Results}
 
 \paragraph{ESS identifies gradient failure.}
-Table~\ref{tab:rlvr-diagnostics} reports all prespecified ESS bins.  The
+Table~\ref{tab:rlvr-diagnostics} reports all prespecified ESS bins. The
 permissive-gradient MSE increases monotonically from the highest-ESS bin to the
-lowest.  The corresponding policy step improves reward above ESS $0.2$, is
+lowest. The corresponding policy step improves reward above ESS $0.2$, is
 approximately neutral between $0.1$ and $0.2$, and reduces reward below $0.1$.
-In contrast, the oracle-gradient step improves reward in every bin.  The loss
+In contrast, the oracle-gradient step improves reward in every bin. The loss
 below $0.1$ is therefore attributable to gradient estimation error rather than
 to the absence of a locally improving direction.
 
@@ -1013,7 +909,7 @@ to the absence of a locally improving direction.
   \caption{ESS reliability and the initial operational test.
   (a) Permissive-gradient error by pre-update ESS.
   (b) Exact reward change after a permissive step and after its matched
-  oracle-gradient step.  Dotted lines mark the prespecified threshold $0.1$;
+  oracle-gradient step. Dotted lines mark the prespecified threshold $0.1$;
   error bars in (a) and (b) are standard errors within ESS bins.
   (c) Relative population-reward improvement against verifier responses;
   bands are 95\% confidence intervals over 100 paired replications.}
@@ -1023,8 +919,8 @@ to the absence of a locally improving direction.
 \begin{table}[htbp]
 \centering
 \small
-\caption{Minibatch diagnostics from the first 20 replications.  Count is the
-number of minibatch updates in each fixed ESS interval.  Gradient MSE and
+\caption{Minibatch diagnostics from the first 20 replications. Count is the
+number of minibatch updates in each fixed ESS interval. Gradient MSE and
 one-step relative reward changes are means $\pm$ standard errors.}
 \label{tab:rlvr-diagnostics}
 \begin{tabular}{lrrrr}
@@ -1043,18 +939,18 @@ $[0.8,1]$ & 632 & $0.016\pm0.001$ & $2.95\pm0.69$ & $3.49\pm0.12$ \\
 \end{table}
 
 \paragraph{Sensitivity to estimator construction.}
-Table~\ref{tab:rlvr-crossover} reports the direct paired comparison.  With one
+Table~\ref{tab:rlvr-crossover} reports the direct paired comparison. With one
 training-size minibatch, the sequence mask has lower estimated MSE in every ESS
-interval.  Averaging four minibatches reduces the permissive estimator's
-variance without removing the masked estimator's bias.  At $N=512$, the sequence mask
+interval. Averaging four minibatches reduces the permissive estimator's
+variance without removing the masked estimator's bias. At $N=512$, the sequence mask
 has lower mean MSE below population ESS $0.4$, while the permissive estimator has
-lower mean MSE in the three intervals above $0.4$.  The crossover therefore appears
-only after averaging more independent blocks.  This is the batch-size effect
+lower mean MSE in the three intervals above $0.4$. The crossover therefore appears
+only after averaging more independent blocks. This is the batch-size effect
 predicted by the factor $N\|b_C\|_2^2$ in
 Equation~\eqref{eq:crossover}, applied to the block-level estimator described
-above.  The result supports ESS as a gradient-error coordinate within this fixed
+above. The result supports ESS as a gradient-error coordinate within this fixed
 construction and confirms that the diagnostic boundary is
-configuration-specific.  This sensitivity check is not a batch-size
+configuration-specific. This sensitivity check is not a batch-size
 prescription for RLVR: an LLM minibatch count need not equal the number of
 independent sampling blocks in the theorem, and the practical $0.1$ rule is
 evaluated through its one-sided low-ESS condition instead.
@@ -1062,9 +958,9 @@ evaluated through its one-sided low-ESS condition instead.
 \begin{table}[htbp]
 \centering
 \small
-\caption{Conditional gradient MSE at frozen policy states.  Each entry is the
+\caption{Conditional gradient MSE at frozen policy states. Each entry is the
 mean $\pm$ standard error across eight checkpoints after 32 independent
-redraws per checkpoint.  PPO reduction is computed per checkpoint; positive
+redraws per checkpoint. PPO reduction is computed per checkpoint; positive
 values indicate lower MSE for the sequence mask.}
 \label{tab:rlvr-crossover}
 \begin{tabular}{rrlll}
@@ -1093,19 +989,19 @@ $512$ & $[0.8,1)$ & $0.004\pm0.001$ & $0.004\pm0.001$ & $-10.5\pm6.5$ \\
 \paragraph{Calibration fixes an oracle reference configuration.}
 The fitted boundary selects PPO throughout at $N=128$ and $N=256$, raw
 throughout at $N=1024$, and both estimators only at $N=512$, where the interior
-boundary is $0.417$.  This choice uses no held-out gradient errors.
+boundary is $0.417$. This choice uses no held-out gradient errors.
 
 \paragraph{The calibrated rule improves held-out gradient risk.}
 Table~\ref{tab:formula-heldout} reports state-normalized excess MSE at $N=512$.
 The fitted $0.417$ boundary improves on the better static estimator by
-$4.3\%\pm1.1\%$.  The $0.1$ row is only a reference because this frozen-state
+$4.3\%\pm1.1\%$. The $0.1$ row is only a reference because this frozen-state
 test uses population ESS, whereas the operational test uses sample ESS along a
 moving trajectory.
 
 \begin{table}[htbp]
 \centering
 \small
-\caption{Held-out estimator selection at $N=512$.  Excess MSE is relative to
+\caption{Held-out estimator selection at $N=512$. Excess MSE is relative to
 the better static estimator and is reported as mean $\pm$ standard error across
 28 test states; negative values are better.}
 \label{tab:formula-heldout}
@@ -1123,10 +1019,10 @@ Fixed ESS heuristic & $0.100$ & $-1.1\pm2.7$ & $28.6$ \\
 
 \paragraph{The $0.1$ event selects high-risk updates on its own trajectory.}
 Table~\ref{tab:on-trajectory-diagnostic} reports the shadow comparison from the
-fixed-$0.1$ run.  In the selected region, the sequence mask has lower squared gradient error
+fixed-$0.1$ run. In the selected region, the sequence mask has lower squared gradient error
 on $83.7\%\pm1.4\%$ of updates and reduces conditional MSE by
-$53.3\%\pm2.9\%$.  Switching estimators only there improves the measured MSE
-ordering relative to always using raw.  The sequence mask also has lower MSE on many
+$53.3\%\pm2.9\%$. Switching estimators only there improves the measured MSE
+ordering relative to always using raw. The sequence mask also has lower MSE on many
 updates immediately above $0.1$, so the heuristic is a sparse high-confidence
 trigger rather than the full oracle classifier.
 
@@ -1135,7 +1031,7 @@ trigger rather than the full oracle classifier.
 \small
 \caption{Shadow estimator comparison along the fixed-$0.1$ trajectory.
 Updates per run and paired diagnostic statistics are means $\pm$ standard
-errors across 100 replications.  PPO minus raw step is the exact one-step
+errors across 100 replications. PPO minus raw step is the exact one-step
 population-reward difference in percentage points.}
 \label{tab:on-trajectory-diagnostic}
 \begin{tabular}{lrrrr}
@@ -1154,30 +1050,30 @@ $-1.13\pm0.07$ \\
 \end{table}
 
 The shadow masked step has lower immediate reward despite its lower gradient
-MSE.  This is the concrete reason not to use MSE as the update-quality
-criterion: lower estimation risk can accompany less policy improvement.  The
+MSE. This is the concrete reason not to use MSE as the update-quality
+criterion: lower estimation risk can accompany less policy improvement. The
 repeated trajectory, not the MSE ordering alone, determines whether masking
 prevents later loss.
 
 \paragraph{Reliability conditioning improves repeated optimization.}
 Table~\ref{tab:n512-optimization} reports the $N=512$ study with eight rollout
-cycles and four optimization epochs per fixed rollout.  The
-fitted ESS reference has the highest final reward and the smallest uncertainty.  It
+cycles and four optimization epochs per fixed rollout. The
+fitted ESS reference has the highest final reward and the smallest uncertainty. It
 uses the raw estimator for 450.3 of 512 updates on average, which explains its
 fast progress, while its 61.7 PPO-masked updates prevent the late loss observed
-under the static raw estimator.  The fixed-$0.1$ rule gives a complementary
-operating point.  It masks only $3.3\%$ of updates, matches the raw median, and
-raises the tenth-percentile endpoint from $0.352$ to $0.495$.  It ends above
+under the static raw estimator. The fixed-$0.1$ rule gives a complementary
+operating point. It masks only $3.3\%$ of updates, matches the raw median, and
+raises the tenth-percentile endpoint from $0.352$ to $0.495$. It ends above
 the fitted reference in 90 of 100 paired runs, although the fitted reference
 retains the higher mean by eliminating a few severe failures that remain under
-the sparse rule.  The comparison supports $0.1$ as a conservative practical
+the sparse rule. The comparison supports $0.1$ as a conservative practical
 heuristic and shows the additional robustness available from calibration.
 
 \begin{table}[htbp]
 \centering
 \small
 \caption{Optimization over eight rollout cycles, with four epochs per fixed
-rollout and 512 sequences per update.  Mean final reward is reported with its
+rollout and 512 sequences per update. Mean final reward is reported with its
 standard error over 100 paired replications;
 median and tenth percentile are computed across the same final outcomes.}
 \label{tab:n512-optimization}
@@ -1198,7 +1094,7 @@ Fixed ESS, $\tau=0.100$ & $0.4940\pm0.0050$ & $0.4998$ & $0.4954$ & $16.9$ \\
 Figure~\ref{fig:ess-validation}(c) shows that the intervention follows the
 permissive trajectory while ESS is high, masks $5.17$ of 128 updates on average,
 and reaches twice the initial reward after 6,144 verifier responses, compared
-with 8,192 for raw and 10,240 for PPO masking.  Final exact rewards are
+with 8,192 for raw and 10,240 for PPO masking. Final exact rewards are
 $0.2826\pm0.0109$, $0.2952\pm0.0014$, and $0.2954\pm0.0098$, respectively.
 The endpoint is not statistically resolved above always masking; the result is
 that reliability conditioning recovers its endpoint after following the faster
@@ -1208,15 +1104,15 @@ permissive path through the high-ESS regime.
 \label{app:llm-diagnostics}
 
 The main text reports evaluation performance and when conditional protection
-activates.  This section records the accompanying training dynamics and a
+activates. This section records the accompanying training dynamics and a
 second permissive TIS setting.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/dynamics/overall.pdf}
-  \caption{Training dynamics for the main comparisons.  The static TIS 3 run
+  \caption{Training dynamics for the main comparisons. The static TIS 3 run
   develops extreme response length and entropy together with a collapse in
-  training reward.  The safeguards and their ESS-conditional variants avoid
+  training reward. The safeguards and their ESS-conditional variants avoid
   this failure over the reported 200 steps.}
   \label{fig:llm-dynamics}
 \end{figure}
@@ -1224,8 +1120,8 @@ second permissive TIS setting.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/tis3_dynamics/overall.pdf}
-  \caption{Detailed TIS 3 comparison.  Under static TIS, ESS falls below $0.01$
-  after step 77 and the response length and entropy diverge.  The fixed-$0.1$
+  \caption{Detailed TIS 3 comparison. Under static TIS, ESS falls below $0.01$
+  after step 77 and the response length and entropy diverge. The fixed-$0.1$
   intervention increases the clipped fraction as ESS declines and keeps both
   diagnostics controlled.}
   \label{fig:tis3-dynamics}
@@ -1234,7 +1130,7 @@ second permissive TIS setting.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/tis5/overall.pdf}
-  \caption{Replication with TIS cap 5.  The static trajectory collapses to zero
+  \caption{Replication with TIS cap 5. The static trajectory collapses to zero
   after ESS vanishes, whereas the fixed-$0.1$ conditional run reaches an
   AIME-2024 mean@16 score of $39.4\%$.}
   \label{fig:tis5-replication}
@@ -1244,359 +1140,242 @@ second permissive TIS setting.
 \section{Proofs for the theoretical results}
 \label{app:proofs}
 
-This appendix supplies the calculations that lead to the single conclusion in
-each main-text result.  All statements are read conditional on the history
-before update $k$, so the current policy is fixed and the unused sampling units
-are independent draws from $Q$.
+At update $k$, all expectations in this appendix are taken after conditioning on the preceding updates. The current policy is therefore fixed and the unused sampling units are independent draws from $Q$. We suppress this conditioning throughout.
 
-\subsection{Policy-gradient identity and mean-square calculation}
+\subsection{Policy-gradient identity and mean-square bound}
 
-By definition,
-$f_k=(R-b(X))\nabla_\theta\log P_{\theta_k}(Y\mid X)$ and
-$W_k=dP_{\theta_k}/dQ$.  Change of measure gives
+By definition, $f_k=(R-b(X))\nabla_\theta\log P_{\theta_k}(Y\mid X)$ and $W_k=dP_{\theta_k}/dQ$. Change of measure gives
 \begin{align}
-  \E_Q[W_k f_k\mid\mathcal F_{k-1}]
-  &=\E_{P_{\theta_k}}
-    [(R-b(X))\nabla_\theta\log P_{\theta_k}(Y\mid X)
-      \mid\mathcal F_{k-1}]
-  \nonumber\\
-  &=\E_{P_{\theta_k}}
-    [R\nabla_\theta\log P_{\theta_k}(Y\mid X)
-      \mid\mathcal F_{k-1}]
-  \nonumber\\
-  &\quad-
-    \E_{P_{\theta_k}}
-    [b(X)\nabla_\theta\log P_{\theta_k}(Y\mid X)
-      \mid\mathcal F_{k-1}].
-  \label{eq:proof-baseline-split}
+ \E_Q[W_kf_k]
+ &=\E_{P_{\theta_k}}[(R-b(X))\nabla_\theta\log P_{\theta_k}(Y\mid X)]
+ \nonumber\\
+ &=\E_{P_{\theta_k}}[R\nabla_\theta\log P_{\theta_k}(Y\mid X)]
+ \nonumber\\
+ &\quad-
+ \E_{P_{\theta_k}}[b(X)\nabla_\theta\log P_{\theta_k}(Y\mid X)].
+ \label{eq:proof-baseline-split}
 \end{align}
 For the baseline term, condition further on $X$:
 \begin{align}
-  &\E_{P_{\theta_k}}
-    [b(X)\nabla_\theta\log P_{\theta_k}(Y\mid X)
-      \mid X,\mathcal F_{k-1}]
-  \nonumber\\
-  &\qquad=
-  b(X)\sum_y P_{\theta_k}(y\mid X)
-  \nabla_\theta\log P_{\theta_k}(y\mid X)
-  \nonumber\\
-  &\qquad=
-  b(X)\sum_y\nabla_\theta P_{\theta_k}(y\mid X)
-  \nonumber\\
-  &\qquad=
-  b(X)\nabla_\theta 1
-  =0.
-  \label{eq:proof-baseline-zero}
+ &\E_{P_{\theta_k}}[b(X)\nabla_\theta\log P_{\theta_k}(Y\mid X)\mid X]
+ \nonumber\\
+ &\qquad=b(X)\sum_yP_{\theta_k}(y\mid X)\nabla_\theta\log P_{\theta_k}(y\mid X)
+ \nonumber\\
+ &\qquad=b(X)\sum_y\nabla_\theta P_{\theta_k}(y\mid X)
+ \nonumber\\
+ &\qquad=b(X)\nabla_\theta1
+ =0.
+ \label{eq:proof-baseline-zero}
 \end{align}
-The remaining term is the score-function identity, and hence
+The remaining term is the score-function identity. Hence
 \begin{equation}
-  \E_Q[W_k f_k\mid\mathcal F_{k-1}]
-  =\nabla J(\theta_k)
-  =g_k.
-  \label{eq:conditional-gradient-identity}
+ \E_Q[W_kf_k]=\nabla J(\theta_k)=g_k.
+ \label{eq:conditional-gradient-identity}
 \end{equation}
-Averaging $N$ identical units proves
-Equation~\eqref{eq:gradient-unbiasedness}.
+Averaging $N$ independent copies gives $\E[\widehat g_k]=g_k$.
 
-For the mean-square calculation, define
-$\xi_{k,i}:=W_{k,i}f_{k,i}-g_k$.  Equation~\eqref{eq:conditional-gradient-identity}
-implies
+For the mean-square calculation, define $\xi_{k,i}:=W_{k,i}f_{k,i}-g_k$. Equation~\eqref{eq:conditional-gradient-identity} implies $\E[\xi_{k,i}]=0$. Since $\widehat g_k-g_k=N^{-1}\sum_{i=1}^N\xi_{k,i}$,
+\begin{align}
+ \E\|\widehat g_k-g_k\|_2^2
+ &=\frac1{N^2}\sum_{i=1}^N\E\|\xi_{k,i}\|_2^2
+ +\frac1{N^2}\sum_{i\ne j}\E[\xi_{k,i}^\top\xi_{k,j}].
+ \label{eq:mse-expand-sums}
+\end{align}
+For $i\ne j$, independence and zero means give
 \begin{equation}
-  \E[\xi_{k,i}\mid\mathcal F_{k-1}]=0.
-  \label{eq:centered-unit}
+ \E[\xi_{k,i}^\top\xi_{k,j}]
+ =\E[\xi_{k,i}]^\top\E[\xi_{k,j}]
+ =0.
+ \label{eq:cross-terms-zero}
 \end{equation}
-Using $\widehat g_k-g_k=N^{-1}\sum_{i=1}^N\xi_{k,i}$ and expanding the squared
-norm gives
-\begin{align}
-  &\E[\|\widehat g_k-g_k\|_2^2\mid\mathcal F_{k-1}]
-  \nonumber\\
-  &\quad=
-  \frac1{N^2}\sum_{i=1}^N
-  \E[\|\xi_{k,i}\|_2^2\mid\mathcal F_{k-1}]
-  \nonumber\\
-  &\qquad+
-  \frac1{N^2}\sum_{i\ne j}
-  \E[\xi_{k,i}^\top\xi_{k,j}\mid\mathcal F_{k-1}].
-  \label{eq:mse-expand-sums}
-\end{align}
-For $i\ne j$, conditional independence and
-Equation~\eqref{eq:centered-unit} imply
-\begin{align}
-  \E[\xi_{k,i}^\top\xi_{k,j}\mid\mathcal F_{k-1}]
-  &=\E[\xi_{k,i}\mid\mathcal F_{k-1}]^\top
-    \E[\xi_{k,j}\mid\mathcal F_{k-1}]
-  \nonumber\\
-  &=0.
-  \label{eq:cross-terms-zero}
-\end{align}
-The remaining diagonal terms are identical, so
+The diagonal terms are identical, so
 \begin{equation}
-  \E[\|\widehat g_k-g_k\|_2^2\mid\mathcal F_{k-1}]
-  =\frac1N
-  \E_Q[\|W_kf_k-g_k\|_2^2\mid\mathcal F_{k-1}].
-  \label{eq:mse-single-unit}
+ \E\|\widehat g_k-g_k\|_2^2
+ =\frac1N\E_Q\|W_kf_k-g_k\|_2^2.
+ \label{eq:mse-single-unit}
 \end{equation}
-Expanding the last squared norm yields
+Expanding the remaining squared norm yields
 \begin{align}
-  &\E_Q[\|W_kf_k-g_k\|_2^2\mid\mathcal F_{k-1}]
-  \nonumber\\
-  &\quad=
-  \E_Q[W_k^2\|f_k\|_2^2\mid\mathcal F_{k-1}]
-  -2g_k^\top\E_Q[W_kf_k\mid\mathcal F_{k-1}]
-  +\|g_k\|_2^2
-  \nonumber\\
-  &\quad=
-  \E_Q[W_k^2\|f_k\|_2^2\mid\mathcal F_{k-1}]
-  -\|g_k\|_2^2,
-  \label{eq:mse-expand-unit}
+ \E_Q\|W_kf_k-g_k\|_2^2
+ &=\E_Q[W_k^2\|f_k\|_2^2]
+ -2g_k^\top\E_Q[W_kf_k]
+ +\|g_k\|_2^2
+ \nonumber\\
+ &=\E_Q[W_k^2\|f_k\|_2^2]-\|g_k\|_2^2,
+ \label{eq:mse-expand-unit}
 \end{align}
-where the last equality uses
-Equation~\eqref{eq:conditional-gradient-identity}.  Combining
-Equations~\eqref{eq:mse-single-unit} and \eqref{eq:mse-expand-unit} proves
-Equation~\eqref{eq:rho-gradient-mse}.
-
-Finally, $\|f_k(z)\|_2\le\|f_k\|_\infty$ for every $z$, so
+where the last equality uses Equation~\eqref{eq:conditional-gradient-identity}. Combining Equations~\eqref{eq:mse-single-unit} and \eqref{eq:mse-expand-unit} gives
+\begin{equation}
+ \E\|\widehat g_k-g_k\|_2^2
+ =\frac1N\left\{\E_Q[W_k^2\|f_k\|_2^2]-\|g_k\|_2^2\right\}.
+ \label{eq:rho-gradient-mse}
+\end{equation}
+Finally, $\|f_k(z)\|_2\le\|f_k\|_\infty$ and $\E_Q[W_k^2]=\rho_k^{-1}$ imply
 \begin{align}
-  \E[\|\widehat g_k-g_k\|_2^2\mid\mathcal F_{k-1}]
-  &\le\frac1N
-    \E_Q[W_k^2\|f_k\|_2^2\mid\mathcal F_{k-1}]
-  \nonumber\\
-  &\le\frac{\|f_k\|_\infty^2}{N}
-    \E_Q[W_k^2\mid\mathcal F_{k-1}]
-  \nonumber\\
-  &=\frac{\|f_k\|_\infty^2}{N\rho_k}.
-  \label{eq:mse-rho-bound-proof}
+ \E\|\widehat g_k-g_k\|_2^2
+ &\le\frac1N\E_Q[W_k^2\|f_k\|_2^2]
+ \nonumber\\
+ &\le\frac{\|f_k\|_\infty^2}{N}\E_Q[W_k^2]
+ \nonumber\\
+ &=\frac{\|f_k\|_\infty^2}{N\rho_k},
+ \label{eq:mse-rho-bound-proof}
 \end{align}
-This proves Equation~\eqref{eq:rho-gradient-mse-bound}.
+which proves Equation~\eqref{eq:rho-gradient-mse-bound}.
 
 \subsection{Proof of Lemma~\ref{lem:rho-gradient-reliability}}
 
-Apply Markov's inequality to the nonnegative random variable
-$\|\widehat g_k-g_k\|_2^2$:
+Apply Markov's inequality to the nonnegative random variable $\|\widehat g_k-g_k\|_2^2$:
 \begin{align}
-  &\Pr\!\left(
-    \|\widehat g_k-g_k\|_2
-    >\frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}
-    \,\middle|\mathcal F_{k-1}
-  \right)
-  \nonumber\\
-  &\quad=
-  \Pr\!\left(
-    \|\widehat g_k-g_k\|_2^2
-    >\frac{\|f_k\|_\infty^2}{\delta N\rho_k}
-    \,\middle|\mathcal F_{k-1}
-  \right)
-  \nonumber\\
-  &\quad\le
-  \frac{
-    \E[\|\widehat g_k-g_k\|_2^2\mid\mathcal F_{k-1}]
-  }{
-    \|f_k\|_\infty^2/(\delta N\rho_k)
-  }
-  \nonumber\\
-  &\quad\le\delta,
-  \label{eq:markov-rho-proof}
+ &\Pr\left(
+ \|\widehat g_k-g_k\|_2
+ >\frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}
+ \right)
+ \nonumber\\
+ &\quad=
+ \Pr\left(
+ \|\widehat g_k-g_k\|_2^2
+ >\frac{\|f_k\|_\infty^2}{\delta N\rho_k}
+ \right)
+ \nonumber\\
+ &\quad\le
+ \frac{\E\|\widehat g_k-g_k\|_2^2}{\|f_k\|_\infty^2/(\delta N\rho_k)}
+ \nonumber\\
+ &\quad\le\delta,
+ \label{eq:markov-rho-proof}
 \end{align}
-where the final line uses
-Equation~\eqref{eq:rho-gradient-mse-bound}.  Taking complements proves
-Equation~\eqref{eq:rho-gradient-concentration}.
+where the last line uses Equation~\eqref{eq:rho-gradient-mse-bound}. Taking complements proves Equation~\eqref{eq:rho-gradient-concentration}.
 
 \subsection{Proof of Lemma~\ref{lem:gradient-error-progress}}
 
-Let $\|\widetilde g-g\|_2\le\varepsilon$.  Smoothness gives, for every
-$\alpha\ge0$,
+Let $\|\widehat g-g\|_2\le\varepsilon$. Smoothness gives, for every $\alpha\ge0$,
 \begin{equation}
-  J(\theta+\alpha\widetilde g)-J(\theta)
-  \ge
-  \alpha g^\top\widetilde g
-  -\frac{L\alpha^2}{2}\|\widetilde g\|_2^2.
-  \label{eq:smoothness-start}
+ J(\theta+\alpha\widehat g)-J(\theta)
+ \ge
+ \alpha g^\top\widehat g
+ -\frac{L\alpha^2}{2}\|\widehat g\|_2^2.
+ \label{eq:smoothness-start}
 \end{equation}
-The inner product is bounded from below as follows:
+The inner product satisfies
 \begin{align}
-  g^\top\widetilde g
-  &=\|\widetilde g\|_2^2
-    +(g-\widetilde g)^\top\widetilde g
-  \nonumber\\
-  &\ge\|\widetilde g\|_2^2
-    -\|g-\widetilde g\|_2\|\widetilde g\|_2
-  \nonumber\\
-  &\ge\|\widetilde g\|_2
-    (\|\widetilde g\|_2-\varepsilon).
-  \label{eq:reliable-inner-product}
+ g^\top\widehat g
+ &=\|\widehat g\|_2^2+(g-\widehat g)^\top\widehat g
+ \nonumber\\
+ &\ge\|\widehat g\|_2^2-\|g-\widehat g\|_2\|\widehat g\|_2
+ \nonumber\\
+ &\ge\|\widehat g\|_2(\|\widehat g\|_2-\varepsilon).
+ \label{eq:reliable-inner-product}
 \end{align}
-Substituting Equation~\eqref{eq:reliable-inner-product} into
-Equation~\eqref{eq:smoothness-start} gives
+Substituting Equation~\eqref{eq:reliable-inner-product} into Equation~\eqref{eq:smoothness-start} gives
 \begin{align}
-  J(\theta+\alpha\widetilde g)-J(\theta)
-  &\ge
-  \alpha\|\widetilde g\|_2
-  (\|\widetilde g\|_2-\varepsilon)
-  \nonumber\\
-  &\quad-
-  \frac{L\alpha^2}{2}\|\widetilde g\|_2^2.
-  \label{eq:reliable-quadratic}
+ J(\theta+\alpha\widehat g)-J(\theta)
+ &\ge
+ \alpha\|\widehat g\|_2(\|\widehat g\|_2-\varepsilon)
+ -\frac{L\alpha^2}{2}\|\widehat g\|_2^2.
+ \label{eq:reliable-quadratic}
 \end{align}
-For $\widetilde g\ne0$, the derivative of the right-hand side is
+For $\widehat g\ne0$, the derivative of the right-hand side is
 \begin{equation}
-  \|\widetilde g\|_2
-  (\|\widetilde g\|_2-\varepsilon)
-  -L\alpha\|\widetilde g\|_2^2.
-  \label{eq:reliable-quadratic-derivative}
+ \|\widehat g\|_2(\|\widehat g\|_2-\varepsilon)
+ -L\alpha\|\widehat g\|_2^2.
+ \label{eq:reliable-quadratic-derivative}
 \end{equation}
-Its nonnegative maximizer is
-$\alpha=L^{-1}(1-\varepsilon/\|\widetilde g\|_2)_+$; when
-$\widetilde g=0$, both the chosen step and the claimed lower bound are zero.
-Substituting the maximizer into Equation~\eqref{eq:reliable-quadratic} gives
-Equation~\eqref{eq:gradient-error-progress}.
+Its nonnegative maximizer is $\alpha=L^{-1}(1-\varepsilon/\|\widehat g\|_2)_+$. When $\widehat g=0$, both the chosen step and the claimed lower bound are zero. Substituting the maximizer into Equation~\eqref{eq:reliable-quadratic} proves Equation~\eqref{eq:gradient-error-progress}.
 
 \subsection{Proof of Theorem~\ref{thm:permissive-reliability}}
 
 Lemma~\ref{lem:rho-gradient-reliability} shows that the event
-$\|\widehat g_k-g_k\|_2\le r_k(\delta)$ has conditional probability at least
-$1-\delta$.  On that event, apply
-Lemma~\ref{lem:gradient-error-progress} with
-$\theta=\theta_k$, $\widetilde g=\widehat g_k$,
-$\varepsilon=r_k(\delta)$, and $L=L_k$.  The resulting inequality is exactly
-Equation~\eqref{eq:permissive-reliability}.
-
-\subsection{Expected-risk form used for estimator comparison}
-
-For any direction $\widetilde g$ and any $0<\eta\le1/L$, smoothness gives
 \begin{equation}
-  J(\theta+\eta\widetilde g)-J(\theta)
-  \ge
-  \eta g^\top\widetilde g
-  -\frac{L\eta^2}{2}\|\widetilde g\|_2^2.
-  \label{eq:fixed-step-smoothness}
+ \|\widehat g_k-g_k\|_2
+ \le
+ \frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}
+ \label{eq:theorem-reliability-event}
+\end{equation}
+has probability at least $1-\delta$. On this event, apply Lemma~\ref{lem:gradient-error-progress} with $\theta=\theta_k$, $\widehat g=\widehat g_k$, $\varepsilon=\|f_k\|_\infty/\sqrt{\delta N\rho_k}$, and $L=L_k$. The resulting inequality is exactly Equation~\eqref{eq:permissive-reliability}.
+
+\subsection{Risk comparison for a general modification}
+
+Let $\phi_k:\mathcal Z\to\mathbb R^d$ be integrable and define $\widehat g_{\phi,k}=N^{-1}\sum_i\phi_k(Z_i)$. Add and subtract its expectation:
+\begin{equation}
+ \widehat g_{\phi,k}-g_k
+ =\{\widehat g_{\phi,k}-\E_Q[\phi_k]\}+b_{\phi,k}.
+ \label{eq:modified-bias-split}
+\end{equation}
+Squaring and taking expectation gives
+\begin{align}
+ m_{\phi,k}
+ &=\E\|\widehat g_{\phi,k}-\E_Q[\phi_k]\|_2^2
+ +\|b_{\phi,k}\|_2^2
+ \nonumber\\
+ &\quad+2b_{\phi,k}^\top\E[\widehat g_{\phi,k}-\E_Q[\phi_k]]
+ \nonumber\\
+ &=\frac{v_{\phi,k}}{N}+\|b_{\phi,k}\|_2^2,
+ \label{eq:modified-risk-proof}
+\end{align}
+where the cross term is zero and independence gives the variance factor $1/N$. For the unmodified estimator, Equation~\eqref{eq:conditional-gradient-identity} gives zero bias, so $m_k=v_k/N$. Therefore
+\begin{align}
+ m_{\phi,k}<m_k
+ &\iff
+ \|b_{\phi,k}\|_2^2+\frac{v_{\phi,k}}{N}<\frac{v_k}{N}
+ \nonumber\\
+ &\iff
+ v_k-v_{\phi,k}>N\|b_{\phi,k}\|_2^2,
+ \label{eq:crossover-proof}
+\end{align}
+which proves Proposition~\ref{prop:clipping-crossover}.
+
+It remains to connect total risk to the expected policy-improvement certificate used in Corollary~\ref{cor:clipping-needed}. For any random estimate $\widehat g$ of $g_k$ and any $0<\eta_k\le1/L_k$, smoothness gives
+\begin{equation}
+ J(\theta_k+\eta_k\widehat g)-J(\theta_k)
+ \ge
+ \eta_k g_k^\top\widehat g
+ -\frac{L_k\eta_k^2}{2}\|\widehat g\|_2^2.
+ \label{eq:fixed-step-smoothness}
 \end{equation}
 The polarization identity gives
 \begin{equation}
-  2g^\top\widetilde g
-  =\|g\|_2^2+\|\widetilde g\|_2^2
-   -\|\widetilde g-g\|_2^2.
-  \label{eq:polarization}
+ 2g_k^\top\widehat g
+ =\|g_k\|_2^2+\|\widehat g\|_2^2-\|\widehat g-g_k\|_2^2.
+ \label{eq:polarization}
 \end{equation}
-Substitution yields
+Substituting and using $\eta_k\le1/L_k$ yields
 \begin{align}
-  J(\theta+\eta\widetilde g)-J(\theta)
-  &\ge
-  \frac{\eta}{2}
-  \{\|g\|_2^2-\|\widetilde g-g\|_2^2\}
-  \nonumber\\
-  &\quad+
-  \frac{\eta}{2}(1-L\eta)\|\widetilde g\|_2^2.
-  \label{eq:fixed-step-polarized}
+ J(\theta_k+\eta_k\widehat g)-J(\theta_k)
+ &\ge
+ \frac{\eta_k}{2}\{\|g_k\|_2^2-\|\widehat g-g_k\|_2^2\}
+ \nonumber\\
+ &\quad+\frac{\eta_k}{2}(1-L_k\eta_k)\|\widehat g\|_2^2
+ \nonumber\\
+ &\ge
+ \frac{\eta_k}{2}\{\|g_k\|_2^2-\|\widehat g-g_k\|_2^2\}.
+ \label{eq:fixed-step-polarized}
 \end{align}
-Because $\eta\le1/L$, the last term is nonnegative.  Dropping it, taking
-conditional expectation, and setting
-$m_k^e=\E[\|\widehat g_k^e-g_k\|_2^2\mid\mathcal F_{k-1}]$ proves
-Equation~\eqref{eq:expected-risk-progress}.
+Taking expectation gives a positive lower bound exactly when the estimator risk is smaller than $\|g_k\|_2^2$. Applying this statement to $\widehat g_{\phi,k}$ and $\widehat g_k$ proves Corollary~\ref{cor:clipping-needed}.
 
 \subsection{Intact prompt groups}
 
-Suppose $m$ prompts are independent and each prompt has $G$ conditionally
-independent responses.  Keep each prompt group intact and define its contribution
-by $\Xi_{k,i}:=G^{-1}\sum_{g=1}^G W_{k,ig}f_{k,ig}$.  A leave-one-out baseline is
-admissible because it excludes the focal response; conditional on the prompt and
-the remaining responses, the focal score still has mean zero.  Thus
-$\E[\Xi_{k,i}\mid\mathcal F_{k-1}]=g_k$.
+Suppose $M$ prompts are independent and each prompt has $G$ conditionally independent responses. Keep each prompt group intact and define its contribution by $\Xi_{k,i}:=G^{-1}\sum_{j=1}^G W_{k,ij}f_{k,ij}$. A leave-one-out baseline is admissible because it excludes the focal response. Conditional on the prompt and the remaining responses, the focal score still has mean zero. Hence $\E[\Xi_{k,i}]=g_k$.
 
 Jensen's inequality gives
 \begin{align}
-  \|\Xi_{k,i}\|_2^2
-  &=\left\|\frac1G\sum_{g=1}^G W_{k,ig}f_{k,ig}\right\|_2^2
-  \nonumber\\
-  &\le\frac1G\sum_{g=1}^G
-  W_{k,ig}^2\|f_{k,ig}\|_2^2.
-  \label{eq:group-jensen}
+ \|\Xi_{k,i}\|_2^2
+ &=\left\|\frac1G\sum_{j=1}^G W_{k,ij}f_{k,ij}\right\|_2^2
+ \nonumber\\
+ &\le\frac1G\sum_{j=1}^G W_{k,ij}^2\|f_{k,ij}\|_2^2.
+ \label{eq:group-jensen}
 \end{align}
-Repeating the sample-mean calculation across the $m$ independent groups gives
+Repeating the sample-mean calculation across the $M$ independent prompt groups gives
 \begin{align}
-  \E\!\left[
-    \left\|
-      \frac1m\sum_{i=1}^m\Xi_{k,i}-g_k
-    \right\|_2^2
-    \middle|\mathcal F_{k-1}
-  \right]
-  &\le\frac1m\E[\|\Xi_{k,1}\|_2^2\mid\mathcal F_{k-1}]
-  \nonumber\\
-  &\le\frac{\|f_k\|_\infty^2}{m\rho_k}.
-  \label{eq:group-rho-bound}
+ \E\left\|\frac1M\sum_{i=1}^M\Xi_{k,i}-g_k\right\|_2^2
+ &\le\frac1M\E\|\Xi_{k,1}\|_2^2
+ \nonumber\\
+ &\le\frac{\|f_k\|_\infty^2}{M\rho_k}.
+ \label{eq:group-rho-bound}
 \end{align}
-Markov's inequality then gives the same conclusion as
-Lemma~\ref{lem:rho-gradient-reliability} with the independent-unit count $N$
-replaced by the number of prompt groups $m$.
-
-\subsection{Proof of Proposition~\ref{prop:clipping-crossover}}
-
-For the permissive estimator,
-$\E[Z_k^{\mathrm P}\mid\mathcal F_{k-1}]=g_k$.  Conditional independence gives
-\begin{equation}
-  m_k^{\mathrm P}
-  =\E\!\left[
-    \left\|
-      \frac1N\sum_{i=1}^N
-      (Z_{k,i}^{\mathrm P}-g_k)
-    \right\|_2^2
-    \middle|\mathcal F_{k-1}
-  \right]
-  =\frac{v_k^{\mathrm P}}{N}.
-  \label{eq:permissive-risk-proof}
-\end{equation}
-For the clipped estimator, add and subtract its conditional mean:
-\begin{equation}
-  \widehat g_k^{\mathrm C}-g_k
-  =
-  (\widehat g_k^{\mathrm C}-\E\widehat g_k^{\mathrm C})
-  +b_k^{\mathrm C}.
-  \label{eq:clipped-bias-split}
-\end{equation}
-Squaring and taking conditional expectation gives
-\begin{align}
-  m_k^{\mathrm C}
-  &=\E\|\widehat g_k^{\mathrm C}-\E\widehat g_k^{\mathrm C}\|_2^2
-    +\|b_k^{\mathrm C}\|_2^2
-  \nonumber\\
-  &\quad+
-  2(b_k^{\mathrm C})^\top
-  \E[\widehat g_k^{\mathrm C}-\E\widehat g_k^{\mathrm C}]
-  \nonumber\\
-  &=\frac{v_k^{\mathrm C}}{N}+\|b_k^{\mathrm C}\|_2^2,
-  \label{eq:clipped-risk-proof}
-\end{align}
-where the cross term is zero.  Therefore
-\begin{align}
-  m_k^{\mathrm C}<m_k^{\mathrm P}
-  &\iff
-  \|b_k^{\mathrm C}\|_2^2+\frac{v_k^{\mathrm C}}{N}
-  <\frac{v_k^{\mathrm P}}{N}
-  \nonumber\\
-  &\iff
-  v_k^{\mathrm P}-v_k^{\mathrm C}
-  >N\|b_k^{\mathrm C}\|_2^2.
-  \label{eq:crossover-proof}
-\end{align}
-This is Equation~\eqref{eq:crossover}.
-
-\subsection{Proof of Corollary~\ref{cor:clipping-needed}}
-
-Equation~\eqref{eq:expected-risk-progress} is positive for estimator $e$ exactly
-when $m_k^e<\|g_k\|_2^2$.  It is therefore positive for the clipped estimator
-and nonpositive for the permissive estimator exactly when
-$m_k^{\mathrm C}<\|g_k\|_2^2\le m_k^{\mathrm P}$, which is
-Equation~\eqref{eq:clipping-needed}.
+Markov's inequality then gives the same form as Lemma~\ref{lem:rho-gradient-reliability} with the number of independent prompts $M$ in place of the number of responses $N$.
 
 \subsection{Finite-moment relaxation}
 
-Equation~\eqref{eq:rho-gradient-mse} requires only
-$\E_Q[W_k^2\|f_k\|_2^2\mid\mathcal F_{k-1}]<\infty$.  The bounded contribution
-condition is used solely to obtain the conventional importance-sampling form in
-Equation~\eqref{eq:rho-gradient-mse-bound}.  More generally, define
-$M_{2,k}:=\E_Q[W_k^2\|f_k\|_2^2]/\E_Q[W_k^2]$.  The same calculation gives
-$\E\|\widehat g_k-g_k\|_2^2\le M_{2,k}/(N\rho_k)$.  We use the bounded form in
-the main text because it isolates normalized ESS as the mismatch-dependent
-factor.
+The exact equality in Equation~\eqref{eq:rho-gradient-mse} requires only $\E_Q[W_k^2\|f_k\|_2^2]<\infty$. The bounded-contribution condition is used solely to obtain the standard form $\|f_k\|_\infty^2/(N\rho_k)$. More generally, define $M_{2,k}:=\E_Q[W_k^2\|f_k\|_2^2]/\E_Q[W_k^2]$. The same calculation gives $\E\|\widehat g_k-g_k\|_2^2\le M_{2,k}/(N\rho_k)$. We use the bounded form in the main text to match conventional importance-sampling notation and make the role of normalized ESS explicit.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
