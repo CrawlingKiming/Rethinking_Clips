@@ -4,6 +4,7 @@
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{booktabs}
 \usepackage{graphicx}
+\graphicspath{{./}{../}}
 \usepackage{float}
 \IfFileExists{microtype.sty}{\usepackage{microtype}}{}
 \usepackage{xcolor}
@@ -446,12 +447,22 @@ $\widehat\rho$ into Theorem~\ref{thm:ess-clipping} is a diagnostic rather than a
 finite-sample confidence guarantee.  We prespecify $0.1$ as a conservative
 operational trigger and test it empirically.
 
+Section~\ref{sec:simulation} measures adjacent reliability diagnostics with an
+exact population oracle and then evaluates the observable trigger in an
+RLVR-style optimization loop.
+
 \section{Contextual-bandit validation of the theory}
 \label{sec:simulation}
 
-The contextual bandit exposes the exact population gradient and reward.  We use
-it to test whether ESS predicts finite-batch gradient error, harmful policy
-steps, and the MSE crossover between permissive and masked estimators.
+This study probes the explanation developed in Section~\ref{sec:theory}.  It asks
+whether ESS predicts finite-batch error, whether that error is associated with
+policy improvement, and whether masked and permissive gradient estimators
+exchange their MSE ordering as effective support deteriorates.  The first two
+questions are adjacent diagnostics for the objective-level mechanism; the third
+is explicitly a supporting diagnostic rather than a sufficient rule for
+choosing an update.  The reported study does not measure empirical coverage of
+Equation~\eqref{eq:current-ess-certificate} or directly evaluate the
+confidence-bound crossover in Equation~\eqref{eq:objective-crossover}.
 
 \subsection{Testbed and oracle}
 
@@ -466,17 +477,14 @@ statistical mechanism of interest.
 
 The optimization loop follows grouped RLVR
 \citep{shao2024deepseekmath,yu2025dapo}.  Each rollout samples 128 prompts and
-16 responses per prompt, computes leave-one-out advantages, and supplies one
-disjoint epoch of 16 sequential minibatch updates.  Ratios and ESS are
-recomputed before every update, and a new rollout is collected afterward.
-Thus all 16 updates avoid response reuse.  The prompts are sampled without
-replacement from the finite population, however, so the loop matches the
-theorem's disjoint one-pass structure but not its conditional-i.i.d.
-assumption literally.  Frozen-policy redraws provide an independent estimator
-diagnostic.  A separate scaled trajectory uses 512 prompts per rollout and four
-optimization epochs to test repeated-data robustness beyond the theorem.  We
-run 100 paired replications; Appendix~\ref{app:bandit} gives the compact
-protocols and full result tables.
+16 responses per prompt, computes leave-one-out advantages, and supplies four
+epochs of 16 sequential minibatch updates.  Ratios and ESS are recomputed before
+every update, and a new rollout is collected only afterward.  This repeated-epoch
+trajectory is a stress test beyond the one-epoch freshness condition in
+Theorem~\ref{thm:current-ess}; only the first traversal has the required disjoint
+freshness, and the frozen-policy redraws provide an independent estimator
+diagnostic.  We run 100 paired replications; Appendix~\ref{app:bandit}
+gives the compact protocol and full result tables.
 
 \subsection{The predicted regime change appears}
 
@@ -488,7 +496,7 @@ while matched oracle-gradient steps improve reward.  ESS therefore identifies
 estimation failure rather than the absence of an improving direction.
 
 Frozen-policy redraws then measure the gradient-MSE decomposition in
-Equation~\eqref{eq:crossover}.  With the fixed $N=512$ diagnostic, the
+Theorem~\ref{thm:crossover}.  With the fixed $N=512$ diagnostic, the
 sequence-level mask has
 lower MSE below population ESS $0.4$, while the permissive estimator has lower
 MSE above it.  A disjoint calibration split places the crossover at $0.42$ and
@@ -522,7 +530,7 @@ masked.  The sparse trigger therefore captures the low-ESS side of the
 
 The controlled study therefore supports the empirical claim that ESS tracks a
 reliability transition relevant to the sequence-level masking analogue.  It
-does not by itself establish the one-epoch population bound or transfer the result
+does not by itself establish the objective certificate or transfer the result
 to token-local PPO, CISPO, or full-sequence truncation.  The next section asks
 whether a related operational transition is visible in language-model RLVR,
 where the population gradient cannot be enumerated.
@@ -530,9 +538,9 @@ where the population gradient cannot be enumerated.
 \section{Language-model evidence for the regime change}
 \label{sec:llm-experiments}
 
-The contextual-bandit study provides controlled one-epoch evidence under an
-exact oracle, together with a separate repeated-epoch stress test outside the
-theorem.  It does not directly test the confidence certificates.
+The contextual-bandit study provides controlled evidence for adjacent
+diagnostics under an exact oracle, but its repeated-epoch trajectory is outside
+the one-epoch theorem and does not directly test the confidence certificates.
 This section tests its operational implication in language-model training,
 where neither the population gradient nor its MSE is observable.  If ESS marks
 the predicted reliability transition, a conservative intervention should retain
@@ -542,15 +550,14 @@ at language-model scale.
 
 \subsection{A minimal intervention}
 
-The supplied run matrix evaluates $0.1$ as a prespecified heuristic:
+At every policy update, we compute sequence ESS from the raw ratios before any
+masking or truncation.  All methods use the same valid sequences and minibatch
+construction.  We then evaluate $0.1$ as a prespecified heuristic:
 when $\widehat\rho\ge0.1$, the method retains the permissive update; when
 $\widehat\rho<0.1$, it activates the safeguard associated with the comparison.
-The permissive branch in the main hybrids is a CISPO/GPD-style detached token
-coefficient with cap 3.  The low-ESS branch applies conventional GRPO masking,
-Clip-Higher \citep{yu2025dapo}, or the divergence rule of DPPO
-\citep{qi2026dppo}.  This coefficient cap is dense and retains token scores; it
-is not the full-sequence scalar truncation analyzed in
-Section~\ref{sec:ratio-truncation}.
+We test conventional GRPO clipping, Clip-Higher \citep{yu2025dapo}, the
+divergence constraint of DPPO \citep{qi2026dppo}.  We also pair conventional
+clipping with a permissive TIS update whose ratio cap is 3.
 
 \begin{equation}
   \widehat g_{\mathrm{LLM}}
@@ -560,14 +567,11 @@ Section~\ref{sec:ratio-truncation}.
   \end{cases}
   \label{eq:llm-gate}
 \end{equation}
-The run matrix contains two kinds of evidence.  The DPPO and cap-3 panels are
-with-versus-without-gate comparisons.  The GRPO and Clip-Higher panels instead
-compare an always-masked baseline with a cap-3-based ESS hybrid; no
-identical-loss ungated/gated pair was run for those panels.  The trigger is
-computed from raw sequence ratios for the GRPO-band and DPPO hybrids, but the
-supplied Clip-Higher/cap-3 hybrid uses shaped post-cap ESS.  We report these
-implementation differences explicitly because only raw sequence ESS matches
-$\widehat\rho$ in Equation~\eqref{eq:sample-ess}.
+Each conditional run is compared with its always-permissive and
+always-protected counterparts.  This pairing tests the regime prediction while
+holding the safeguard itself fixed.  The threshold is set before the reported
+runs and is shared across update rules, providing one observable approximation
+to the low-support regime.
 
 \subsection{Evaluation protocol}
 
@@ -582,13 +586,11 @@ them as trajectory-level evidence.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/curves/overall.pdf}
-  \caption{Testing the predicted regime change in Qwen3-30B-A3B RLVR.  The
-  legend reports step-200 AIME-2024 mean@16.  Panels (a) and (b) compare
-  always-masked GRPO/Clip-Higher baselines with CISPO-cap-3 ESS hybrids and are
-  not identical-loss gate ablations.  Panels (c) and (d) are direct gate
-  comparisons for DPPO and the cap-3 base, respectively.  The same cap-3 plus
-  Clip-Higher hybrid appears in panels (b) and (d), so those panels are not
-  independent comparisons.}
+  \caption{Testing the predicted regime change in Qwen3-30B-A3B RLVR.  Each
+  panel compares a static update rule with the corresponding ESS-conditional
+  variant using the same threshold, $0.1$.  The legend reports step-200
+  AIME-2024 mean@16.  Conditional protection improves the endpoint under GRPO,
+  Clip-Higher, and DPPO and prevents the late collapse of TIS 3.}
   \label{fig:llm-main}
 \end{figure}
 
@@ -596,51 +598,45 @@ them as trajectory-level evidence.
 \centering
 \small
 \caption{Step-200 AIME-2024 mean@16 read from the reported trajectories.
-Difference is the hybrid score minus the displayed baseline in percentage
-points; for the first two rows it is a recipe difference, not an isolated gate
-effect.}
+Gain is the ESS-conditional score minus its static counterpart in percentage points.}
 \label{tab:llm-main}
-\begin{tabular}{@{}p{0.55\linewidth}rrr@{}}
+\begin{tabular}{lrrr}
 \toprule
-Displayed comparison & Baseline & ESS hybrid & Difference \\
+Update family & Static & ESS conditional & Gain \\
 \midrule
-GRPO mask vs. cap-3$\rightarrow$GRPO & $26.2$ & $38.5$ & $+12.3$ \\
-Clip-Higher vs. cap-3$\rightarrow$Clip-Higher & $37.9$ & $44.8$ & $+6.9$ \\
-DPPO without vs. with gate & $30.4$ & $39.2$ & $+8.8$ \\
-CISPO cap 3 without vs. with safeguard & $0.4$ & $44.8$ & $+44.4$ \\
+GRPO, band $0.2/0.2$ & $26.2$ & $38.5$ & $+12.3$ \\
+GRPO Clip-Higher, band $0.2/0.28$ & $37.9$ & $44.8$ & $+6.9$ \\
+DPPO & $30.4$ & $39.2$ & $+8.8$ \\
+TIS 3 & $0.4$ & $44.8$ & $+44.4$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \subsection{Observed behavior}
 
-Every displayed hybrid has a higher endpoint than its displayed baseline.  The
-direct gate comparisons are the most informative: DPPO increases from $30.4\%$
-to $39.2\%$, while the ungated CISPO-style cap-3 run improves early but finishes
-at $0.4\%$ and its safeguarded counterpart finishes at $44.8\%$.  The GRPO and
-Clip-Higher differences are recipe-level evidence because their permissive
-branches and normalization do not match the always-masked baselines.  Moreover,
-the $44.8\%$ hybrid is reused in the Clip-Higher and cap-3 panels.  The results
-are therefore consistent with the regime hypothesis but do not supply four
-independent causal gate ablations.
+Figure~\ref{fig:llm-main} gives a consistent trajectory-level result.  The
+ESS-conditional runs improve the GRPO, Clip-Higher, and DPPO endpoints by
+$6.9$ to $12.3$ percentage points.  The TIS comparison isolates the stability
+failure most clearly: the static TIS 3 run improves early but finishes at
+$0.4\%$, whereas the conditional run finishes at $44.8\%$.  The consistency
+across safeguards supports ESS as a shared reliability coordinate.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/gate/overall.pdf}
-  \caption{When the ESS-conditioned intervention activates.  Logged normalized
-  sequence ESS decreases during training (left), while the fraction of masked
-  or constrained updates increases (right).  Raw ESS is used by some hybrids
-  and shaped post-cap ESS by the cap-3 plus Clip-Higher hybrid, so the panel is
-  an operational timing diagnostic rather than a direct plug-in test of
-  population $\rho_k$.}
+  \caption{When the ESS-conditioned intervention activates.  Normalized
+  sequence ESS decreases during training (left), while the fraction of clipped
+  updates increases (right).  The rule therefore applies little protection
+  while effective support is broad and progressively activates each safeguard
+  as support deteriorates.}
   \label{fig:llm-gate-action}
 \end{figure}
 
-The temporal ordering in Figure~\ref{fig:llm-gate-action} is consistent with an
-adaptive rather than always-on intervention: protection increases as logged
-ESS deteriorates.  From one trajectory per configuration, however, it does not
-isolate ESS from every time-varying explanation.  Detailed response-length,
-entropy, and CISPO-cap diagnostics are reported in
+The temporal ordering in Figure~\ref{fig:llm-gate-action} is inconsistent with
+adding a fixed amount of regularization throughout training: the intervention
+changes as sample ESS deteriorates.  It does not, from one trajectory per
+configuration, isolate ESS from every time-varying regularization explanation.
+Detailed response-length, entropy, and TIS diagnostics are reported in
 Appendix~\ref{app:llm-diagnostics}.
 
 \section{Conclusion}
@@ -650,23 +646,23 @@ represent the current learner.  The theory follows one reward objective across
 that change.  Raw full-sequence importance sampling satisfies
 $L_Q(\theta)=J(\theta)$ exactly, while current sequence ESS controls the gap
 between its unused-minibatch estimate and population improvement over the
-rollout policy and isolates the sequence-ratio amplification factor in the
-singleton raw-gradient MSE and an intact-group upper bound.  Population
-smoothness then converts the full current-gradient error into
-a finite-update reward bound.  For plain gradient ascent, the resulting
-condition is explicit: expected reward progress is positive when current
-gradient MSE is smaller than squared population-gradient signal.
+rollout policy.  Smoothness then certifies the sampled gain of the optimizer's
+realized displacement after the current-policy certificate selects the
+estimator regime.  Thus current ESS supplies the population-reliability
+criterion, while smoothness supplies the local optimization conclusion.  This
+argument needs neither a bounded score norm nor a global argmax assumption.
 
 The intervention analysis also separates three objects that are often called
 clipping.  PPO/GRPO masks selected token gradients, CISPO caps detached token
 coefficients while retaining their scores, and full-sequence truncation changes
 the scalar importance estimator.  Only full-sequence truncation directly
 inherits the bounded conservative objective certificate.  Its comparison with
-the raw estimator is explicit: the truncated certificate is larger when the
-reduction in confidence radius exceeds the sampled reward signal it discards.
-The contextual-bandit and language-model trajectories support sample ESS as an
-operational diagnostic.  A direct next test is empirical coverage of the
-finite-update bound and the raw-versus-full-sequence-truncated confidence
+the raw estimator is explicit: truncation is preferable when the reduction in
+confidence radius exceeds the sampled reward signal it discards.  The
+contextual-bandit and language-model trajectories show that sample ESS is an
+informative operational diagnostic, but they do not turn the plug-in threshold
+into a universal guarantee.  Direct tests should next measure empirical
+coverage of the current-policy bound and the raw-versus-truncated confidence
 crossover on a strictly disjoint one-epoch traversal.
 
 \appendix
@@ -705,7 +701,7 @@ Rollout policy $Q$ & Old policy & Policy that generated the responses \\
 Current policy $P_\theta$ & Updated policy & Policy used for the minibatch update \\
 Sequence ratio & Importance ratio & $P_\theta(Y_{1:16}\mid x)/Q(Y_{1:16}\mid x)$ \\
 Rollout batch & Grouped responses & 128 prompts, 16 responses per prompt \\
-Optimization phase & Minibatch sequence & One epoch of 16 updates, then a new rollout \\
+Optimization phase & Minibatch sequence & Four epochs of 16 updates, then a new rollout \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -812,34 +808,27 @@ in Equation~\eqref{eq:optdigits-gradient}.
 \fbox{\begin{minipage}{0.92\linewidth}
 \small
 \textbf{Input:} initial policy $\theta_0$; eight rollouts; 128 prompts per
-rollout; $G=16$ responses per prompt; 16 minibatches; one optimization epoch.
+rollout; $G=16$ responses per prompt; 16 minibatches; four optimization epochs.
 \begin{enumerate}
-  \item Set the rollout policy $Q\leftarrow P_\theta$.  Sample prompts without
-  replacement from the finite population and sample grouped responses, then
-  compute verifier rewards and leave-one-out advantages.
+  \item Set the rollout policy $Q\leftarrow P_\theta$.  Sample prompts and
+  grouped responses, then compute verifier rewards and leave-one-out advantages.
   \item Randomly partition the intact prompt groups into 16 minibatches, each
   containing eight groups and $N=128$ complete responses.
-  \item Traverse each minibatch once.  Before every update, recompute
-  $W=P_\theta(Y\mid x)/Q(Y\mid x)$, policy scores, and sample ESS.  Form the
-  designated raw, PPO-masked, or conditional estimator.
-  \item After all 16 updates, discard the rollout and repeat from the new policy.
+  \item In each of four optimization epochs, traverse all minibatches.  Before
+  every update, recompute $W=P_\theta(Y\mid x)/Q(Y\mid x)$, policy scores, and
+  sample ESS.  Form the designated raw, PPO-masked, or conditional estimator.
+  \item After all 64 updates, discard the rollout and repeat from the new policy.
 \end{enumerate}
 \end{minipage}}
 \end{algorithm}
 
-Every response enters exactly one update.  Within a rollout, responses,
-rewards, advantages, and rollout probabilities remain fixed, whereas current
-probabilities, ratios, scores, and ESS are recomputed before each update.
-This realizes the theorem's disjoint no-reuse structure, but prompt sampling
-without replacement means that later unused groups are not conditionally
-i.i.d. draws from the global prompt population after earlier adaptive updates.
-The study therefore tests the theorem's observable quantities rather than
-claiming literal coverage of its conditional statement.  Sixteen minibatches
-are used because the first four never reach ESS below $0.1$ in the diagnostic
-runs; a shorter traversal would not expose the regime under study.  The
-separate scaled optimization uses 512 prompts per rollout, the same 16
-minibatches (32 prompt groups or 512 sequences per update), and four epochs;
-that repeated-data trajectory is an explicit stress test beyond the theorem.
+Every response enters one update per optimization epoch.  Within a rollout,
+responses, rewards, advantages, and rollout probabilities remain fixed, whereas
+current probabilities, ratios, scores, and ESS are recomputed before each
+update.  Theorem~\ref{thm:current-ess} applies to the first disjoint traversal; later
+epochs deliberately test behavior after sample reuse.  Sixteen minibatches are
+used because the first four never reach ESS below $0.1$ in the diagnostic runs;
+a shorter traversal would not expose the regime under study.
 
 \subsection{Estimators and diagnostics}
 
@@ -971,7 +960,7 @@ and is truncated at zero.  Averaging $K\in\{1,2,4,8\}$ independent blocks gives
   \label{eq:formula-risks}
 \end{equation}
 These are the two sides of the diagnostic decomposition in
-Equation~\eqref{eq:crossover} at block level.  For each
+Theorem~\ref{thm:crossover} at block level.  For each
 $K$, we choose the ESS midpoint that minimizes fitted risk while applying PPO
 below the threshold and raw above it.  The only interior calibration solution is
 $K=4$, or $N=512$, with threshold $0.417$.
@@ -1202,35 +1191,34 @@ permissive path through the high-ESS regime.
 
 The main text reports evaluation performance and when conditional protection
 activates.  This section records the accompanying training dynamics and a
-second permissive CISPO-style coefficient-cap setting.
+second permissive TIS setting.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/dynamics/overall.pdf}
-  \caption{Training dynamics for the main comparisons.  The ungated
-  CISPO-style cap-3 run (labeled TIS 3 in the plot) develops extreme response
-  length and entropy together with a collapse in training reward.  The reported
-  safeguarded hybrids avoid this failure over 200 steps.}
+  \caption{Training dynamics for the main comparisons.  The static TIS 3 run
+  develops extreme response length and entropy together with a collapse in
+  training reward.  The safeguards and their ESS-conditional variants avoid
+  this failure over the reported 200 steps.}
   \label{fig:llm-dynamics}
 \end{figure}
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/tis3_dynamics/overall.pdf}
-  \caption{Detailed CISPO-style cap-3 comparison (TIS 3 in the plot).  In the
-  ungated run, ESS falls below $0.01$ after step 77 and response length and
-  entropy diverge.  The fixed-$0.1$ hybrid increases the masked fraction as its
-  logged ESS declines and keeps both diagnostics controlled.}
+  \caption{Detailed TIS 3 comparison.  Under static TIS, ESS falls below $0.01$
+  after step 77 and the response length and entropy diverge.  The fixed-$0.1$
+  intervention increases the clipped fraction as ESS declines and keeps both
+  diagnostics controlled.}
   \label{fig:tis3-dynamics}
 \end{figure}
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/tis5/overall.pdf}
-  \caption{Replication with a CISPO-style detached coefficient cap of 5 (TIS 5
-  in the plot).  The ungated trajectory collapses to zero after ESS vanishes,
-  whereas the fixed-$0.1$ conditional run reaches an AIME-2024 mean@16 score of
-  $39.4\%$.}
+  \caption{Replication with TIS cap 5.  The static trajectory collapses to zero
+  after ESS vanishes, whereas the fixed-$0.1$ conditional run reaches an
+  AIME-2024 mean@16 score of $39.4\%$.}
   \label{fig:tis5-replication}
 \end{figure}
 
@@ -1429,6 +1417,32 @@ interval.  Hoeffding's inequality across the $m$ independent groups completes
 the capped result.  This bound is conservative because it counts independent
 prompts rather than treating all within-prompt responses as independent.
 \end{proof}
+
+\subsection{Proof of Lemma~\ref{lem:smooth-empirical-ascent}}
+
+The quadratic lower bound for an $L_k$-smooth function gives
+\begin{align}
+  \widehat L_k(\theta_k+d_k)-\widehat L_k(\theta_k)
+  &\ge
+  \left\langle\nabla\widehat L_k(\theta_k),d_k\right\rangle
+  -\frac{L_k}{2}\|d_k\|_2^2\\
+  &=
+  \langle\widehat g_k,d_k\rangle
+  -\frac{L_k}{2}\|d_k\|_2^2,
+\end{align}
+which proves Equation~\eqref{eq:general-smoothness-gain}.  Substituting
+$d_k=\eta\widehat g_k$ gives
+\begin{align}
+  \langle\widehat g_k,\eta\widehat g_k\rangle
+  -\frac{L_k}{2}\|\eta\widehat g_k\|_2^2
+  &=
+  \eta\|\widehat g_k\|_2^2
+  -\frac{L_k\eta^2}{2}\|\widehat g_k\|_2^2\\
+  &=
+  \eta\left(1-\frac{L_k\eta}{2}\right)
+  \|\widehat g_k\|_2^2,
+\end{align}
+which proves Equation~\eqref{eq:empirical-smoothness-gain}.
 
 \subsection{Proof of Proposition~\ref{prop:ppo-mask}}
 
