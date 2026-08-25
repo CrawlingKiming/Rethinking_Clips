@@ -29,6 +29,13 @@ jobs:
 
       - name: Rewrite theory
         run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/rewrite_theory_logical_flow.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('\x0c', '\\f')
+          path.write_text(text, encoding='utf-8')
+          PY
           python -m py_compile scripts/rewrite_theory_logical_flow.py
           python scripts/rewrite_theory_logical_flow.py
 
