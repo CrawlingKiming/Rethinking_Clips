@@ -30,6 +30,13 @@ jobs:
       - name: Rewrite the paper
         run: |
           sed -i '/        "ESS",/d' scripts/rewrite_delayed_failure.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/rewrite_delayed_failure.py')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace(r"\end{abstract}'''", "'''", 1)
+          p.write_text(s, encoding='utf-8')
+          PY
           python -m py_compile scripts/rewrite_delayed_failure.py
           python scripts/rewrite_delayed_failure.py
 
