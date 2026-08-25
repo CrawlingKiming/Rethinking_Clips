@@ -1,0 +1,47 @@
+name: Rewrite gradient reliability theory
+
+on:
+  push:
+    branches:
+      - rewrite-gradient-reliability-theory
+    paths:
+      - scripts/rewrite_gradient_reliability.py
+      - .github/workflows/rewrite-gradient-reliability.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  rewrite-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out rewrite branch
+        uses: actions/checkout@v4
+        with:
+          ref: rewrite-gradient-reliability-theory
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Rewrite the paper
+        run: |
+          python -m py_compile scripts/rewrite_gradient_reliability.py
+          python scripts/rewrite_gradient_reliability.py
+
+      - name: Compile LaTeX
+        uses: xu-cheng/latex-action@v3
+        with:
+          root_file: main.tex
+
+      - name: Commit rewritten paper
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add main.tex
+          git diff --cached --quiet && exit 0
+          git commit -m "Rewrite theory around ESS-controlled gradient reliability"
+          git push origin HEAD:rewrite-gradient-reliability-theory
