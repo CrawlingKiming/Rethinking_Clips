@@ -1,0 +1,127 @@
+name: Manual merge Overleaf 0450
+
+on:
+  push:
+    branches:
+      - manual-merge-overleaf-0450
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  merge-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository with full history
+        uses: actions/checkout@v4
+        with:
+          ref: manual-merge-overleaf-0450
+          fetch-depth: 0
+
+      - name: Merge Overleaf branch and resolve main.tex
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main overleaf-2026-08-25-0450
+          git checkout -B main origin/main
+
+          set +e
+          git merge --no-ff --no-commit origin/overleaf-2026-08-25-0450
+          merge_status=$?
+          set -e
+
+          if [ "$merge_status" -ne 0 ]; then
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            if [ "$conflicts" != "main.tex" ]; then
+              echo "Unexpected conflict set:"
+              printf '%s\n' "$conflicts"
+              exit 1
+            fi
+
+            python - <<'PY'
+          from pathlib import Path
+
+          path = Path("main.tex")
+          lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+          resolved = []
+          i = 0
+          conflict_count = 0
+
+          while i < len(lines):
+              line = lines[i]
+              if line.startswith("<<<<<<< "):
+                  conflict_count += 1
+                  i += 1
+                  ours = []
+                  while i < len(lines) and not lines[i].startswith("======="):
+                      ours.append(lines[i])
+                      i += 1
+                  if i >= len(lines):
+                      raise RuntimeError("Malformed conflict: missing separator")
+                  i += 1
+                  while i < len(lines) and not lines[i].startswith(">>>>>>> "):
+                      i += 1
+                  if i >= len(lines):
+                      raise RuntimeError("Malformed conflict: missing end marker")
+                  i += 1
+                  resolved.extend(ours)
+              else:
+                  resolved.append(line)
+                  i += 1
+
+          if conflict_count == 0:
+              raise RuntimeError("Merge failed but no conflict markers were found")
+
+          text = "".join(resolved)
+          for marker in ("<<<<<<< ", "=======", ">>>>>>> "):
+              if marker in text:
+                  raise RuntimeError(f"Unresolved marker remains: {marker}")
+          path.write_text(text, encoding="utf-8")
+          print(f"Resolved {conflict_count} main.tex conflict blocks in favor of current main")
+          PY
+
+            git add main.tex
+          fi
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("main.tex")
+          text = path.read_text(encoding="utf-8")
+
+          # Make graphics resolution robust whether Overleaf compiles from the
+          # project root or from a one-level-deeper working directory.
+          if "\\graphicspath" not in text:
+              needle = "\\usepackage{graphicx}\n"
+              replacement = needle + "\\graphicspath{{./}{../}}\n"
+              if needle not in text:
+                  raise RuntimeError("Could not locate graphicx package line")
+              text = text.replace(needle, replacement, 1)
+
+          # Repair the duplicated path reported by pdftex.def if it was saved
+          # into the source by an Overleaf-side merge.
+          text = text.replace("figures/figures_mains/", "figures_mains/")
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          git add main.tex
+          git diff --check --cached
+          test -z "$(git diff --name-only --diff-filter=U)"
+
+      - name: Compile the merged paper
+        uses: xu-cheng/latex-action@v3
+        with:
+          root_file: main.tex
+
+      - name: Commit and push the manual merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add main.tex
+          git commit -m "Merge Overleaf edits after ESS theory rewrite"
+          git push origin HEAD:main
