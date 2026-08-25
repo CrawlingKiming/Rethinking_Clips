@@ -168,8 +168,7 @@ and then ask when an intervention can recover reliability.
 Let $X\sim\nu$ be a prompt, let $Q(\cdot\mid X)$ be the rollout policy, and let
 $P_\theta(\cdot\mid X)$ be the current policy.  A complete response is denoted
 by $Y=(Y_1,\ldots,Y_T)$, and $R(X,Y)$ is its verifier reward.  The population
-objective is $J(\theta):=\E_{P_\theta}[R]$.  Assume
-$P_\theta(\cdot\mid X)\ll Q(\cdot\mid X)$ and define the complete-response
+objective is $J(\theta):=\E_{P_\theta}[R]$. Consider $P_\theta(\cdot\mid X)\ll Q(\cdot\mid X)$ and define the complete-response
 likelihood ratio and policy-gradient contribution by
 \begin{equation}
   W_\theta(X,Y)
@@ -179,8 +178,7 @@ likelihood ratio and policy-gradient contribution by
   :=\{R(X,Y)-b(X)\}\nabla_\theta\log P_\theta(Y\mid X),
   \label{eq:weight-and-contribution}
 \end{equation}
-where $b(X)$ is a detached prompt-level baseline.  Because the response is
-autoregressive, the sequence score is the sum of the token scores.  The score
+where $b(X)$ is a detached prompt-level baseline. The standard score
 identity and change of measure give
 \begin{equation}
   g(\theta):=\nabla J(\theta)
@@ -204,9 +202,14 @@ Appendix~\ref{app:proofs} gives the corresponding extension.
 
 \subsection{R\'enyi divergence and normalized effective sample size}
 
+[What is Renyi alpha divergence, intuitively explain,]
+
 For $\alpha>1$, define the R\'enyi divergence
 $D_\alpha(P_\theta\|Q):=(\alpha-1)^{-1}\log\E_Q[W_\theta^\alpha]$ and its
 exponentiated form $d_\alpha(P_\theta\|Q):=\exp\{D_\alpha(P_\theta\|Q)\}$.
+
+[The special relation ship with the \alpha-2 and the ESS,]
+
 At order two, $d_2(P_\theta\|Q)=\E_Q[W_\theta^2]$.  Following
 importance-sampling policy optimization \citep{metelli2018pois,metelli2020is},
 we define normalized sequence ESS by
@@ -217,6 +220,9 @@ we define normalized sequence ESS by
   =\exp\{-D_2(P_\theta\|Q)\}.
   \label{eq:population-ess}
 \end{equation}
+
+[The Ess has revealed to be critical to the importance weighted mean...]
+
 The effective sequence count in a batch of size $N$ is $N\rho_\theta$.  When
 $P_\theta=Q$, $\rho_\theta=1$ and the full batch is effective.  As the current
 policy separates from the rollout policy, $\rho_\theta$ decreases.  Since
@@ -227,11 +233,9 @@ the inverse second-moment measure of sequence-ratio concentration.
 \section{Theoretical analysis}
 \label{sec:theory}
 
-Figure~\ref{fig:llm-motivation} raises a specific question: when does an
-unused portion of a fixed rollout stop supporting a reliable update for the
-current policy?  Answering this question requires two links.  We first connect
+Figure~\ref{fig:llm-motivation} raises a specific question: when does the update becomes unreliable? Answering this question requires two links. We first connect
 normalized sequence ESS to the error of the finite-batch policy-gradient
-estimate.  We then connect that error to the population improvement produced by
+estimate. We then connect that error to the population improvement produced by
 the next update.
 
 At update $k$, condition on the preceding history and write
@@ -243,12 +247,8 @@ $\|f_k\|_\infty:=\sup_z\|f_k(z)\|_2<\infty$.  This condition fixes the scale of
 one response contribution, while $\rho_k$ captures the additional loss of
 reliability caused by policy mismatch.
 
-\subsection{From normalized ESS to a gradient-error radius}
-\label{sec:raw}
-
-Because the minibatch used at update $k$ has not appeared in any previous
-update, its $N$ units are independent draws from $Q$ after conditioning on the
-history.  Change of measure therefore gives
+\paragraph{From normalized ESS to a gradient-error radius}
+Consider $N$ units of independent draws from $Q$ after conditioning on the history.  Change of measure therefore gives
 \begin{equation}
   \E[\widehat g_k\mid\mathcal F_{k-1}]=g_k.
   \label{eq:gradient-unbiasedness}
@@ -300,11 +300,11 @@ For every $\delta\in(0,1)$,
 \end{lemma}
 
 Lemma~\ref{lem:rho-gradient-reliability} turns normalized ESS into a directly
-interpretable uncertainty radius.  For fixed $N$ and $\|f_k\|_\infty$, the
+interpretable uncertainty radius.  The
 radius grows as $\rho_k^{-1/2}$; equivalently, the nominal batch size is reduced
-to the effective sequence count $N\rho_k$.
+to the effective sequence count $N\rho_k$. 
 
-\subsection{From gradient accuracy to policy improvement}
+\paragraph{From gradient accuracy to reliable improvement}
 \label{sec:mse-improvement}
 
 The previous lemma tells us when the sampled direction is close to the true
@@ -370,24 +370,8 @@ delayed: the same rollout can support many useful updates while $N\rho_k$
 remains large, and only becomes statistically inconclusive after effective
 support has sufficiently deteriorated.
 
-\begin{remark}[Interpretation]
-\label{rem:rho-interpretation}
-Theorem~\ref{thm:permissive-reliability} identifies a loss of certification,
-not a deterministic collapse point.  A zero lower bound means that the rollout
-no longer certifies the sampled direction at the chosen confidence level; the
-realized update may still improve.
 
-The criterion complements policy-deviation guarantees.  Those guarantees study
-population-level consequences of changing the policy, whereas the present
-result studies whether a fixed finite rollout still estimates the current
-policy gradient accurately enough.  Both effects may matter, but they answer
-different questions.
 
-For fixed $N$, contribution scale, confidence level, and observed gradient
-signal, all mismatch-dependent degradation enters through $\rho_k$.  No
-universal numerical threshold follows, because the required value also depends
-on those other quantities.
-\end{remark}
 
 The theorem diagnoses when the permissive estimator loses a useful guarantee,
 but it does not prescribe what should replace it.  That distinction leads to a
@@ -397,12 +381,14 @@ the permissive certificate disappears?
 \subsection{When can clipping recover reliability?}
 \label{sec:clipping-recovery}
 
+[Z_k, superscript P.. is not needed, and 
+
 Let $Z_k^{\mathrm P}:=W_k f_k$ be the per-unit permissive contribution and let
 $Z_k^{\mathrm C}$ be the contribution produced by a chosen clipping rule.  For
 $e\in\{\mathrm P,\mathrm C\}$, define
 $\widehat g_k^e:=N^{-1}\sum_{i=1}^N Z_{k,i}^e$ and its total conditional risk
-$m_k^e:=\E[\|\widehat g_k^e-g_k\|_2^2\mid\mathcal F_{k-1}]$.  Write
-$b_k^{\mathrm C}:=\E[Z_k^{\mathrm C}\mid\mathcal F_{k-1}]-g_k$ and
+$m_k^e:=\E[\|\widehat g_k^e-g_k\|_2^2\mid\mathcal F_{k-1}]$.  Write the bias and 
+$b_k^{\mathrm C}:=\E[Z_k^{\mathrm C}\mid\mathcal F_{k-1}]-g_k$ and variance of the estimator as:
 $v_k^e:=\E[\|Z_k^e-\E Z_k^e\|_2^2\mid\mathcal F_{k-1}]$.  Independence gives
 \begin{equation}
   m_k^{\mathrm P}=\frac{v_k^{\mathrm P}}{N},
@@ -428,7 +414,7 @@ The lower bound becomes stronger exactly when total estimation risk decreases.
 Substituting Equation~\eqref{eq:clipping-risk-decomposition} therefore reduces
 the comparison to a single bias--variance condition.
 
-\begin{proposition}[Bias--variance condition for clipping]
+\begin{proposition}[Bias-variance condition for clipping]
 \label{prop:clipping-crossover}
 The clipped estimator has lower total gradient risk than the permissive
 estimator if and only if
@@ -457,35 +443,25 @@ not exactly when
 \end{equation}
 \end{corollary}
 
+[Add remark for the ordinary PPO, clipping rule and why in high ESS case it might not be necessary]
+
+[Add remark for the weight truncation, and say why it is mildly okish]
+
+
+
 A small $\rho_k$ therefore explains why the permissive estimator becomes
 vulnerable, but it does not justify every clipping rule.  Recovery occurs only
 when the chosen rule lowers total error enough to cross the gradient-signal
 level.  If neither estimator crosses that level, the framework points to a new
 rollout rather than stronger modification of the same data.
 
-The comparison is estimator-agnostic.  Full-sequence truncation, token-level
-PPO/GRPO masking, and detached coefficient capping define different
-$Z_k^{\mathrm C}$ and hence different biases and variances.  The experiments
-ask whether normalized ESS identifies the regime in which each concrete
-safeguard becomes useful.
+The intuitive conclusion therefore says that high ESS means that clipping is not necessary.. \emph{and the clipping rule should consider the ESS as the criterion}. 
 
-\subsection{Observable reliability diagnostic}
-\label{sec:practice}
+To validate this intuition, in later experiments we check the simple heuristics rule: ESS < \tau clip yes ESS > \tau clip no
 
-Population $\rho_k$ is unavailable during training.  We use the standard
-normalized plug-in estimate
-\begin{equation}
-  \widehat\rho_k
-  :=\frac{(\sum_{i=1}^N W_{k,i})^2}
-          {N\sum_{i=1}^N W_{k,i}^2}.
-  \label{eq:sample-ess}
-\end{equation}
-It is computed from complete-response ratios before the update.  A finite batch
-can miss rare large-ratio responses and therefore overstate population support,
-so $\widehat\rho_k$ is an observable diagnostic rather than an exact substitute
-inside Theorem~\ref{thm:permissive-reliability}.  The numerical value $0.1$ used
-in the experiments is prespecified as a conservative operational event; it is
-not a constant derived from the theorem.
+
+
+
 
 \section{Contextual-bandit validation of the framework}
 \label{sec:simulation}
