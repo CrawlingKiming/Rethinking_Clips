@@ -227,51 +227,70 @@ the inverse second-moment measure of sequence-ratio concentration.
 \section{Theoretical analysis}
 \label{sec:theory}
 
-The analysis follows a single chain.  Normalized sequence ESS controls the
-reliability of the importance-weighted gradient estimate, and estimator
-reliability controls the improvement produced by the next policy update.
+Figure~\ref{fig:llm-motivation} raises a specific question: when does an
+unused portion of a fixed rollout stop supporting a reliable update for the
+current policy?  Answering this question requires two links.  We first connect
+normalized sequence ESS to the error of the finite-batch policy-gradient
+estimate.  We then connect that error to the population improvement produced by
+the next update.
 
 At update $k$, condition on the preceding history and write
 $W_k:=W_{\theta_k}$, $f_k:=f_{\theta_k}$,
 $g_k:=g(\theta_k)$, $\widehat g_k:=\widehat g_N(\theta_k)$, and
 $\rho_k:=\rho_{\theta_k}$.  Throughout this section, suppose that the current
 gradient contribution is bounded,
-$\|f_k\|_\infty:=\sup_z\|f_k(z)\|_2<\infty$.  This is the standard bounded
-integrand condition used in importance-sampling bounds.  It controls the scale
-of one response contribution; the amplification caused by policy mismatch is
-captured separately by $\rho_k$.
+$\|f_k\|_\infty:=\sup_z\|f_k(z)\|_2<\infty$.  This condition fixes the scale of
+one response contribution, while $\rho_k$ captures the additional loss of
+reliability caused by policy mismatch.
 
-\subsection{Normalized ESS controls gradient reliability}
+\subsection{From normalized ESS to a gradient-error radius}
 \label{sec:raw}
 
-\begin{lemma}[Normalized ESS controls gradient reliability]
-\label{lem:rho-gradient-reliability}
-If the unused minibatch contains $N$ independent rollout units, then
-\begin{align}
-  \E[\widehat g_k\mid\mathcal F_{k-1}]
-  &=g_k,
-  \label{eq:gradient-unbiasedness}\\
+Because the minibatch used at update $k$ has not appeared in any previous
+update, its $N$ units are independent draws from $Q$ after conditioning on the
+history.  Change of measure therefore gives
+\begin{equation}
+  \E[\widehat g_k\mid\mathcal F_{k-1}]=g_k.
+  \label{eq:gradient-unbiasedness}
+\end{equation}
+Independence then reduces the squared error of the sample average to the
+second moment of one centered contribution:
+\begin{equation}
   \E\!\left[
     \|\widehat g_k-g_k\|_2^2
     \mid\mathcal F_{k-1}
   \right]
-  &=\frac1N
+  =\frac1N
   \left\{
     \E_Q[W_k^2\|f_k\|_2^2\mid\mathcal F_{k-1}]
     -\|g_k\|_2^2
-  \right\}
-  \nonumber\\
-  &\le
-  \frac{\|f_k\|_\infty^2}{N\rho_k}.
+  \right\}.
   \label{eq:rho-gradient-mse}
-\end{align}
-Consequently, for every $\delta\in(0,1)$,
+\end{equation}
+The bounded contribution condition and the definition
+$\rho_k^{-1}=\E_Q[W_k^2\mid\mathcal F_{k-1}]$ now give
+\begin{equation}
+  \E\!\left[
+    \|\widehat g_k-g_k\|_2^2
+    \mid\mathcal F_{k-1}
+  \right]
+  \le
+  \frac{\|f_k\|_\infty^2}{N\rho_k}.
+  \label{eq:rho-gradient-mse-bound}
+\end{equation}
+Equation~\eqref{eq:rho-gradient-mse-bound} identifies the average scale of the
+estimation error.  The actual update, however, is computed from one realized
+minibatch, so we need an event-level statement.  Applying Markov's inequality
+to the squared error yields the following conclusion.
+
+\begin{lemma}[Normalized ESS controls the gradient-error radius]
+\label{lem:rho-gradient-reliability}
+For every $\delta\in(0,1)$,
 \begin{equation}
   \Pr\!\left(
     \|\widehat g_k-g_k\|_2
     \le
-    \frac{\|f_k\|_\infty}
-         {\sqrt{\delta N\rho_k}}
+    \frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}
     \,\middle|\,
     \mathcal F_{k-1}
   \right)
@@ -280,159 +299,175 @@ Consequently, for every $\delta\in(0,1)$,
 \end{equation}
 \end{lemma}
 
-Lemma~\ref{lem:rho-gradient-reliability} is the vector-valued counterpart of the
-standard importance-sampling reliability bound.  For a fixed contribution
-scale, all mismatch-dependent degradation enters through normalized ESS.  The
-nominal batch size $N$ is replaced by the effective sequence count $N\rho_k$.
+Lemma~\ref{lem:rho-gradient-reliability} turns normalized ESS into a directly
+interpretable uncertainty radius.  For fixed $N$ and $\|f_k\|_\infty$, the
+radius grows as $\rho_k^{-1/2}$; equivalently, the nominal batch size is reduced
+to the effective sequence count $N\rho_k$.
 
-\subsection{Gradient reliability controls policy improvement}
+\subsection{From gradient accuracy to policy improvement}
 \label{sec:mse-improvement}
 
-\begin{lemma}[Gradient reliability controls policy improvement]
+The previous lemma tells us when the sampled direction is close to the true
+gradient.  To determine whether that accuracy is sufficient, we must translate
+a gradient-error radius into a change in the population objective.  Smoothness
+provides this second link: an estimated direction that lies within radius
+$\varepsilon$ of the true gradient must retain a controlled component in an
+ascent direction.  Optimizing the resulting quadratic lower bound gives the
+next lemma.
+
+\begin{lemma}[A reliable direction yields policy improvement]
 \label{lem:gradient-error-progress}
-Let $g=\nabla J(\theta)$ and let $\widetilde g$ be any estimated update
-direction.  If $J$ is $L$-smooth along the update segment, then for every
-$0<\eta\le1/L$,
+Let $g=\nabla J(\theta)$ and suppose that
+$\|\widetilde g-g\|_2\le\varepsilon$.  If $J$ is $L$-smooth along the update
+segment, define
+$\alpha=L^{-1}(1-\varepsilon/\|\widetilde g\|_2)_+$, with $\alpha=0$ when
+$\widetilde g=0$.  Then
 \begin{equation}
-  J(\theta+\eta\widetilde g)-J(\theta)
+  J(\theta+\alpha\widetilde g)-J(\theta)
   \ge
-  \frac{\eta}{2}
-  \left\{
-    \|g\|_2^2-\|\widetilde g-g\|_2^2
-  \right\}.
+  \frac{1}{2L}
+  \left(\|\widetilde g\|_2-\varepsilon\right)_+^2.
   \label{eq:gradient-error-progress}
-\end{equation}
-If $\widetilde g$ is random with finite second moment, then
-\begin{equation}
-  \E[J(\theta+\eta\widetilde g)-J(\theta)]
-  \ge
-  \frac{\eta}{2}
-  \left\{
-    \|g\|_2^2-\E\|\widetilde g-g\|_2^2
-  \right\}.
-  \label{eq:expected-gradient-error-progress}
 \end{equation}
 \end{lemma}
 
-Lemma~\ref{lem:gradient-error-progress} isolates the quantity relevant to one
-update: the total squared error of the estimated direction relative to the true
-gradient.  The result does not require the estimator to be unbiased; any bias
-and variance are both included in the same error term.  The argument is the
-standard smoothness step used in safe policy-gradient analyses
+The lower bound increases as the error radius decreases.  Thus estimator
+reliability is not merely a diagnostic quantity: it determines both whether a
+nonzero step can be certified and how large that certificate can be.  This is
+the same smoothness mechanism used in safe policy-gradient analyses
 \citep{pirotta2013adaptive,papini2022smoothing}.
 
 \subsection{When does a permissive update remain reliable?}
 
+Lemma~\ref{lem:rho-gradient-reliability} supplies an ESS-dependent error radius
+for the current minibatch.  Lemma~\ref{lem:gradient-error-progress} converts any
+such radius into population improvement.  Substituting the first conclusion
+into the second yields the central result.
+
 \begin{theorem}[When a permissive update remains reliable]
 \label{thm:permissive-reliability}
-Suppose $J$ is $L_k$-smooth along the update segment and
-$0<\eta_k\le1/L_k$.  Then the unmodified importance-weighted update satisfies
+For $\delta\in(0,1)$, let
+$r_k(\delta):=\|f_k\|_\infty/\sqrt{\delta N\rho_k}$ and define
+$\alpha_k:=L_k^{-1}(1-r_k(\delta)/\|\widehat g_k\|_2)_+$, with
+$\alpha_k=0$ when $\widehat g_k=0$.  If $J$ is $L_k$-smooth along the update
+segment, then, conditional on $\mathcal F_{k-1}$, with probability at least
+$1-\delta$,
 \begin{equation}
-  \E\!\left[
-    J(\theta_k+\eta_k\widehat g_k)-J(\theta_k)
-    \mid\mathcal F_{k-1}
-  \right]
+  J(\theta_k+\alpha_k\widehat g_k)-J(\theta_k)
   \ge
-  \frac{\eta_k}{2}
+  \frac{1}{2L_k}
   \left(
-    \|g_k\|_2^2
-    -
-    \frac{\|f_k\|_\infty^2}{N\rho_k}
-  \right).
+    \|\widehat g_k\|_2
+    -\frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}
+  \right)_+^2.
   \label{eq:permissive-reliability}
 \end{equation}
-In particular, the lower bound is positive whenever
-$N\rho_k\|g_k\|_2^2>\|f_k\|_\infty^2$.
 \end{theorem}
+
+The certificate is positive exactly when the observed gradient norm exceeds its
+ESS-dependent uncertainty radius.  This comparison explains why failure can be
+delayed: the same rollout can support many useful updates while $N\rho_k$
+remains large, and only becomes statistically inconclusive after effective
+support has sufficiently deteriorated.
 
 \begin{remark}[Interpretation]
 \label{rem:rho-interpretation}
-Theorem~\ref{thm:permissive-reliability} characterizes a loss of certification,
-not a deterministic collapse point.  When the sufficient condition holds, the
-fixed rollout supports a positive expected-improvement guarantee for the
-permissive update.  When it fails, the update may still improve, but the theorem
-can no longer certify that its finite-batch direction is accurate enough.
+Theorem~\ref{thm:permissive-reliability} identifies a loss of certification,
+not a deterministic collapse point.  A zero lower bound means that the rollout
+no longer certifies the sampled direction at the chosen confidence level; the
+realized update may still improve.
 
-The result explains the delayed transition in Figure~\ref{fig:llm-motivation}.
-A fixed rollout can support many successful updates while $N\rho_k$ remains
-large.  Reliability deteriorates only after normalized ESS has fallen enough
-for the estimation-error term to compete with the gradient signal.
+The criterion complements policy-deviation guarantees.  Those guarantees study
+population-level consequences of changing the policy, whereas the present
+result studies whether a fixed finite rollout still estimates the current
+policy gradient accurately enough.  Both effects may matter, but they answer
+different questions.
 
-This criterion complements policy-deviation guarantees.  Those guarantees
-control population-level consequences of changing the policy; the present
-bound controls the finite-sample reliability of estimating the current gradient
-from a fixed rollout.  Both effects can matter, but they answer different
-questions.
-
-For fixed $N$, contribution scale, and gradient signal, all mismatch-dependent
-degradation in the bound enters through $\rho_k$.  Nevertheless, no universal
-numerical threshold follows from the theorem because the required level also
-depends on $N$, $\|f_k\|_\infty$, and $\|g_k\|_2$.
+For fixed $N$, contribution scale, confidence level, and observed gradient
+signal, all mismatch-dependent degradation enters through $\rho_k$.  No
+universal numerical threshold follows, because the required value also depends
+on those other quantities.
 \end{remark}
 
-A high-probability adaptive-step version of the same result is given in
-Appendix~\ref{app:proofs}.  It replaces the expected-error comparison by the
-radius in Equation~\eqref{eq:rho-gradient-concentration}.
+The theorem diagnoses when the permissive estimator loses a useful guarantee,
+but it does not prescribe what should replace it.  That distinction leads to a
+separate question: can a more conservative estimator recover reliability after
+the permissive certificate disappears?
 
 \subsection{When can clipping recover reliability?}
 \label{sec:clipping-recovery}
 
-The preceding theorem diagnoses when the unmodified estimator loses a positive
-reliability certificate; it does not prescribe a remedy.  We now consider a
-clipped estimator as a competing gradient estimator.  Let
-$Z_k^{\mathrm P}:=W_k f_k$ be the per-unit permissive contribution and let
+Let $Z_k^{\mathrm P}:=W_k f_k$ be the per-unit permissive contribution and let
 $Z_k^{\mathrm C}$ be the contribution produced by a chosen clipping rule.  For
 $e\in\{\mathrm P,\mathrm C\}$, define
-$\widehat g_k^e:=N^{-1}\sum_{i=1}^N Z_{k,i}^e$ and
+$\widehat g_k^e:=N^{-1}\sum_{i=1}^N Z_{k,i}^e$ and its total conditional risk
 $m_k^e:=\E[\|\widehat g_k^e-g_k\|_2^2\mid\mathcal F_{k-1}]$.  Write
-$b_k^{\mathrm C}:=\E[Z_k^{\mathrm C}\mid\mathcal F_{k-1}]-g_k$ for the
-clipping bias and
-$v_k^e:=\E[\|Z_k^e-\E Z_k^e\|_2^2\mid\mathcal F_{k-1}]$ for the per-unit
-variance.
-
-\begin{proposition}[Bias--variance condition for clipping]
-\label{prop:clipping-crossover}
-For independent units with finite second moments,
+$b_k^{\mathrm C}:=\E[Z_k^{\mathrm C}\mid\mathcal F_{k-1}]-g_k$ and
+$v_k^e:=\E[\|Z_k^e-\E Z_k^e\|_2^2\mid\mathcal F_{k-1}]$.  Independence gives
 \begin{equation}
   m_k^{\mathrm P}=\frac{v_k^{\mathrm P}}{N},
   \qquad
-  m_k^{\mathrm C}=\|b_k^{\mathrm C}\|_2^2+\frac{v_k^{\mathrm C}}{N},
-  \qquad
-  m_k^{\mathrm C}<m_k^{\mathrm P}
-  \iff
+  m_k^{\mathrm C}=\|b_k^{\mathrm C}\|_2^2+\frac{v_k^{\mathrm C}}{N}.
+  \label{eq:clipping-risk-decomposition}
+\end{equation}
+
+To compare these risks with policy improvement, take expectation in the
+polarized smoothness bound for a common step size $0<\eta_k\le1/L_k$.  For
+either estimator does this require unbiasedness, and it gives
+\begin{equation}
+  \E\!\left[
+    J(\theta_k+\eta_k\widehat g_k^e)-J(\theta_k)
+    \mid\mathcal F_{k-1}
+  \right]
+  \ge
+  \frac{\eta_k}{2}
+  \left(\|g_k\|_2^2-m_k^e\right).
+  \label{eq:expected-risk-progress}
+\end{equation}
+The lower bound becomes stronger exactly when total estimation risk decreases.
+Substituting Equation~\eqref{eq:clipping-risk-decomposition} therefore reduces
+the comparison to a single bias--variance condition.
+
+\begin{proposition}[Bias--variance condition for clipping]
+\label{prop:clipping-crossover}
+The clipped estimator has lower total gradient risk than the permissive
+estimator if and only if
+\begin{equation}
   v_k^{\mathrm P}-v_k^{\mathrm C}
   >N\|b_k^{\mathrm C}\|_2^2.
   \label{eq:crossover}
 \end{equation}
 \end{proposition}
 
-Thus clipping gives a stronger expected-improvement lower bound than the
-permissive estimator only when the variance it removes exceeds the squared bias
-it introduces.
+Proposition~\ref{prop:clipping-crossover} says that variance reduction alone is
+not enough: it must exceed the squared bias introduced by the clipping rule.  A
+lower risk is also weaker than recovery, because both estimators may still have
+errors larger than the underlying gradient signal.  Clipping is needed in the
+narrower regime where only the clipped estimator retains a positive lower
+bound.
 
-\begin{corollary}[When clipping is needed to recover the certificate]
+\begin{corollary}[When clipping recovers the certificate]
 \label{cor:clipping-needed}
-Under the conditions of Lemma~\ref{lem:gradient-error-progress}, the clipped
-estimator has a positive expected-improvement certificate while the permissive
-estimator does not exactly in the regime
+Under Equation~\eqref{eq:expected-risk-progress}, the clipped estimator has a
+positive expected-improvement certificate while the permissive estimator does
+not exactly when
 \begin{equation}
   m_k^{\mathrm C}<\|g_k\|_2^2\le m_k^{\mathrm P}.
   \label{eq:clipping-needed}
 \end{equation}
 \end{corollary}
 
-A small $\rho_k$ therefore diagnoses vulnerability of the permissive estimator,
-but does not by itself justify a particular clipping rule.  Recovery requires
-that the rule reduce total estimation error after accounting for its bias.  If
-both $m_k^{\mathrm P}$ and $m_k^{\mathrm C}$ exceed the gradient signal, neither
-estimator has a positive certificate; collecting a fresh rollout is then the
-natural response suggested by the theory.
+A small $\rho_k$ therefore explains why the permissive estimator becomes
+vulnerable, but it does not justify every clipping rule.  Recovery occurs only
+when the chosen rule lowers total error enough to cross the gradient-signal
+level.  If neither estimator crosses that level, the framework points to a new
+rollout rather than stronger modification of the same data.
 
-The result is estimator-agnostic.  Full-sequence truncation, token-level
+The comparison is estimator-agnostic.  Full-sequence truncation, token-level
 PPO/GRPO masking, and detached coefficient capping define different
-$Z_k^{\mathrm C}$ and therefore different biases and variances.  The proposition
-does not equate these operations.  The experiments test whether normalized ESS
-identifies the regime in which each concrete safeguard becomes useful.
+$Z_k^{\mathrm C}$ and hence different biases and variances.  The experiments
+ask whether normalized ESS identifies the regime in which each concrete
+safeguard becomes useful.
 
 \subsection{Observable reliability diagnostic}
 \label{sec:practice}
@@ -1233,29 +1268,31 @@ second permissive TIS setting.
 \section{Proofs for the theoretical results}
 \label{app:proofs}
 
-This appendix gives the algebraic steps omitted from the main text.  All
-statements are read conditional on the history before update $k$, so the current
-policy is fixed and the unused sampling units are independent draws from $Q$.
+This appendix supplies the calculations that lead to the single conclusion in
+each main-text result.  All statements are read conditional on the history
+before update $k$, so the current policy is fixed and the unused sampling units
+are independent draws from $Q$.
 
-\subsection{Conditional policy-gradient identity}
+\subsection{Policy-gradient identity and mean-square calculation}
 
-By definition, $f_k=(R-b(X))\nabla_\theta\log P_{\theta_k}(Y\mid X)$ and
-$W_k=dP_{\theta_k}/dQ$.  Therefore
+By definition,
+$f_k=(R-b(X))\nabla_\theta\log P_{\theta_k}(Y\mid X)$ and
+$W_k=dP_{\theta_k}/dQ$.  Change of measure gives
 \begin{align}
   \E_Q[W_k f_k\mid\mathcal F_{k-1}]
   &=\E_{P_{\theta_k}}
     [(R-b(X))\nabla_\theta\log P_{\theta_k}(Y\mid X)
       \mid\mathcal F_{k-1}]
-      \label{eq:proof-change-measure}\\
+  \nonumber\\
   &=\E_{P_{\theta_k}}
     [R\nabla_\theta\log P_{\theta_k}(Y\mid X)
       \mid\mathcal F_{k-1}]
-    \nonumber\\
+  \nonumber\\
   &\quad-
     \E_{P_{\theta_k}}
     [b(X)\nabla_\theta\log P_{\theta_k}(Y\mid X)
       \mid\mathcal F_{k-1}].
-      \label{eq:proof-baseline-split}
+  \label{eq:proof-baseline-split}
 \end{align}
 For the baseline term, condition further on $X$:
 \begin{align}
@@ -1282,59 +1319,48 @@ The remaining term is the score-function identity, and hence
   =g_k.
   \label{eq:conditional-gradient-identity}
 \end{equation}
+Averaging $N$ identical units proves
+Equation~\eqref{eq:gradient-unbiasedness}.
 
-\subsection{Proof of Lemma~\ref{lem:rho-gradient-reliability}}
-
-Let $Z_{k,i}:=W_{k,i}f_{k,i}$ and
-$\xi_{k,i}:=Z_{k,i}-g_k$.  Equation~\eqref{eq:conditional-gradient-identity}
+For the mean-square calculation, define
+$\xi_{k,i}:=W_{k,i}f_{k,i}-g_k$.  Equation~\eqref{eq:conditional-gradient-identity}
 implies
 \begin{equation}
   \E[\xi_{k,i}\mid\mathcal F_{k-1}]=0.
   \label{eq:centered-unit}
 \end{equation}
-Since $\widehat g_k-g_k=N^{-1}\sum_{i=1}^N\xi_{k,i}$,
+Using $\widehat g_k-g_k=N^{-1}\sum_{i=1}^N\xi_{k,i}$ and expanding the squared
+norm gives
 \begin{align}
-  &\E\!\left[
-    \|\widehat g_k-g_k\|_2^2
-    \mid\mathcal F_{k-1}
-  \right]
+  &\E[\|\widehat g_k-g_k\|_2^2\mid\mathcal F_{k-1}]
   \nonumber\\
   &\quad=
-  \E\!\left[
-    \left\|
-      \frac1N\sum_{i=1}^N\xi_{k,i}
-    \right\|_2^2
-    \middle|\mathcal F_{k-1}
-  \right]
-  \nonumber\\
-  &\quad=
-  \frac1{N^2}
-  \sum_{i=1}^N
+  \frac1{N^2}\sum_{i=1}^N
   \E[\|\xi_{k,i}\|_2^2\mid\mathcal F_{k-1}]
   \nonumber\\
   &\qquad+
-  \frac1{N^2}
-  \sum_{i\ne j}
+  \frac1{N^2}\sum_{i\ne j}
   \E[\xi_{k,i}^\top\xi_{k,j}\mid\mathcal F_{k-1}].
   \label{eq:mse-expand-sums}
 \end{align}
 For $i\ne j$, conditional independence and
-Equation~\eqref{eq:centered-unit} give
-\begin{equation}
-  \E[\xi_{k,i}^\top\xi_{k,j}\mid\mathcal F_{k-1}]
-  =\E[\xi_{k,i}\mid\mathcal F_{k-1}]^\top
-   \E[\xi_{k,j}\mid\mathcal F_{k-1}]
-  =0.
-  \label{eq:cross-terms-zero}
-\end{equation}
-The units are identically distributed, so
+Equation~\eqref{eq:centered-unit} imply
 \begin{align}
-  \E[\|\widehat g_k-g_k\|_2^2\mid\mathcal F_{k-1}]
-  &=\frac1N
-    \E_Q[\|W_kf_k-g_k\|_2^2\mid\mathcal F_{k-1}].
-  \label{eq:mse-single-unit}
+  \E[\xi_{k,i}^\top\xi_{k,j}\mid\mathcal F_{k-1}]
+  &=\E[\xi_{k,i}\mid\mathcal F_{k-1}]^\top
+    \E[\xi_{k,j}\mid\mathcal F_{k-1}]
+  \nonumber\\
+  &=0.
+  \label{eq:cross-terms-zero}
 \end{align}
-Expanding the remaining squared norm gives
+The remaining diagonal terms are identical, so
+\begin{equation}
+  \E[\|\widehat g_k-g_k\|_2^2\mid\mathcal F_{k-1}]
+  =\frac1N
+  \E_Q[\|W_kf_k-g_k\|_2^2\mid\mathcal F_{k-1}].
+  \label{eq:mse-single-unit}
+\end{equation}
+Expanding the last squared norm yields
 \begin{align}
   &\E_Q[\|W_kf_k-g_k\|_2^2\mid\mathcal F_{k-1}]
   \nonumber\\
@@ -1348,12 +1374,12 @@ Expanding the remaining squared norm gives
   -\|g_k\|_2^2,
   \label{eq:mse-expand-unit}
 \end{align}
-where the final equality uses
+where the last equality uses
 Equation~\eqref{eq:conditional-gradient-identity}.  Combining
-Equations~\eqref{eq:mse-single-unit} and \eqref{eq:mse-expand-unit} proves the
-exact equality in Equation~\eqref{eq:rho-gradient-mse}.
+Equations~\eqref{eq:mse-single-unit} and \eqref{eq:mse-expand-unit} proves
+Equation~\eqref{eq:rho-gradient-mse}.
 
-Next, $\|f_k(z)\|_2\le\|f_k\|_\infty$ for every $z$, and therefore
+Finally, $\|f_k(z)\|_2\le\|f_k\|_\infty$ for every $z$, so
 \begin{align}
   \E[\|\widehat g_k-g_k\|_2^2\mid\mathcal F_{k-1}]
   &\le\frac1N
@@ -1365,10 +1391,12 @@ Next, $\|f_k(z)\|_2\le\|f_k\|_\infty$ for every $z$, and therefore
   &=\frac{\|f_k\|_\infty^2}{N\rho_k}.
   \label{eq:mse-rho-bound-proof}
 \end{align}
-This proves the MSE bound.
+This proves Equation~\eqref{eq:rho-gradient-mse-bound}.
 
-For the probability statement, apply Markov's inequality to the nonnegative
-random variable $\|\widehat g_k-g_k\|_2^2$:
+\subsection{Proof of Lemma~\ref{lem:rho-gradient-reliability}}
+
+Apply Markov's inequality to the nonnegative random variable
+$\|\widehat g_k-g_k\|_2^2$:
 \begin{align}
   &\Pr\!\left(
     \|\widehat g_k-g_k\|_2
@@ -1390,20 +1418,81 @@ random variable $\|\widehat g_k-g_k\|_2^2$:
     \|f_k\|_\infty^2/(\delta N\rho_k)
   }
   \nonumber\\
-  &\quad\le\delta.
+  &\quad\le\delta,
   \label{eq:markov-rho-proof}
 \end{align}
-Rearranging proves Equation~\eqref{eq:rho-gradient-concentration}.
+where the final line uses
+Equation~\eqref{eq:rho-gradient-mse-bound}.  Taking complements proves
+Equation~\eqref{eq:rho-gradient-concentration}.
 
 \subsection{Proof of Lemma~\ref{lem:gradient-error-progress}}
 
-The quadratic lower bound for an $L$-smooth function gives
+Let $\|\widetilde g-g\|_2\le\varepsilon$.  Smoothness gives, for every
+$\alpha\ge0$,
+\begin{equation}
+  J(\theta+\alpha\widetilde g)-J(\theta)
+  \ge
+  \alpha g^\top\widetilde g
+  -\frac{L\alpha^2}{2}\|\widetilde g\|_2^2.
+  \label{eq:smoothness-start}
+\end{equation}
+The inner product is bounded from below as follows:
+\begin{align}
+  g^\top\widetilde g
+  &=\|\widetilde g\|_2^2
+    +(g-\widetilde g)^\top\widetilde g
+  \nonumber\\
+  &\ge\|\widetilde g\|_2^2
+    -\|g-\widetilde g\|_2\|\widetilde g\|_2
+  \nonumber\\
+  &\ge\|\widetilde g\|_2
+    (\|\widetilde g\|_2-\varepsilon).
+  \label{eq:reliable-inner-product}
+\end{align}
+Substituting Equation~\eqref{eq:reliable-inner-product} into
+Equation~\eqref{eq:smoothness-start} gives
+\begin{align}
+  J(\theta+\alpha\widetilde g)-J(\theta)
+  &\ge
+  \alpha\|\widetilde g\|_2
+  (\|\widetilde g\|_2-\varepsilon)
+  \nonumber\\
+  &\quad-
+  \frac{L\alpha^2}{2}\|\widetilde g\|_2^2.
+  \label{eq:reliable-quadratic}
+\end{align}
+For $\widetilde g\ne0$, the derivative of the right-hand side is
+\begin{equation}
+  \|\widetilde g\|_2
+  (\|\widetilde g\|_2-\varepsilon)
+  -L\alpha\|\widetilde g\|_2^2.
+  \label{eq:reliable-quadratic-derivative}
+\end{equation}
+Its nonnegative maximizer is
+$\alpha=L^{-1}(1-\varepsilon/\|\widetilde g\|_2)_+$; when
+$\widetilde g=0$, both the chosen step and the claimed lower bound are zero.
+Substituting the maximizer into Equation~\eqref{eq:reliable-quadratic} gives
+Equation~\eqref{eq:gradient-error-progress}.
+
+\subsection{Proof of Theorem~\ref{thm:permissive-reliability}}
+
+Lemma~\ref{lem:rho-gradient-reliability} shows that the event
+$\|\widehat g_k-g_k\|_2\le r_k(\delta)$ has conditional probability at least
+$1-\delta$.  On that event, apply
+Lemma~\ref{lem:gradient-error-progress} with
+$\theta=\theta_k$, $\widetilde g=\widehat g_k$,
+$\varepsilon=r_k(\delta)$, and $L=L_k$.  The resulting inequality is exactly
+Equation~\eqref{eq:permissive-reliability}.
+
+\subsection{Expected-risk form used for estimator comparison}
+
+For any direction $\widetilde g$ and any $0<\eta\le1/L$, smoothness gives
 \begin{equation}
   J(\theta+\eta\widetilde g)-J(\theta)
   \ge
   \eta g^\top\widetilde g
   -\frac{L\eta^2}{2}\|\widetilde g\|_2^2.
-  \label{eq:smoothness-start}
+  \label{eq:fixed-step-smoothness}
 \end{equation}
 The polarization identity gives
 \begin{equation}
@@ -1412,8 +1501,7 @@ The polarization identity gives
    -\|\widetilde g-g\|_2^2.
   \label{eq:polarization}
 \end{equation}
-Substituting Equation~\eqref{eq:polarization} into
-Equation~\eqref{eq:smoothness-start} yields
+Substitution yields
 \begin{align}
   J(\theta+\eta\widetilde g)-J(\theta)
   &\ge
@@ -1422,79 +1510,12 @@ Equation~\eqref{eq:smoothness-start} yields
   \nonumber\\
   &\quad+
   \frac{\eta}{2}(1-L\eta)\|\widetilde g\|_2^2.
-  \label{eq:smoothness-polarized}
+  \label{eq:fixed-step-polarized}
 \end{align}
-Because $0<\eta\le1/L$, the final term is nonnegative.  Dropping it proves
-Equation~\eqref{eq:gradient-error-progress}.  Taking expectation on both sides
-proves Equation~\eqref{eq:expected-gradient-error-progress}.
-
-\subsection{Proof of Theorem~\ref{thm:permissive-reliability}}
-
-Apply Equation~\eqref{eq:expected-gradient-error-progress} with
-$\theta=\theta_k$, $\widetilde g=\widehat g_k$, and $\eta=\eta_k$.  This gives
-\begin{align}
-  &\E[J(\theta_k+\eta_k\widehat g_k)-J(\theta_k)
-      \mid\mathcal F_{k-1}]
-  \nonumber\\
-  &\quad\ge
-  \frac{\eta_k}{2}
-  \left\{
-    \|g_k\|_2^2
-    -
-    \E[\|\widehat g_k-g_k\|_2^2\mid\mathcal F_{k-1}]
-  \right\}.
-  \label{eq:theorem-before-rho}
-\end{align}
-Lemma~\ref{lem:rho-gradient-reliability} gives
-$\E[\|\widehat g_k-g_k\|_2^2\mid\mathcal F_{k-1}]
-\le\|f_k\|_\infty^2/(N\rho_k)$.  Substituting this bound into
-Equation~\eqref{eq:theorem-before-rho} proves
-Equation~\eqref{eq:permissive-reliability}.
-
-\subsection{High-probability adaptive-step form}
-
-Let $r_k(\delta):=\|f_k\|_\infty/\sqrt{\delta N\rho_k}$.  By
-Equation~\eqref{eq:rho-gradient-concentration}, the event
-$\|\widehat g_k-g_k\|_2\le r_k(\delta)$ has conditional probability at least
-$1-\delta$.  On this event,
-\begin{align}
-  g_k^\top\widehat g_k
-  &=\|\widehat g_k\|_2^2
-    +(g_k-\widehat g_k)^\top\widehat g_k
-  \nonumber\\
-  &\ge\|\widehat g_k\|_2^2
-    -\|g_k-\widehat g_k\|_2\|\widehat g_k\|_2
-  \nonumber\\
-  &\ge\|\widehat g_k\|_2
-    \{\|\widehat g_k\|_2-r_k(\delta)\}.
-  \label{eq:adaptive-inner-product}
-\end{align}
-Smoothness therefore gives, for every $\alpha\ge0$,
-\begin{align}
-  J(\theta_k+\alpha\widehat g_k)-J(\theta_k)
-  &\ge
-  \alpha\|\widehat g_k\|_2
-  \{\|\widehat g_k\|_2-r_k(\delta)\}
-  \nonumber\\
-  &\quad-
-  \frac{L_k\alpha^2}{2}\|\widehat g_k\|_2^2.
-  \label{eq:adaptive-quadratic}
-\end{align}
-The right-hand side is a concave quadratic.  If $\widehat g_k\ne0$, its
-nonnegative maximizer is
-$\alpha_k^*=L_k^{-1}
-(1-r_k(\delta)/\|\widehat g_k\|_2)_+$; set $\alpha_k^*=0$ otherwise.
-Substitution gives, with conditional probability at least $1-\delta$,
-\begin{equation}
-  J(\theta_k+\alpha_k^*\widehat g_k)-J(\theta_k)
-  \ge
-  \frac1{2L_k}
-  \left(
-    \|\widehat g_k\|_2
-    -\frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}
-  \right)_+^2.
-  \label{eq:adaptive-rho-improvement}
-\end{equation}
+Because $\eta\le1/L$, the last term is nonnegative.  Dropping it, taking
+conditional expectation, and setting
+$m_k^e=\E[\|\widehat g_k^e-g_k\|_2^2\mid\mathcal F_{k-1}]$ proves
+Equation~\eqref{eq:expected-risk-progress}.
 
 \subsection{Intact prompt groups}
 
@@ -1527,20 +1548,20 @@ Repeating the sample-mean calculation across the $m$ independent groups gives
   &\le\frac{\|f_k\|_\infty^2}{m\rho_k}.
   \label{eq:group-rho-bound}
 \end{align}
-The bound counts independent prompts rather than all responses and is therefore
-conservative.
+Markov's inequality then gives the same conclusion as
+Lemma~\ref{lem:rho-gradient-reliability} with the independent-unit count $N$
+replaced by the number of prompt groups $m$.
 
-\subsection{Proof of Proposition~\ref{prop:clipping-crossover} and
-Corollary~\ref{cor:clipping-needed}}
+\subsection{Proof of Proposition~\ref{prop:clipping-crossover}}
 
-For the permissive contribution,
-$\E[Z_k^{\mathrm P}\mid\mathcal F_{k-1}]=g_k$.  Independence gives
+For the permissive estimator,
+$\E[Z_k^{\mathrm P}\mid\mathcal F_{k-1}]=g_k$.  Conditional independence gives
 \begin{equation}
   m_k^{\mathrm P}
   =\E\!\left[
     \left\|
       \frac1N\sum_{i=1}^N
-      \{Z_{k,i}^{\mathrm P}-g_k\}
+      (Z_{k,i}^{\mathrm P}-g_k)
     \right\|_2^2
     \middle|\mathcal F_{k-1}
   \right]
@@ -1548,14 +1569,14 @@ $\E[Z_k^{\mathrm P}\mid\mathcal F_{k-1}]=g_k$.  Independence gives
   \label{eq:permissive-risk-proof}
 \end{equation}
 For the clipped estimator, add and subtract its conditional mean:
-\begin{align}
+\begin{equation}
   \widehat g_k^{\mathrm C}-g_k
-  &=
-  \{\widehat g_k^{\mathrm C}-\E\widehat g_k^{\mathrm C}\}
+  =
+  (\widehat g_k^{\mathrm C}-\E\widehat g_k^{\mathrm C})
   +b_k^{\mathrm C}.
   \label{eq:clipped-bias-split}
-\end{align}
-Squaring and taking expectation gives
+\end{equation}
+Squaring and taking conditional expectation gives
 \begin{align}
   m_k^{\mathrm C}
   &=\E\|\widehat g_k^{\mathrm C}-\E\widehat g_k^{\mathrm C}\|_2^2
@@ -1577,28 +1598,29 @@ where the cross term is zero.  Therefore
   \nonumber\\
   &\iff
   v_k^{\mathrm P}-v_k^{\mathrm C}
-  >N\|b_k^{\mathrm C}\|_2^2,
+  >N\|b_k^{\mathrm C}\|_2^2.
   \label{eq:crossover-proof}
 \end{align}
-which proves Proposition~\ref{prop:clipping-crossover}.
+This is Equation~\eqref{eq:crossover}.
 
-Finally, Lemma~\ref{lem:gradient-error-progress} gives the expected-improvement
-lower bound $\eta_k\{\|g_k\|_2^2-m_k^e\}/2$ for estimator $e$.  This lower bound
-is positive for the clipped estimator and nonpositive for the permissive
-estimator exactly when
-$m_k^{\mathrm C}<\|g_k\|_2^2\le m_k^{\mathrm P}$, proving
-Corollary~\ref{cor:clipping-needed}.
+\subsection{Proof of Corollary~\ref{cor:clipping-needed}}
+
+Equation~\eqref{eq:expected-risk-progress} is positive for estimator $e$ exactly
+when $m_k^e<\|g_k\|_2^2$.  It is therefore positive for the clipped estimator
+and nonpositive for the permissive estimator exactly when
+$m_k^{\mathrm C}<\|g_k\|_2^2\le m_k^{\mathrm P}$, which is
+Equation~\eqref{eq:clipping-needed}.
 
 \subsection{Finite-moment relaxation}
 
-The exact equality in Equation~\eqref{eq:rho-gradient-mse} requires only
+Equation~\eqref{eq:rho-gradient-mse} requires only
 $\E_Q[W_k^2\|f_k\|_2^2\mid\mathcal F_{k-1}]<\infty$.  The bounded contribution
-condition is used solely to obtain the simple standard form
-$\|f_k\|_\infty^2/(N\rho_k)$.  More generally, define
-$M_{2,k}:=\E_Q[W_k^2\|f_k\|_2^2]/\E_Q[W_k^2]$.  Then the same calculation gives
+condition is used solely to obtain the conventional importance-sampling form in
+Equation~\eqref{eq:rho-gradient-mse-bound}.  More generally, define
+$M_{2,k}:=\E_Q[W_k^2\|f_k\|_2^2]/\E_Q[W_k^2]$.  The same calculation gives
 $\E\|\widehat g_k-g_k\|_2^2\le M_{2,k}/(N\rho_k)$.  We use the bounded form in
-the main text to match the conventional importance-sampling notation and to
-make the role of normalized ESS explicit.
+the main text because it isolates normalized ESS as the mismatch-dependent
+factor.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
