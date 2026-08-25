@@ -39,6 +39,39 @@ jobs:
           PY
           python -m py_compile scripts/rewrite_delayed_failure.py
           python scripts/rewrite_delayed_failure.py
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('main.tex')
+          s = p.read_text(encoding='utf-8')
+
+          # JSON transport can encode a lone "\f" as a form-feed character.
+          # Restore the intended LaTeX command prefix everywhere.
+          s = s.replace('\x0c', r'\f')
+
+          old_title = "\\title{\\bf When Does Clipping Help?\\\\\nEffective Sample Size and Policy-Gradient Reliability}"
+          new_title = "\\title{\\bf When Does Permissive Policy Optimization Fail?\\\\\nEffective Sample Size and Gradient Reliability in RLVR}"
+          s = s.replace(old_title, new_title)
+          s = s.replace("\\newtheorem{assumption}[theorem]{Assumption}\n", "")
+
+          if '\x0c' in s:
+              raise RuntimeError('A form-feed control character remains in main.tex')
+          if "\\newtheorem{assumption}" in s or "\\begin{assumption}" in s:
+              raise RuntimeError('The numbered assumption environment survived')
+          if 'When Does Clipping Help?' in s:
+              raise RuntimeError('The old paper title survived')
+
+          intro = s.split('\\section{Introduction}', 1)[1].split('\\section{Related work}', 1)[0]
+          for token in ('$', '\\begin{equation}', '\\begin{align}', '\\[', '\\('):
+              if token in intro:
+                  raise RuntimeError(f'Introduction contains mathematics: {token}')
+          for term in ('effective sample size', 'importance sampling', 'variance', 'bias',
+                       'gradient', 'trust region', 'surrogate', 'divergence'):
+              if term.lower() in intro.lower():
+                  raise RuntimeError(f'Introduction contains technical jargon: {term}')
+
+          p.write_text(s, encoding='utf-8')
+          PY
 
       - name: Compile LaTeX
         uses: xu-cheng/latex-action@v3
