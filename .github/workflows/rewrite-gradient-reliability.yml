@@ -29,6 +29,16 @@ jobs:
 
       - name: Rewrite the paper
         run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/rewrite_gradient_reliability.py')
+          text = path.read_text()
+          old = 'text = replace_between(text, r"\\begin{abstract}", r"\\end{abstract}", ABSTRACT)'
+          new = 'text = replace_between(text, r"\\begin{abstract}", r"\\end{abstract}", ABSTRACT.removesuffix(r"\\end{abstract}"))'
+          if old not in text:
+              raise RuntimeError('abstract replacement line not found')
+          path.write_text(text.replace(old, new))
+          PY
           python -m py_compile scripts/rewrite_gradient_reliability.py
           python scripts/rewrite_gradient_reliability.py
 
