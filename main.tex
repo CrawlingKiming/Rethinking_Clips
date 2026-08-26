@@ -539,530 +539,104 @@ when its variance reduction exceeds its induced bias and lowers total estimator
 risk below the gradient signal. If neither estimator meets this condition, the
 theory points to fresh data rather than stronger clipping.
 
-The contextual bandit confirms the predicted relation among normalized ESS,
-gradient error, harmful updates, and estimator crossover. The language-model
-runs show the same temporal ordering at scale: permissive learning succeeds
-while effective support is broad, and selective protection becomes useful only
-after support deteriorates. Future work should develop tighter online estimates
-of the contribution scale and test whether the resulting reliability boundary
-transfers across models, rollout sizes, and verifier tasks.
+The categorical contextual bandit confirms the two links used by the theory.
+Lower normalized ESS coincides with larger gradient-estimation error, and
+harmful updates appear after the realized error reaches the scale of the
+population gradient signal. The language-model runs show a related temporal
+ordering at scale: permissive learning succeeds while effective support is
+broad, and selective protection becomes useful only after support deteriorates.
+Future work should develop tighter online estimates of the contribution scale
+and test whether the resulting reliability boundary transfers across models,
+rollout sizes, and verifier tasks.
 
 \appendix
 
-\section{Compact contextual-bandit protocol and supporting results}
+\section{Categorical Optdigits protocol}
 \label{app:bandit}
 
-This appendix records the task, exact oracle, RLVR-style update loop, frozen-state
-diagnostics, and supporting results. The sequence is sufficient to interpret
-and reproduce Figures~\ref{fig:formula-oracle} and
-\ref{fig:ess-validation} without repeating derivations from the main theory.
+This appendix gives the full construction used in Section~\ref{sec:simulation}. The experiment is a one-step contextual bandit with a ten-class action space. It contains no ESS-conditioned update rule.
 
-\subsection{Task and correspondence to RLVR}
+\subsection{Finite population and policy}
 
-The testbed turns supervised classification into a verifier task using the
-standard contextual-bandit reduction of \citet{wang2017adaptive}: an input is
-presented as the context, a policy samples an answer, and reward is one only for
-the correct label. We replace the single label action with a token sequence and
-embed this task in the grouped rollout and minibatch structure used by RLVR
-\citep{shao2024deepseekmath,yu2025dapo}. Table
-\ref{tab:rlvr-correspondence} records the resulting correspondence.
+Optdigits contains 5,620 labeled handwritten-digit images \citep{alpaydin1998optdigits}. We concatenate the supplied training and test files, divide each of the 64 pixel-count features by 16, and append an intercept. The resulting finite population is $\{(x_j,y_j)\}_{j=1}^{M}$ with $M=5{,}620$, $x_j\in\mathbb R^{65}$, and $y_j\in\{0,\ldots,9\}$. The original split is not used because the target is finite-population policy optimization rather than classification generalization.
 
-\begin{table}[htbp]
-\centering
-\small
-\caption{Correspondence between RLVR and the contextual-bandit verifier task.}
-\label{tab:rlvr-correspondence}
-\begin{tabular}{lll}
-\toprule
-RLVR object & Bandit object & Realization \\
-\midrule
-Prompt $X$ & Context $x$ & Optdigits feature vector \\
-Complete response $Y$ & Sequence $Y_{1:16}$ & 16-token binary digit code \\
-Verifier reward $R$ & Exact-match reward & $\mathbf{1}\{Y_{1:16}=c(y)\}$ \\
-Rollout policy $Q$ & Old policy & Policy that generated the responses \\
-Current policy $P_\theta$ & Updated policy & Policy used for the minibatch update \\
-Sequence ratio & Importance ratio & $P_\theta(Y_{1:16}\mid x)/Q(Y_{1:16}\mid x)$ \\
-Rollout batch & Grouped responses & 128 prompts, 16 responses per prompt \\
-Optimization phase & Minibatch sequence & Four epochs of 16 updates, then a new rollout \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The testbed uses a sequence policy, not a language model. Its token heads are
-conditionally independent so that the population gradient remains exact, but
-its response ratio is the same product of token ratios that appears in RLVR.
-During training, the learner observes only sampled responses, rollout log
-probabilities, and verifier rewards. Labels are used only by the oracle that
-evaluates the finite-population reward and gradient. This separation preserves
-the RLVR feedback structure while exposing the quantities needed to test the
-theory.
-
-\subsection{Finite population and initial policy}
-
-Optdigits is a handwritten-digit classification benchmark with 5,620 labeled
-examples
-\citep{alpaydin1998optdigits}. Each original $32\times32$ binary image is
-partitioned into $4\times4$ blocks; foreground counts produce 64 integer
-features in $\{0,\ldots,16\}$. We concatenate the supplied 3,823 training and
-1,797 test examples, divide each feature by 16, and append an intercept. This
-gives a finite population $\{(x_j,y_j)\}_{j=1}^{M}$ with $M=5{,}620$ and
-$x_j\in\mathbb{R}^{65}$. The original split is not used because the estimand
-is finite-population policy optimization, not classification generalization.
-
-Each label $y\in\{0,\ldots,9\}$ has a four-bit binary representation. Let
-$c(y)\in\{0,1\}^{16}$ repeat this code four times. The repetition changes only
-the response length, not which answer is correct, and creates a sequence ratio
-that compounds over 16 token probabilities. The policy has one Bernoulli head
-per token position,
-\begin{align}
-  p_{\theta,\ell}(x)&=\sigma(\theta_\ell^\top x),\nonumber\\
-  P_\theta(a_{1:16}\mid x)
-  &=\prod_{\ell=1}^{16}
-    p_{\theta,\ell}(x)^{a_\ell}
-    \{1-p_{\theta,\ell}(x)\}^{1-a_\ell},
-  \qquad \theta\in\mathbb{R}^{16\times65}.
-  \label{eq:optdigits-policy}
-\end{align}
-The verifier reward is
-$R(x_j,a_{1:16})=\mathbf{1}\{a_{1:16}=c(y_j)\}$.
-
-Initialization is deterministic and uses no experimental outcomes. Starting
-from zero, we fit all token heads for 500 full-population logistic-regression
-steps with step size $0.8$ and no regularization. We then multiply the fitted
-weights by $0.55$ to keep the initial policy stochastic, which gives exact
-initial reward $V(\theta_0)=0.095766$. This procedure uses no data split,
-minibatching, early stopping, or model selection.
-
-For compactness, define
+The policy is a linear softmax model,
 \begin{equation}
-  q_j(\theta)
-  :=P_\theta(c(y_j)\mid x_j)
-  =\prod_{\ell=1}^{16}
-  \left[c_{j\ell}p_{j\ell}
-  +(1-c_{j\ell})(1-p_{j\ell})\right],
-  \label{eq:correct-sequence-probability}
+ \pi_\theta(a\mid x)
+ =\frac{\exp(\theta_a^\top x)}{\sum_{c=0}^{9}\exp(\theta_c^\top x)},
+ \qquad a\in\{0,\ldots,9\}.
+ \label{eq:categorical-policy}
 \end{equation}
-where $c_{j\ell}=c(y_j)_\ell$ and
-$p_{j\ell}=p_{\theta,\ell}(x_j)$. The finite-population objective is
+The reward is $R(x_j,a)=\mathbf 1\{a=y_j\}$, so the exact population objective is
 \begin{equation}
-  V(\theta)=\frac1M\sum_{j=1}^{M}q_j(\theta).
-  \label{eq:optdigits-value}
+ J(\theta)=\frac1M\sum_{j=1}^{M}\pi_\theta(y_j\mid x_j).
+ \label{eq:categorical-value}
 \end{equation}
-
-\subsection{Exact gradient and group-relative advantage}
-
-The Bernoulli score identity gives the exact finite-population gradient
+Writing $e_y$ for the one-hot vector of class $y$, the exact population gradient is
 \begin{equation}
-  \nabla_{\theta_\ell}V(\theta)
-  =\frac1M\sum_{j=1}^{M}
-    q_j(\theta)\{c_{j\ell}-p_{j\ell}\}x_j.
-  \label{eq:optdigits-gradient}
+ g(\theta)
+ =\frac1M\sum_{j=1}^{M}
+ \pi_\theta(y_j\mid x_j)
+ \{e_{y_j}-\pi_\theta(\cdot\mid x_j)\}x_j^\top.
+ \label{eq:categorical-gradient}
 \end{equation}
-where $q_j(\theta)$ is the correct-sequence probability,
-$c_{j\ell}$ is its bit at position $\ell$, and $p_{j\ell}$ is the policy
-probability of bit one. The oracle enumerates all 5,620 contexts at the current
-pre-update policy. We measure a sampled estimator by
-\begin{equation}
-  E_t=\|\widehat g_t-\nabla V(\theta_t)\|_F^2,
-  \label{eq:optdigits-gradient-error}
-\end{equation}
-and report its mean within each fixed ESS interval.
+Both Equations~\eqref{eq:categorical-value} and \eqref{eq:categorical-gradient} are evaluated by summing over all images. The policy is initialized by 400 full-population cross-entropy steps with step size $0.5$, after which the fitted weights are multiplied by $0.35$. This produces an initial population value of $0.4382$ while retaining substantial action randomness.
 
-For response $g$ to prompt $i$, we use the leave-one-out advantage
-\begin{equation}
-  A_{ig}=R_{ig}-\frac1{G-1}\sum_{h\ne g}R_{ih}
-  =\frac{G}{G-1}(R_{ig}-\bar R_i).
-  \label{eq:loo-group-advantage}
-\end{equation}
-It has the sign of the group-centered GRPO advantage
-\citep{shao2024deepseekmath}; standard-deviation scaling is omitted so every
-minibatch targets the same population gradient. The baseline excludes the
-focal response and is therefore independent of it conditional on the prompt.
-Importance weighting and the zero-mean score identity then preserve the target
-in Equation~\eqref{eq:optdigits-gradient}.
+\subsection{One-epoch rollout and update}
 
-\subsection{Rollout and minibatch procedure}
-
-\begin{algorithm}[htbp]
-\caption{RLVR-style OptDigits policy optimization}
-\label{alg:bandit-loop}
-\centering
-\fbox{\begin{minipage}{0.92\linewidth}
-\small
-\textbf{Input:} initial policy $\theta_0$; eight rollouts; 128 prompts per
-rollout; $G=16$ responses per prompt; 16 minibatches; four optimization epochs.
+Each policy iteration uses the following procedure.
 \begin{enumerate}
-  \item Set the rollout policy $Q\leftarrow P_\theta$. Sample prompts and
-  grouped responses, then compute verifier rewards and leave-one-out advantages.
-  \item Randomly partition the intact prompt groups into 16 minibatches, each
-  containing eight groups and $N=128$ complete responses.
-  \item In each of four optimization epochs, traverse all minibatches. Before
-  every update, recompute $W=P_\theta(Y\mid x)/Q(Y\mid x)$, policy scores, and
-  sample ESS. Form the designated raw, PPO-masked, or conditional estimator.
-  \item After all 64 updates, discard the rollout and repeat from the new policy.
+ \item Freeze the current parameters as the rollout policy $Q$.
+ \item Sample 600 images without replacement and draw one action from $Q(\cdot\mid x)$ for each image.
+ \item Set $A=R-Q(y\mid x)$, where $Q(y\mid x)$ is used as a detached context-dependent baseline.
+ \item Shuffle the 600 observations into 12 minibatches of size 50 and traverse them once.
+ \item Discard the rollout and collect a new batch from the updated policy.
 \end{enumerate}
-\end{minipage}}
-\end{algorithm}
-
-Every response enters one update per optimization epoch. Within a rollout,
-responses, rewards, advantages, and rollout probabilities remain fixed, whereas
-current probabilities, ratios, scores, and ESS are recomputed before each
-update. Theorem~\ref{thm:permissive-reliability} applies to the first disjoint traversal; later
-epochs deliberately test behavior after sample reuse. Sixteen minibatches are
-used because the first four never reach ESS below $0.1$ in the diagnostic runs;
-a shorter traversal would not expose the regime under study.
-
-\subsection{Estimators and diagnostics}
-
-Let $S_{ig,t}=\nabla_\theta\log
-P_{\theta_{r,t-1}}(Y_{ig}\mid x_i)$. For each $N=128$ minibatch, the
-permissive and PPO-masked gradients are
-\begin{align}
-  \widehat g_{\mathrm{raw},t}
-  &=\frac1N\sum_{i,g}W_{ig,t}A_{ig}S_{ig,t},
-    \label{eq:simulation-raw-gradient}\\
-  \widehat g_{\mathrm{PPO},t}
-  &=\frac1N\sum_{i,g}W_{ig,t}M_{ig,t}^{\mathrm{seq}}A_{ig}S_{ig,t},
-    \label{eq:simulation-ppo-gradient}
-\end{align}
-where the experiment uses the response-level analogue
+Thus each rollout is used for one optimization epoch. At a minibatch update, the unmodified estimator is
 \begin{equation}
-  M_{ig,t}^{\mathrm{seq}}
-  =\mathbf{1}\{A_{ig}\ge0,W_{ig,t}\le1+\epsilon\}
-   +\mathbf{1}\{A_{ig}<0,W_{ig,t}\ge1-\epsilon\},
-  \qquad \epsilon=0.2.
-  \label{eq:simulation-sequence-mask}
+ \widehat g(\theta)
+ =\frac1n\sum_{i=1}^{n}
+ \frac{\pi_\theta(a_i\mid x_i)}{Q(a_i\mid x_i)}
+ A_i\nabla_\theta\log\pi_\theta(a_i\mid x_i).
+ \label{eq:categorical-raw-gradient}
 \end{equation}
-This construction applies the advantage-sign mask once to the complete-response
-ratio rather than separately to token ratios. It is therefore a controlled
-sequence-level masking analogue, not the exact token-local PPO/GRPO gradient and
-not numerical ratio truncation. The third method uses
+The static PPO trajectory uses the usual advantage-dependent mask with radius $0.2$. Both static trajectories use learning rate $3.0$ and six rollout cycles. They are used only to generate a broad collection of pre-update policy states. No trajectory changes its update rule according to ESS.
+
+\subsection{Population ESS and frozen-state redraws}
+
+For a current policy $P_\theta$ and rollout policy $Q$, the normalized population ESS is exact in this categorical model:
 \begin{equation}
-  \widehat g_{\mathrm{cond},t}
-  =\begin{cases}
-    \widehat g_{\mathrm{raw},t},&\widehat\rho_t\ge0.1,\\
-    \widehat g_{\mathrm{PPO},t},&\widehat\rho_t<0.1,
-  \end{cases}
-  \qquad
-  \widehat\rho_t
-  =\frac{(\sum_{i,g}W_{ig,t})^2}
-  {N\sum_{i,g}W_{ig,t}^2}.
-  \label{eq:simulation-gate}
+ \rho(\theta,Q)
+ =\left\{
+ \frac1M\sum_{j=1}^{M}\sum_{a=0}^{9}
+ \frac{\pi_\theta(a\mid x_j)^2}{Q(a\mid x_j)}
+ \right\}^{-1}.
+ \label{eq:categorical-population-ess}
 \end{equation}
-The $0.1$ threshold is fixed before the runs and is not selected from a reported
-outcome. All methods share the initialization, prompt draws, response-sampling
-uniforms, and group permutations within each of 100 paired replications.
+We order all pre-update states by Equation~\eqref{eq:categorical-population-ess} and select 30 approximately equally spaced states over the observed range. At each state, 80 independent minibatches of 128 context-action pairs are redrawn from the frozen rollout policy. These redraws estimate the conditional gradient MSE. The first 12 redraws also receive a common diagnostic step of size $0.25$, after which Equation~\eqref{eq:categorical-value} is recomputed exactly. None of these diagnostic redraws changes the training trajectory.
 
-The first 20 conditional replications provide 2,560 pre-update diagnostics. At
-each state, we evaluate the raw gradient against
-Equation~\eqref{eq:optdigits-gradient} and compare its counterfactual reward
-step with the exact-gradient step. Results use seven prespecified ESS intervals:
-\[
-  \begin{gathered}
-    \relax[0,0.03),\ [0.03,0.1),\ [0.1,0.2),\ [0.2,0.4),\\
-    [0.4,0.6),\ [0.6,0.8),\ [0.8,1].
-  \end{gathered}
-\]
-Within-bin error bars are standard errors. Optimization curves use all 100
-replications and report relative population-reward improvement from the common
-initial policy with 95\% confidence intervals. One rollout costs 2,048
-verifier responses.
-
-\subsection{Fixed-checkpoint crossover diagnostic}
-
-To estimate conditional MSE rather than one realized error, we freeze the
-rollout and current policies at selected pre-update checkpoints and redraw
-independent minibatches. This diagnostic does not change training.
-
-The finite Bernoulli policy also makes population sequence ESS exact. For
-prompt $x$ and token position $\ell$, let $q_{x\ell}$ and $p_{x\ell}$ denote
-the rollout and current probabilities of token one. Independence across the
-16 response positions gives
-\begin{align}
-  \E_Q[W^2\mid x]
-  &=\prod_{\ell=1}^{16}
-    \left\{
-      \frac{p_{x\ell}^2}{q_{x\ell}}
-      +\frac{(1-p_{x\ell})^2}{1-q_{x\ell}}
-    \right\},
-    \label{eq:simulation-weight-second-moment}\\
-  \rho_{\mathrm{pop}}
-  &=\left\{
-    \frac1{5620}\sum_{x=1}^{5620}\E_Q[W^2\mid x]
-  \right\}^{-1}.
-    \label{eq:simulation-population-ess}
-\end{align}
-These equations use $\E_Q[W]=1$ and contain no minibatch noise. We evaluate
-eight checkpoints from each of the seven ESS intervals, giving 56 frozen states
-selected from the 2,560 trajectory checkpoints. At each state, 32 paired
-redraws compare raw and PPO-masked estimates. One independent block contains
-eight prompts and 16 responses per prompt, hence $N=128$ sequences; the
-$N=512$ estimate averages four blocks. The block is the independent unit
-because responses within a prompt share an advantage. For checkpoint $c$,
-estimator $e$, and size $N$, we report
-\begin{equation}
-  \widehat{\operatorname{MSE}}_{c,e,N}
-  =\frac1{32}\sum_{s=1}^{32}
-    \left\|
-      \widehat g_{c,e,N}^{(s)}-\nabla V(\theta_c)
-    \right\|_F^2.
-  \label{eq:simulation-crossover-mse}
-\end{equation}
-We average redraws within a state and states within an ESS interval; standard
-errors use the eight states as independent units. PPO reduction is
-$100(\widehat{\operatorname{MSE}}_{\mathrm{raw}}-
-\widehat{\operatorname{MSE}}_{\mathrm{PPO}})/
-\widehat{\operatorname{MSE}}_{\mathrm{raw}}$. Positive values favor masking.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/ess_estimator_crossover.pdf}
-  \caption{Direct raw-versus-sequence-mask gradient-MSE diagnostic at frozen policy
-  states. (a) At $N=512$, the sequence mask has lower MSE in the low-ESS regime,
-  whereas the raw estimator has lower MSE at high ESS. (b) PPO MSE reduction
-  relative to the raw estimator for $N=128$ and $N=512$; positive values favor
-  the sequence mask (called PPO in the plot). Each point averages eight states evaluated with 32 independent
-  redraws. Error bars are standard errors across states.}
-  \label{fig:ess-crossover}
-\end{figure}
-
-\subsection{Formula calibration and held-out decision test}
-
-We split the eight states in each ESS interval into four calibration and four
-test states, yielding 28 of each. At every state,
-100 paired $N=128$ blocks estimate the raw covariance trace $\widehat V_W$, the
-PPO covariance trace $\widehat V_C$, and the PPO squared bias $\widehat B_C$.
-The squared-bias estimate subtracts the sampling variance of the estimated mean
-and is truncated at zero. Averaging $K\in\{1,2,4,8\}$ independent blocks gives
-\begin{equation}
-  \widehat R_W(K):=\frac{\widehat V_W}{K},
-  \qquad
-  \widehat R_C(K):=\widehat B_C+\frac{\widehat V_C}{K}.
-  \label{eq:formula-risks}
-\end{equation}
-These are the two sides of the diagnostic decomposition in
-Equation~\eqref{eq:crossover} at block level. For each
-$K$, we choose the ESS midpoint that minimizes fitted risk while applying PPO
-below the threshold and raw above it. The only interior calibration solution is
-$K=4$, or $N=512$, with threshold $0.417$.
-
-Held-out evaluation uses 100 paired redraws at each test state.
-The fitted threshold never sees test-state errors; standard errors use the 28
-states as independent units. The subsequent optimization study freezes that
-threshold, uses 512 sequences per update, traverses each rollout for four epochs,
-and runs eight rollout cycles in 100 paired replications. Sample ESS, rather
-than population ESS, determines the training intervention.
-
-The fixed-$0.1$ trajectory also records shadow raw and PPO gradients whenever
-sample ESS is below $0.417$. Comparing each with the exact gradient yields the
-three intervals $[0,0.1)$, $[0.1,0.25)$, and $[0.25,0.417)$. These shadow
-calculations do not alter training. Means and standard errors use the 100
-replications as independent units.
-
-\subsection{Results}
-
-\paragraph{ESS identifies gradient failure.}
-Table~\ref{tab:rlvr-diagnostics} reports all prespecified ESS bins. The
-permissive-gradient MSE increases monotonically from the highest-ESS bin to the
-lowest. The corresponding policy step improves reward above ESS $0.2$, is
-approximately neutral between $0.1$ and $0.2$, and reduces reward below $0.1$.
-In contrast, the oracle-gradient step improves reward in every bin. The loss
-below $0.1$ is therefore attributable to gradient estimation error rather than
-to the absence of a locally improving direction.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/ess_policy_validation.pdf}
-  \caption{ESS reliability and the initial operational test.
-  (a) Permissive-gradient error by pre-update ESS.
-  (b) Exact reward change after a permissive step and after its matched
-  oracle-gradient step. Dotted lines mark the prespecified threshold $0.1$;
-  error bars in (a) and (b) are standard errors within ESS bins.
-  (c) Relative population-reward improvement against verifier responses;
-  bands are 95\% confidence intervals over 100 paired replications.}
-  \label{fig:ess-validation}
-\end{figure}
+Table~\ref{tab:categorical-ess-bins} reports the six equal-count ESS bins used in Figure~\ref{fig:optdigits-theory}. Each bin contains five frozen states. The MSE is averaged over 80 redraws per state, and the harmful-update rate is computed from the 12 diagnostic steps per state.
 
 \begin{table}[htbp]
 \centering
 \small
-\caption{Minibatch diagnostics from the first 20 replications. Count is the
-number of minibatch updates in each fixed ESS interval. Gradient MSE and
-one-step relative reward changes are means $\pm$ standard errors.}
-\label{tab:rlvr-diagnostics}
-\begin{tabular}{lrrrr}
+\caption{Categorical Optdigits diagnostics across population-ESS bins.}
+\label{tab:categorical-ess-bins}
+\begin{tabular}{rrr}
 \toprule
-ESS interval & Count & Raw-gradient MSE & Raw change (\%) & Exact change (\%) \\
+Median population ESS & Unmodified gradient MSE & Harmful updates (\%) \\
 \midrule
-$[0,0.03)$ & 26 & $0.477\pm0.207$ & $-13.29\pm5.82$ & $6.29\pm1.10$ \\
-$[0.03,0.1)$ & 76 & $0.131\pm0.034$ & $-3.99\pm1.75$ & $7.03\pm0.70$ \\
-$[0.1,0.2)$ & 137 & $0.054\pm0.008$ & $-0.10\pm0.91$ & $5.94\pm0.48$ \\
-$[0.2,0.4)$ & 443 & $0.028\pm0.002$ & $1.19\pm0.22$ & $4.26\pm0.15$ \\
-$[0.4,0.6)$ & 585 & $0.022\pm0.001$ & $1.42\pm0.19$ & $3.57\pm0.10$ \\
-$[0.6,0.8)$ & 661 & $0.020\pm0.001$ & $1.27\pm0.10$ & $2.99\pm0.07$ \\
-$[0.8,1]$ & 632 & $0.016\pm0.001$ & $2.95\pm0.69$ & $3.49\pm0.12$ \\
+$0.007$ & $0.1981$ & $30.0$ \\
+$0.293$ & $0.1980$ & $1.7$ \\
+$0.554$ & $0.0325$ & $1.7$ \\
+$0.720$ & $0.0216$ & $1.7$ \\
+$0.843$ & $0.0168$ & $0.0$ \\
+$1.000$ & $0.0065$ & $0.0$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\paragraph{Sensitivity to estimator construction.}
-Table~\ref{tab:rlvr-crossover} reports the direct paired comparison. With one
-training-size minibatch, the sequence mask has lower estimated MSE in every ESS
-interval. Averaging four minibatches reduces the permissive estimator's
-variance without removing the masked estimator's bias. At $N=512$, the sequence mask
-has lower mean MSE below population ESS $0.4$, while the permissive estimator has
-lower mean MSE in the three intervals above $0.4$. The crossover therefore appears
-only after averaging more independent blocks. This is the batch-size effect predicted by Equation~\eqref{eq:crossover}, applied to the block-level estimator described above. The result supports ESS as a gradient-error coordinate within this fixed
-construction and confirms that the diagnostic boundary is
-configuration-specific. This sensitivity check is not a batch-size
-prescription for RLVR: an LLM minibatch count need not equal the number of
-independent sampling blocks in the theorem, and the practical $0.1$ rule is
-evaluated through its one-sided low-ESS condition instead.
-
-\begin{table}[htbp]
-\centering
-\small
-\caption{Conditional gradient MSE at frozen policy states. Each entry is the
-mean $\pm$ standard error across eight checkpoints after 32 independent
-redraws per checkpoint. PPO reduction is computed per checkpoint; positive
-values indicate lower MSE for the sequence mask.}
-\label{tab:rlvr-crossover}
-\begin{tabular}{rrlll}
-\toprule
-$N$ & Population-ESS interval & Raw MSE & PPO MSE & PPO reduction (\%) \\
-\midrule
-$128$ & $[0,0.03)$ & $0.085\pm0.028$ & $0.071\pm0.030$ & $25.9\pm11.3$ \\
-$128$ & $[0.03,0.1)$ & $0.223\pm0.160$ & $0.182\pm0.164$ & $49.4\pm10.4$ \\
-$128$ & $[0.1,0.2)$ & $0.038\pm0.003$ & $0.027\pm0.004$ & $30.1\pm6.6$ \\
-$128$ & $[0.2,0.4)$ & $0.031\pm0.007$ & $0.018\pm0.002$ & $33.1\pm7.8$ \\
-$128$ & $[0.4,0.6)$ & $0.023\pm0.002$ & $0.019\pm0.003$ & $19.2\pm4.1$ \\
-$128$ & $[0.6,0.8)$ & $0.017\pm0.002$ & $0.014\pm0.002$ & $16.4\pm2.4$ \\
-$128$ & $[0.8,1)$ & $0.015\pm0.003$ & $0.013\pm0.002$ & $11.1\pm2.8$ \\
-\midrule
-$512$ & $[0,0.03)$ & $0.049\pm0.020$ & $0.043\pm0.021$ & $26.7\pm9.3$ \\
-$512$ & $[0.03,0.1)$ & $0.036\pm0.010$ & $0.031\pm0.011$ & $16.4\pm11.6$ \\
-$512$ & $[0.1,0.2)$ & $0.011\pm0.001$ & $0.011\pm0.001$ & $5.1\pm4.9$ \\
-$512$ & $[0.2,0.4)$ & $0.007\pm0.001$ & $0.006\pm0.001$ & $9.1\pm6.5$ \\
-$512$ & $[0.4,0.6)$ & $0.006\pm0.001$ & $0.007\pm0.001$ & $-19.0\pm5.4$ \\
-$512$ & $[0.6,0.8)$ & $0.005\pm0.001$ & $0.005\pm0.001$ & $-17.6\pm4.8$ \\
-$512$ & $[0.8,1)$ & $0.004\pm0.001$ & $0.004\pm0.001$ & $-10.5\pm6.5$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\paragraph{Calibration fixes an oracle reference configuration.}
-The fitted boundary selects PPO throughout at $N=128$ and $N=256$, raw
-throughout at $N=1024$, and both estimators only at $N=512$, where the interior
-boundary is $0.417$. This choice uses no held-out gradient errors.
-
-\paragraph{The calibrated rule improves held-out gradient risk.}
-Table~\ref{tab:formula-heldout} reports state-normalized excess MSE at $N=512$.
-The fitted $0.417$ boundary improves on the better static estimator by
-$4.3\%\pm1.1\%$. The $0.1$ row is only a reference because this frozen-state
-test uses population ESS, whereas the operational test uses sample ESS along a
-moving trajectory.
-
-\begin{table}[htbp]
-\centering
-\small
-\caption{Held-out estimator selection at $N=512$. Excess MSE is relative to
-the better static estimator and is reported as mean $\pm$ standard error across
-28 test states; negative values are better.}
-\label{tab:formula-heldout}
-\begin{tabular}{lrrr}
-\toprule
-Decision rule & ESS boundary & Excess MSE (\%) & PPO selections (\%) \\
-\midrule
-State-specific formula reference & State-specific & $-3.4\pm2.0$ & $50.0$ \\
-Fitted ESS & $0.417$ & $-4.3\pm1.1$ & $57.1$ \\
-Fixed effective count & $0.250$ & $-4.9\pm1.2$ & $50.0$ \\
-Fixed ESS heuristic & $0.100$ & $-1.1\pm2.7$ & $28.6$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\paragraph{The $0.1$ event selects high-risk updates on its own trajectory.}
-Table~\ref{tab:on-trajectory-diagnostic} reports the shadow comparison from the
-fixed-$0.1$ run. In the selected region, the sequence mask has lower squared gradient error
-on $83.7\%\pm1.4\%$ of updates and reduces conditional MSE by
-$53.3\%\pm2.9\%$. Switching estimators only there improves the measured MSE
-ordering relative to always using raw. The sequence mask also has lower MSE on many
-updates immediately above $0.1$, so the heuristic is a sparse high-confidence
-trigger rather than the full oracle classifier.
-
-\begin{table}[htbp]
-\centering
-\small
-\caption{Shadow estimator comparison along the fixed-$0.1$ trajectory.
-Updates per run and paired diagnostic statistics are means $\pm$ standard
-errors across 100 replications. PPO minus raw step is the exact one-step
-population-reward difference in percentage points.}
-\label{tab:on-trajectory-diagnostic}
-\begin{tabular}{lrrrr}
-\toprule
-Sample ESS & Updates/run & PPO lower MSE (\%) & MSE reduction (\%) &
-PPO minus raw step \\
-\midrule
-$[0,0.1)$ & $16.9\pm0.8$ & $83.7\pm1.4$ & $53.3\pm2.9$ &
-$-0.64\pm0.14$ \\
-$[0.1,0.25)$ & $31.2\pm1.1$ & $82.7\pm1.3$ & $53.4\pm1.7$ &
-$-1.18\pm0.04$ \\
-$[0.25,0.417)$ & $26.3\pm1.3$ & $71.2\pm1.3$ & $36.3\pm1.5$ &
-$-1.13\pm0.07$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The shadow masked step has lower immediate reward despite its lower gradient
-MSE. This is the concrete reason not to use MSE as the update-quality
-criterion: lower estimation risk can accompany less policy improvement. The
-repeated trajectory, not the MSE ordering alone, determines whether masking
-prevents later loss.
-
-\paragraph{Reliability conditioning improves repeated optimization.}
-Table~\ref{tab:n512-optimization} reports the $N=512$ study with eight rollout
-cycles and four optimization epochs per fixed rollout. The
-fitted ESS reference has the highest final reward and the smallest uncertainty. It
-uses the raw estimator for 450.3 of 512 updates on average, which explains its
-fast progress, while its 61.7 PPO-masked updates prevent the late loss observed
-under the static raw estimator. The fixed-$0.1$ rule gives a complementary
-operating point. It masks only $3.3\%$ of updates, matches the raw median, and
-raises the tenth-percentile endpoint from $0.352$ to $0.495$. It ends above
-the fitted reference in 90 of 100 paired runs, although the fitted reference
-retains the higher mean by eliminating a few severe failures that remain under
-the sparse rule. The comparison supports $0.1$ as a conservative practical
-heuristic and shows the additional robustness available from calibration.
-
-\begin{table}[htbp]
-\centering
-\small
-\caption{Optimization over eight rollout cycles, with four epochs per fixed
-rollout and 512 sequences per update. Mean final reward is reported with its
-standard error over 100 paired replications;
-median and tenth percentile are computed across the same final outcomes.}
-\label{tab:n512-optimization}
-\begin{tabular}{lrrrr}
-\toprule
-Update rule & Mean final reward & Median & 10th percentile & Masked updates \\
-\midrule
-Raw & $0.4606\pm0.0098$ & $0.4998$ & $0.3519$ & $0.0$ \\
-PPO masked & $0.4038\pm0.0005$ & $0.4036$ & $0.3982$ & $512.0$ \\
-Fitted ESS, $\tau=0.417$ & $0.4961\pm0.0003$ & $0.4961$ & $0.4933$ & $61.7$ \\
-Fixed count, $\tau=0.250$ & $0.4928\pm0.0050$ & $0.4980$ & $0.4942$ & $35.4$ \\
-Fixed ESS, $\tau=0.100$ & $0.4940\pm0.0050$ & $0.4998$ & $0.4954$ & $16.9$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\paragraph{The conditional intervention preserves early progress.}
-Figure~\ref{fig:ess-validation}(c) shows that the intervention follows the
-permissive trajectory while ESS is high, masks $5.17$ of 128 updates on average,
-and reaches twice the initial reward after 6,144 verifier responses, compared
-with 8,192 for raw and 10,240 for PPO masking. Final exact rewards are
-$0.2826\pm0.0109$, $0.2952\pm0.0014$, and $0.2954\pm0.0098$, respectively.
-The endpoint is not statistically resolved above always masking; the result is
-that reliability conditioning recovers its endpoint after following the faster
-permissive path through the high-ESS regime.
+The second diagnostic uses the realized ratio $\|\widehat g-g\|_2^2/\|g\|_2^2$. Among 209 redraws below one, no update decreases the population objective. Among 151 redraws at or above one, 21 updates decrease it. The exact population-gradient step is positive at every frozen state. This separates estimator failure from the absence of an improving population direction.
 
 \section{Additional RLVR diagnostics}
 \label{app:llm-diagnostics}
