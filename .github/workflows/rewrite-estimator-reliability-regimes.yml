@@ -1,0 +1,47 @@
+name: Rewrite estimator reliability regimes
+
+on:
+  push:
+    branches:
+      - rewrite-estimator-reliability-regimes
+    paths:
+      - scripts/rewrite_estimator_reliability_regimes.py
+      - .github/workflows/rewrite-estimator-reliability-regimes.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  rewrite-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out rewrite branch
+        uses: actions/checkout@v4
+        with:
+          ref: rewrite-estimator-reliability-regimes
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Rewrite paper
+        run: |
+          python -m py_compile scripts/rewrite_estimator_reliability_regimes.py
+          python scripts/rewrite_estimator_reliability_regimes.py
+
+      - name: Compile LaTeX
+        uses: xu-cheng/latex-action@v3
+        with:
+          root_file: main.tex
+
+      - name: Commit rewritten paper
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add main.tex
+          git diff --cached --quiet && exit 0
+          git commit -m "Reframe clipping as estimator reliability across ESS regimes"
+          git push origin HEAD:rewrite-estimator-reliability-regimes
