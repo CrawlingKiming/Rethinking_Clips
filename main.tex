@@ -385,7 +385,7 @@ The theoretical quantity $\rho_k$ is a population object. During training, we us
 \end{equation}
 It is computed from the complete-response ratios before any token coefficient is modified. A finite batch can miss rare, large ratios and can therefore overstate population support, so $\widehat\rho_k$ is an observable diagnostic rather than an exact replacement for $\rho_k$ in the theorem. The numerical value $0.1$ used below is a prespecified operational threshold, not a universal constant derived from the theory.
 
-\section{Contextual-bandit validation of the framework}
+\section{Policy optimization on OptDigits}
 \label{sec:simulation}
 
 The contextual bandit tests three predictions of the theory. First, normalized
@@ -399,10 +399,12 @@ measured directly. The experiment does not estimate the worst-case contribution
 scale in Theorem~\ref{thm:permissive-reliability}; instead, it tests the
 predicted ordering of observable errors and update outcomes.
 
-\subsection{Testbed and oracle}
+\paragraph{Testbed and oracle}
 
 We use the standard reduction from classification to a contextual bandit on Optdigits
-\citep{wang2017adaptive,alpaydin1998optdigits}. Each handwritten-digit image is
+\citep{wang2017adaptive,alpaydin1998optdigits}, which provides  handwritten-digit image with classifciation data.
+
+Each handwritten-digit image is
 a context, the policy emits a 16-token binary encoding of the digit, and an
 exact-match verifier supplies reward. Because the dataset is a finite
 population, we can enumerate the exact reward and policy gradient. The
@@ -410,18 +412,9 @@ sequence action still produces the product importance ratios that drive ESS in
 RLVR, so the testbed removes language-model complexity without removing the
 statistical mechanism of interest.
 
-The optimization loop follows grouped RLVR
-\citep{shao2024deepseekmath,yu2025dapo}. Each rollout samples 128 prompts and
-16 responses per prompt, computes leave-one-out advantages, and supplies four
-epochs of 16 sequential minibatch updates. Ratios and ESS are recomputed before
-every update, and a new rollout is collected only afterward. This repeated-epoch
-trajectory is a stress test beyond the one-epoch freshness condition in
-Theorem~\ref{thm:permissive-reliability}; only the first traversal has the required disjoint
-freshness, and the frozen-policy redraws provide an independent estimator
-diagnostic. We run 100 paired replications; Appendix~\ref{app:bandit}
-gives the compact protocol and full result tables.
+%The optimization loop follows grouped RLVR\citep{shao2024deepseekmath,yu2025dapo}. Each rollout samples 128 prompts and16 responses per prompt, computes leave-one-out advantages, and supplies fourepochs of 16 sequential minibatch updates. Ratios and ESS are recomputed beforeevery update, and a new rollout is collected only afterward. This repeated-epochtrajectory is a stress test beyond the one-epoch freshness condition inTheorem~\ref{thm:permissive-reliability}; only the first traversal has the required disjointfreshness, and the frozen-policy redraws provide an independent estimatordiagnostic. We run 100 paired replications; Appendix~\ref{app:bandit}gives the compact protocol and full result tables.
 
-\subsection{The predicted regime change appears}
+\paragraph{Results}
 
 ESS first predicts the reliability of the permissive gradient. Its MSE rises
 from $1.6\times10^{-2}$ above ESS $0.8$ to $1.31\times10^{-1}$ between $0.03$
