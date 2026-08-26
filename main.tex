@@ -163,36 +163,37 @@ and then ask when an intervention can recover reliability.
 \section{Preliminaries}
 \label{sec:setting}
 
+In this section, we provide the background and the notation that will be employed in the following sections.
+
 \subsection{Policy-gradient estimation from a fixed rollout}
 
-Let $X\sim\nu$ denote a prompt, let $Q(\cdot\mid X)$ be the rollout policy, and let $P_\theta(\cdot\mid X)$ be the current policy. A complete response is denoted by $Y=(Y_1,\ldots,Y_T)$, the joint sample is $Z=(X,Y)\in\mathcal Z$, and $R(Z)$ is its verifier reward. The population objective is $J(\theta):=\E_{P_\theta}[R]$.
+Let $X\sim\nu$ denote a context (prompt) where $Q(\cdot\mid X)$ be the rollout policy and $P_\theta(\cdot\mid X)$ the current policy. A complete response is therefore denoted by $Y=(Y_1,\ldots,Y_T)$, the joint sample is $Z=(X,Y)\in\mathcal Z$, and $R(Z)$ is its verifier reward. Here, the population objective is $J(\theta):=\E_{P_\theta}[R]$.
 
-In RLVR, responses are generated under $Q$ and then reused while the learner changes from $Q$ to $P_\theta$. The objective and the available data are therefore defined under different policies. Assuming $P_\theta(\cdot\mid X)\ll Q(\cdot\mid X)$, this mismatch is corrected by the complete-response likelihood ratio
+In policy optimization, the objective is to maximize the reward of the current policy $P_\theta$ under the observed data from the rollout policy $Q$. Considering  $P_\theta(\cdot\mid X)\ll Q(\cdot\mid X)$, this discrepancy is corrected by the complete-response likelihood ratio
 \begin{equation}
  W_\theta(Z):=\frac{P_\theta(Y\mid X)}{Q(Y\mid X)}.
  \label{eq:sequence-ratio}
 \end{equation}
-Let $b(X)$ be a detached prompt-level baseline and define the policy-gradient contribution
+Let $b(X)$ be a baseline value and define the policy-gradient contribution function
 \begin{equation}
  f_\theta(Z):=\{R(Z)-b(X)\}\nabla_\theta\log P_\theta(Y\mid X).
  \label{eq:gradient-contribution}
 \end{equation}
-The score identity and change of measure then give
+By the standard score identity and change of measure, the gradient of the population objective and the estimator is given as follows:
 \begin{equation}
  g(\theta):=\nabla J(\theta)=\E_Q[W_\theta f_\theta],
  \qquad
  \widehat g_N(\theta):=\frac1N\sum_{i=1}^N W_{\theta,i}f_{\theta,i}.
  \label{eq:true-gradient}
 \end{equation}
-Thus the policy gradient is itself a vector-valued importance-weighted mean, and $\widehat g_N(\theta)$ is its finite-rollout estimate.
 
-This representation makes the statistical difficulty explicit. For a fixed policy, $\widehat g_N(\theta)$ targets the correct gradient, but its finite-sample accuracy depends on how unevenly the likelihood ratios distribute mass across responses. When a few responses carry most of the weight, the nominal batch size $N$ can greatly overstate the amount of information supporting the current update.
+While existing RLVR literature considers only population level of trust-region guarantees, the above representation makes finite-sample accuracy an important aspect. For a fixed policy, $\widehat g_N(\theta)$ targets the correct gradient, but its finite-sample accuracy depends on how unevenly the likelihood ratios distribute mass across responses. 
 
-We analyze one optimization phase. The rollout batch is randomly partitioned into disjoint minibatches, and each minibatch is used at most once in the theoretical traversal. At update $k$, we condition on all previous updates and suppress this conditioning in the notation. The current policy is then fixed and the unused minibatch consists of independent draws from $Q$. When several responses share a prompt or a group-relative baseline, the intact prompt group is treated as one independent sampling unit. Appendix~\ref{app:proofs} gives this extension.
+%We analyze one optimization phase. The rollout batch is randomly partitioned into disjoint minibatches, and each minibatch is used at most once in the theoretical traversal. At update $k$, we condition on all previous updates and suppress this conditioning in the notation. The current policy is then fixed and the unused minibatch consists of independent draws from $Q$. When several responses share a prompt or a group-relative baseline, the intact prompt group is treated as one independent sampling unit. Appendix~\ref{app:proofs} gives this extension.
 
-The remaining question is how to quantify the effective support that the rollout provides to the current policy. Since the estimation error is driven by moments of $W_\theta$, we next introduce a divergence that records these moments and the corresponding normalized effective sample size.
+Hence, the following question is how to quantify the effective support that the rollout provides to the current policy. Since the estimation error is driven by moments of $W_\theta$, we next introduce a divergence that records these moments and the corresponding normalized effective sample size.
 
-\subsection{R\'enyi divergence and normalized effective sample size}
+\subsection{R\'enyi divergence and effective sample size}
 
 R\'enyi divergence is a family of measures indexed by a moment order $\alpha>1$. For the current and rollout policies, define
 \begin{equation}
@@ -223,7 +224,7 @@ The preliminaries identify normalized sequence ESS as the effective-support coor
 
 At update $k$, write $W_k:=W_{\theta_k}$, $f_k:=f_{\theta_k}$, $g_k:=g(\theta_k)$, $\widehat g_k:=\widehat g_N(\theta_k)$, and $\rho_k:=\rho_{\theta_k}$. As stated above, the current policy is fixed after conditioning on the preceding updates, and the $N$ unused sampling units are independent draws from $Q$. We use the standard bounded-integrand condition $\|f_k\|_\infty:=\sup_{z\in\mathcal Z}\|f_k(z)\|_2<\infty$. This condition fixes the scale of one response contribution, while $\rho_k$ records the additional loss of reliability caused by policy mismatch.
 
-\subsection{From normalized ESS to a gradient-error radius}
+\subsection{From ESS to a gradient-error radius}
 \label{sec:raw}
 
 Change of measure gives $\E[\widehat g_k]=g_k$. A standard sample-mean calculation then gives $\E\|\widehat g_k-g_k\|_2^2=N^{-1}\{\E_Q[W_k^2\|f_k\|_2^2]-\|g_k\|_2^2\}$. Using $\|f_k(z)\|_2\le\|f_k\|_\infty$ and $\rho_k^{-1}=\E_Q[W_k^2]$ yields
@@ -290,19 +291,18 @@ The certificate is positive exactly when the observed gradient norm exceeds its 
 
 \begin{remark}[Interpretation of the reliability boundary]
 \label{rem:rho-interpretation}
-Theorem~\ref{thm:permissive-reliability} identifies a loss of certification, not a deterministic collapse point. A zero lower bound means that the rollout no longer certifies the sampled direction at the chosen confidence level. The realized update may still improve.
+Theorem~\ref{thm:permissive-reliability} implies zero lower bound means that the rollout no longer certifies the sampled direction at the chosen confidence level. Confidence level, observed gradient signal and all mismatch-dependent degradation enters through $\rho_k$. 
+\end{remark}
 
 The result complements policy-deviation guarantees. Those guarantees study population-level consequences of changing the policy. The present result studies whether a fixed finite rollout still estimates the current policy gradient accurately enough. Both effects may matter, but they answer different questions.
 
-For fixed $N$, contribution scale, confidence level, and observed gradient signal, all mismatch-dependent degradation enters through $\rho_k$. No universal numerical threshold follows because the required value also depends on those other quantities.
-\end{remark}
-
 The theorem diagnoses when the unmodified estimator loses a useful guarantee, but it does not imply that clipping will repair the problem. A modification can help only if the reduction in sampling error is large enough to compensate for the bias it introduces. We now state this comparison without committing to one particular clipping implementation.
 
-\subsection{When can clipping recover reliability?}
+\subsection{When does clipping becomes necessary?}
 \label{sec:clipping-recovery}
 
-Let $\phi_k:\mathcal Z\to\mathbb R^d$ be any integrable transformation of one rollout sample, and define the corresponding estimator by
+Consider the clipping strategy on the .. token weights denoted..
+
 \begin{equation}
  \widehat g_{\phi,k}:=\frac1N\sum_{i=1}^N\phi_k(Z_i).
  \label{eq:general-modified-estimator}
@@ -316,12 +316,10 @@ The unmodified importance-weighted estimator is recovered by setting $\phi_k(z)=
  \label{eq:clipping-risk-decomposition}
 \end{equation}
 
-\begin{remark}[Per-token coefficient truncation and PPO clipping]
-\label{rem:token-truncation-vs-clipping}
 Write $r_{k,t}$ for the token likelihood ratio and $s_{k,t}:=\nabla_\theta\log P_{\theta_k}(Y_t\mid X,Y_{<t})$ for the token score. A detached per-token coefficient truncation with a bounded function $u$ uses the response contribution $A_k\sum_t u(r_{k,t})s_{k,t}$. For example, an upper truncation uses $u(r)=\min\{r,c\}$.
 
-PPO clipping defines a different estimator. Away from the clipping boundary, its response contribution is $A_k\sum_t r_{k,t}M_\epsilon(r_{k,t},A_k)s_{k,t}$, where $M_\epsilon(r,A)=\mathbf 1\{A\ge0,\ r\le1+\epsilon\}+\mathbf 1\{A<0,\ r\ge1-\epsilon\}$. Thus coefficient truncation caps the magnitude of a token contribution while generally retaining a nonzero gradient, whereas PPO clipping removes the gradient in an advantage-dependent region. Neither operation is the same as truncating the complete-response weight $W_k=\prod_t r_{k,t}$. They define different choices of $\phi_k$ and therefore different biases and variances.
-\end{remark}
+PPO clipping defines a different estimator. Away from the clipping boundary, its response contribution is $A_k\sum_t r_{k,t}M_\epsilon(r_{k,t},A_k)s_{k,t}$, where $M_\epsilon(r,A)=\mathbf 1\{A\ge0,\ r\le1+\epsilon\}+\mathbf 1\{A<0,\ r\ge1-\epsilon\}$. Thus coefficient truncation caps the magnitude of a token contribution while generally retaining a nonzero gradient, whereas PPO clipping removes the gradient in an advantage-dependent region. 
+
 
 For any estimator with total risk $m$, the fixed-step smoothness argument gives the expected-improvement lower bound $\eta_k(\|g_k\|_2^2-m)/2$ for every $0<\eta_k\le1/L_k$. Hence a modified estimator has a stronger lower bound exactly when its total risk is smaller. Substituting Equation~\eqref{eq:clipping-risk-decomposition} reduces this comparison to one condition.
 
