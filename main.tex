@@ -374,7 +374,7 @@ For a common step size $0<\eta_k\le1/L_k$, rule $u_2$ has a positive expected-im
 
 \begin{remark}[ESS and the strength of coefficient control]
 \label{rem:high-ess-clipping}
-The role of $\rho_k$ is to identify the reliability regime of the fixed rollout. When $\rho_k$ is high, Equation~\eqref{eq:rho-gradient-mse-bound} gives a small error bound for the unmodified sequence estimator. In this regime, a loose nonzero token cap provides bounded influence while preserving most of the outbound signal, so aggressive PPO-type masking can be unnecessarily restrictive. When $\rho_k$ is low, the sequence-level reliability certificate deteriorates. Stronger masking can then become preferable if its additional variance reduction satisfies Proposition~\ref{prop:clipping-crossover}. A low value of $\rho_k$ does not prove that masking is better, and a high value does not prove that truncation is optimal. ESS identifies when stronger control can become worth its bias, while the risk comparison determines whether a particular rule is reliable.
+The role of $\rho_k$ is to identify the reliability regime of the fixed rollout. When $\rho_k$ is high, Equation~\eqref{eq:rho-gradient-mse-bound} gives a small error bound for the unmodified sequence estimator. In this regime, a loose nonzero token cap provides bounded influence while retaining a bounded contribution from outbound tokens, so aggressive PPO-type masking can be unnecessarily restrictive. When $\rho_k$ is low, the sequence-level reliability certificate deteriorates. Stronger masking can then become preferable if its additional variance reduction satisfies Proposition~\ref{prop:clipping-crossover}. A low value of $\rho_k$ does not prove that masking is better, and a high value does not prove that truncation is optimal. ESS identifies when stronger control can become worth its bias, while the risk comparison determines whether a particular rule is reliable.
 \end{remark}
 
 The theoretical quantity $\rho_k$ is a population object. During training, we use the standard normalized plug-in estimate
@@ -391,9 +391,9 @@ It is computed from the complete-response ratios before any token coefficient is
 The contextual bandit tests three predictions of the theory. First, normalized
 sequence ESS should track the error of the permissive policy-gradient estimator.
 Second, harmful updates should become more frequent as this reliability
-deteriorates. Third, a clipped estimator should recover reliability only when
-its reduction in variance compensates for its bias, as characterized by
-Proposition~\ref{prop:clipping-crossover}. Because the finite population exposes
+deteriorates. Third, a stronger coefficient rule should recover reliability only when
+its additional variance reduction compensates for its additional bias, as
+characterized by Proposition~\ref{prop:clipping-crossover}. Because the finite population exposes
 both the exact gradient and the exact reward, all three quantities can be
 measured directly. The experiment does not estimate the worst-case contribution
 scale in Theorem~\ref{thm:permissive-reliability}; instead, it tests the
