@@ -458,6 +458,9 @@ def quantile_bin_rows(state_rows: list[dict[str, float]], bins: int = 6) -> list
             "rho_median": float(np.median(rho[indices])),
             "states": float(len(indices)),
         }
+        oracle = np.asarray([item["oracle_change"] for item in selected])
+        row["oracle_mean_change"] = float(np.mean(oracle))
+        row["oracle_change_se"] = standard_error(oracle)
         for name in ("raw", "truncation", "ppo"):
             values = np.asarray([item[f"{name}_mse"] for item in selected])
             row[f"{name}_mse"] = float(np.mean(values))
@@ -465,6 +468,7 @@ def quantile_bin_rows(state_rows: list[dict[str, float]], bins: int = 6) -> list
             changes = np.asarray([item[f"{name}_mean_change"] for item in selected])
             harms = np.asarray([item[f"{name}_harm_rate"] for item in selected])
             row[f"{name}_mean_change"] = float(np.mean(changes))
+            row[f"{name}_change_se"] = standard_error(changes)
             row[f"{name}_harm_rate"] = float(np.mean(harms))
         output.append(row)
     return output
@@ -521,49 +525,45 @@ def make_figure(
 
     ax = axes[0]
     rho = np.asarray([row["population_rho"] for row in state_rows])
-    for name, label, marker in (
-        ("raw", "Unmodified", "o"),
-        ("truncation", "Truncation", "s"),
-        ("ppo", "PPO mask", "^"),
-    ):
-        mse = np.asarray([row[f"{name}_mse"] for row in state_rows])
-        ax.scatter(rho, mse, s=18, alpha=0.38, marker=marker, label=label)
-        x = np.asarray([row["rho_median"] for row in bin_rows])
-        y = np.asarray([row[f"{name}_mse"] for row in bin_rows])
-        order = np.argsort(x)
-        ax.plot(x[order], y[order], marker=marker, linewidth=1.5)
+    raw_mse = np.asarray([row["raw_mse"] for row in state_rows])
+    ax.scatter(rho, raw_mse, s=22, alpha=0.45)
+    x = np.asarray([row["rho_median"] for row in bin_rows])
+    y = np.asarray([row["raw_mse"] for row in bin_rows])
+    yerr = np.asarray([row["raw_mse_se"] for row in bin_rows])
+    order = np.argsort(x)
+    ax.errorbar(x[order], y[order], yerr=yerr[order], marker="o", capsize=3)
     ax.set_yscale("log")
     ax.set_xlabel("Population normalized ESS")
-    ax.set_ylabel("Gradient MSE")
-    ax.set_title("Estimator reliability")
-    ax.legend(frameon=False, fontsize=8)
+    ax.set_ylabel("Unmodified gradient MSE")
+    ax.set_title("ESS and estimator error")
 
     ax = axes[1]
     x = np.asarray([row["relative_error_median"] for row in error_rows])
-    change = np.asarray([row["mean_change"] for row in error_rows])
-    se = np.asarray([row["change_se"] for row in error_rows])
-    ax.errorbar(x, change, yerr=se, marker="o", capsize=3)
-    ax.axhline(0.0, linewidth=1.0)
+    harm = np.asarray([row["harm_rate"] for row in error_rows])
+    ax.plot(x, harm, marker="o")
     ax.axvline(1.0, linestyle=":", linewidth=1.0)
     ax.set_xscale("log")
+    ax.set_ylim(-0.01, max(0.2, float(np.max(harm)) + 0.04))
     ax.set_xlabel(r"Realized squared error / $\|g\|_2^2$")
-    ax.set_ylabel("One-step population change")
-    ax.set_title("Gradient accuracy and improvement")
+    ax.set_ylabel("Probability of negative change")
+    ax.set_title("Error relative to gradient signal")
 
     ax = axes[2]
-    x = np.asarray([row["rho_median"] for row in bin_rows])
-    for name, label, marker in (
-        ("raw", "Unmodified", "o"),
-        ("truncation", "Truncation", "s"),
-        ("ppo", "PPO mask", "^"),
-    ):
-        y = np.asarray([row[f"{name}_harm_rate"] for row in bin_rows])
-        order = np.argsort(x)
-        ax.plot(x[order], y[order], marker=marker, label=label)
-    ax.set_ylim(-0.02, 1.02)
+    raw_change = np.asarray([row["raw_mean_change"] for row in bin_rows])
+    raw_se = np.asarray([row["raw_change_se"] for row in bin_rows])
+    oracle_change = np.asarray([row["oracle_mean_change"] for row in bin_rows])
+    oracle_se = np.asarray([row["oracle_change_se"] for row in bin_rows])
+    ax.errorbar(x=np.asarray([row["rho_median"] for row in bin_rows])[order],
+                y=raw_change[order], yerr=raw_se[order], marker="o",
+                capsize=3, label="Sampled gradient")
+    ax.errorbar(x=np.asarray([row["rho_median"] for row in bin_rows])[order],
+                y=oracle_change[order], yerr=oracle_se[order], marker="s",
+                capsize=3, label="Population gradient")
+    ax.axhline(0.0, linewidth=1.0)
     ax.set_xlabel("Population normalized ESS")
-    ax.set_ylabel("Probability of negative change")
-    ax.set_title("Harmful-update frequency")
+    ax.set_ylabel("One-step population change")
+    ax.set_title("Sampled and oracle updates")
+    ax.legend(frameon=False, fontsize=8)
 
     fig.tight_layout()
     fig.savefig(figure_path.with_suffix(".pdf"), bbox_inches="tight")
@@ -594,36 +594,38 @@ def correlation_summary(
 ) -> str:
     rho = np.asarray([row["population_rho"] for row in state_rows])
     raw_mse = np.asarray([row["raw_mse"] for row in state_rows])
-    log_corr = float(np.corrcoef(np.log(rho), np.log(raw_mse))[0, 1])
+    positive = rho > 0.0
+    log_corr = float(
+        np.corrcoef(np.log(rho[positive]), np.log(raw_mse[positive]))[0, 1]
+    )
     raw_draws = [
         row
         for row in draw_rows
         if row["estimator"] == "raw" and np.isfinite(row["reward_change"])
     ]
-    relative_error = np.asarray([row["relative_error"] for row in raw_draws])
-    reward_change = np.asarray([row["reward_change"] for row in raw_draws])
-    error_change_corr = float(np.corrcoef(np.log1p(relative_error), reward_change)[0, 1])
+    below = [row for row in raw_draws if row["relative_error"] < 1.0]
+    above = [row for row in raw_draws if row["relative_error"] >= 1.0]
+    below_harm = float(np.mean([row["reward_change"] < 0.0 for row in below]))
+    above_harm = float(np.mean([row["reward_change"] < 0.0 for row in above]))
     oracle_negative = float(np.mean([row["oracle_change"] < 0.0 for row in state_rows]))
 
-    low_cut, high_cut = np.quantile(rho, [1.0 / 3.0, 2.0 / 3.0])
+    lowest = min(state_rows, key=lambda row: row["population_rho"])
+    highest = max(state_rows, key=lambda row: row["population_rho"])
     lines = [
         f"states={len(state_rows)}",
-        f"population_rho_min={np.min(rho):.6f}",
+        f"population_rho_min={np.min(rho):.10f}",
         f"population_rho_median={np.median(rho):.6f}",
         f"population_rho_max={np.max(rho):.6f}",
         f"corr_log_rho_log_raw_mse={log_corr:.6f}",
-        f"corr_log_relative_error_reward_change={error_change_corr:.6f}",
+        f"lowest_rho_raw_mse={lowest['raw_mse']:.8f}",
+        f"highest_rho_raw_mse={highest['raw_mse']:.8f}",
+        f"low_to_high_mse_ratio={lowest['raw_mse']/highest['raw_mse']:.6f}",
+        f"relative_error_below_one_count={len(below)}",
+        f"relative_error_below_one_harm_rate={below_harm:.6f}",
+        f"relative_error_above_one_count={len(above)}",
+        f"relative_error_above_one_harm_rate={above_harm:.6f}",
         f"oracle_negative_rate={oracle_negative:.6f}",
     ]
-    for regime, mask in (
-        ("low", rho <= low_cut),
-        ("middle", (rho > low_cut) & (rho <= high_cut)),
-        ("high", rho > high_cut),
-    ):
-        lines.append(f"{regime}_rho_median={np.median(rho[mask]):.6f}")
-        for name in ("raw", "truncation", "ppo"):
-            values = np.asarray([row[f"{name}_mse"] for row in state_rows])
-            lines.append(f"{regime}_{name}_mse={np.mean(values[mask]):.8f}")
     for row in final_rows:
         lines.append(
             f"final_value_{row['trajectory']}_mean={row['mean_final_value']:.8f}"

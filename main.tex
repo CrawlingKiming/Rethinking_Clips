@@ -388,81 +388,29 @@ It is computed from the complete-response ratios before any token coefficient is
 \section{Policy optimization on OptDigits}
 \label{sec:simulation}
 
-The contextual bandit tests three predictions of the theory. First, normalized
-sequence ESS should track the error of the permissive policy-gradient estimator.
-Second, harmful updates should become more frequent as this reliability
-deteriorates. Third, a stronger coefficient rule should recover reliability only when
-its additional variance reduction compensates for its additional bias, as
-characterized by Proposition~\ref{prop:clipping-crossover}. Because the finite population exposes
-both the exact gradient and the exact reward, all three quantities can be
-measured directly. The experiment does not estimate the worst-case contribution
-scale in Theorem~\ref{thm:permissive-reliability}; instead, it tests the
-predicted ordering of observable errors and update outcomes.
+The theory gives two implications that can be tested without introducing an ESS-based decision rule. First, lower effective support should increase the error of the importance-weighted gradient estimate. Second, the sampled update should become vulnerable when its realized gradient error is comparable to or larger than the population gradient signal. The experiment below tests these two links directly. No ESS threshold is used to choose an update.
 
-\paragraph{Testbed and oracle}
+\paragraph{Categorical contextual bandit.}
+We convert the Optdigits classification dataset into a one-step contextual bandit \citep{alpaydin1998optdigits}. Each handwritten-digit image is a context $x$, the action is a digit $a\in\{0,\ldots,9\}$, and the reward is $R(x,a)=\mathbf 1\{a=y(x)\}$. The policy is a linear softmax classifier. The complete dataset is treated as a finite context population, so its population value and gradient can be evaluated exactly.
 
-We use the standard reduction from classification to a contextual bandit on Optdigits
-\citep{wang2017adaptive,alpaydin1998optdigits}, which provides  handwritten-digit image with classifciation data.
+At each policy iteration, we sample 600 images without replacement and draw one action per image from a frozen rollout policy. We use the rollout policy's exact success probability as a detached context-dependent baseline. The 600 observations are shuffled into 12 minibatches, and the policy is updated sequentially for one epoch. The rollout is then discarded and a new batch is collected from the updated policy. We run static unmodified and static PPO trajectories to generate policy states with different levels of mismatch. Neither trajectory switches its update rule according to ESS.
 
-Each handwritten-digit image is
-a context, the policy emits a 16-token binary encoding of the digit, and an
-exact-match verifier supplies reward. Because the dataset is a finite
-population, we can enumerate the exact reward and policy gradient. The
-sequence action still produces the product importance ratios that drive ESS in
-RLVR, so the testbed removes language-model complexity without removing the
-statistical mechanism of interest.
+\paragraph{Oracle diagnostics.}
+To measure estimator reliability independently of a particular realized minibatch, we select 30 pre-update policy states spanning the observed population ESS range. At each state, we draw 80 fresh minibatches of 128 independent context-action pairs from the frozen rollout policy. The exact finite-population gradient gives the squared error of every sampled gradient. For the first 12 redraws at each state, we also evaluate the exact population reward change produced by a common diagnostic step. These redraws are used only for evaluation and never affect training.
 
-%The optimization loop follows grouped RLVR\citep{shao2024deepseekmath,yu2025dapo}. Each rollout samples 128 prompts and16 responses per prompt, computes leave-one-out advantages, and supplies fourepochs of 16 sequential minibatch updates. Ratios and ESS are recomputed beforeevery update, and a new rollout is collected only afterward. This repeated-epochtrajectory is a stress test beyond the one-epoch freshness condition inTheorem~\ref{thm:permissive-reliability}; only the first traversal has the required disjointfreshness, and the frozen-policy redraws provide an independent estimatordiagnostic. We run 100 paired replications; Appendix~\ref{app:bandit}gives the compact protocol and full result tables.
+\paragraph{Results.}
+Figure~\ref{fig:optdigits-theory} verifies both links in the theory. In the lowest-ESS bin, whose median population ESS is $0.007$, the mean squared error of the unmodified gradient is $0.198$. In the on-policy bin, where the median ESS is $1.000$, the corresponding error is $0.0065$, a reduction by more than a factor of thirty. Thus the same nominal minibatch size can provide very different gradient accuracy as effective support changes.
 
-\paragraph{Results}
-
-ESS first predicts the reliability of the permissive gradient. Its MSE rises
-from $1.6\times10^{-2}$ above ESS $0.8$ to $1.31\times10^{-1}$ between $0.03$
-and $0.1$, and to $4.77\times10^{-1}$ below $0.03$. In the same two low-ESS
-regions, permissive steps reduce population reward by $4.0\%$ and $13.3\%$,
-while matched oracle-gradient steps improve reward. ESS therefore identifies
-estimation failure rather than the absence of an improving direction.
-
-Frozen-policy redraws then measure the gradient-MSE decomposition in
-Equation~\eqref{eq:crossover}. With the fixed $N=512$ diagnostic, the
-sequence-level mask has
-lower MSE below population ESS $0.4$, while the permissive estimator has lower
-MSE above it. A disjoint calibration split places the crossover at $0.42$ and
-reduces held-out MSE by $4.3\%\pm1.1\%$ relative to the better static estimator.
-Thus ESS predicts which estimator has lower gradient error under this fixed
-construction; it does not establish which update has greater population gain.
+The second panel compares realized squared gradient error with the population gradient signal. Across 209 redraws for which $\|\widehat g-g\|_2^2<\|g\|_2^2$, none produces a negative population change. Once the realized error exceeds the gradient signal, 21 of 151 updates, or $13.9\%$, are harmful. The population-gradient step improves the objective at all 30 frozen states. The harmful sampled updates therefore arise from estimation error rather than from the absence of a locally improving direction.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures/ess_formula_oracle.pdf}
-  \caption{Controlled tests of the theoretical regime change. (a) The
-  masked-versus-permissive MSE preference changes sign with population ESS.
-  (b) A conservative $0.1$ event selects updates on which the sequence mask usually
-  has lower MSE. Labels give updates per run; error bars are standard errors
-  across 100 replications. (c) The same sparse intervention preserves
-  permissive progress while reducing late failures across eight rollout cycles,
-  with four optimization epochs per fixed rollout. The horizontal axis reports
-  cumulative optimization epochs; bands are 95\% confidence intervals.}
-  \label{fig:formula-oracle}
+  \includegraphics[width=\linewidth]{figures/optdigits_categorical_theory.pdf}
+  \caption{Theory validation in a ten-action Optdigits contextual bandit. (a) The mean-squared error of the unmodified gradient increases as population normalized ESS decreases. Points denote frozen policy states, and the connected values are ESS-bin averages. (b) Harmful updates appear only after the realized squared gradient error reaches the scale of the population gradient signal. The dotted line marks equality of these two quantities. (c) The exact population-gradient step remains improving across the ESS range, while sampled-gradient steps become less reliable as effective support deteriorates. No ESS-conditioned update rule is used in this experiment.}
+  \label{fig:optdigits-theory}
 \end{figure}
 
-Finally, we evaluate the deliberately conservative rule
-$\widehat\rho<0.1$. It selects only $3.3\%$ of updates; within that event, PPO
-has lower MSE on $83.7\%\pm1.4\%$ of updates and reduces
-conditional MSE by $53.3\%\pm2.9\%$. Across eight rollout cycles, each with four
-optimization epochs over its fixed batch, the resulting trajectory reaches
-$0.4940\pm0.0050$ final reward, compared with
-$0.4606\pm0.0098$ for always permissive and $0.4038\pm0.0005$ for always
-masked. The sparse trigger therefore captures the low-ESS side of the
-  empirical diagnostic region with an observable training statistic.
-
-The controlled study supports the framework in three ways. Normalized ESS
-tracks the error of the permissive gradient, harmful updates become more
-frequent as effective support deteriorates, and the relative risk of the
-masked and permissive estimators changes across the same regime. The study
-does not identify a universal threshold or equate the sequence-level mask
-with token-local clipping. The next section tests whether the same delayed
-failure and selective-recovery pattern appears in language-model RLVR.
+The categorical experiment isolates the two statistical links with exact oracle quantities. It is not intended to validate a fixed ESS threshold. The next section examines whether the same loss of effective support accompanies delayed failure in language-model training, where the population gradient is unavailable.
 
 \section{Language-model evidence for delayed failure and recovery}
 \label{sec:llm-experiments}
