@@ -1,0 +1,72 @@
+name: Validate smaller Optdigits rollout setting
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r simulation/requirements.txt
+      - name: Run 100 fresh paired replications
+        run: |
+          python - <<'PY'
+          import csv
+          import importlib.util
+          import math
+          import sys
+          from dataclasses import replace
+          from pathlib import Path
+          import numpy as np
+
+          root=Path.cwd()
+          spec=importlib.util.spec_from_file_location('exp',root/'simulation'/'optdigits_categorical_theory.py')
+          exp=importlib.util.module_from_spec(spec); sys.modules['exp']=exp; spec.loader.exec_module(exp)
+          base=exp.Config(replications=100, rollout_cycles=2)
+          cfg=replace(base, rollout_size=320, minibatches=8, training_learning_rate=2.0)
+          features,labels=exp.load_optdigits(root/'simulation'/'data',False)
+          initial_weights=exp.fit_initial_policy(features,labels,cfg)
+          seed_start=20310826
+          values={m:[] for m in ('raw','ppo','mse_oracle')}; ppo_frac=[]
+          for rep in range(cfg.replications):
+              rng=np.random.default_rng(seed_start+rep)
+              draws=exp.common_randomness(rng,len(features),cfg)
+              for method in ('raw','ppo','mse_oracle'):
+                  _,_,summary=exp.run_trajectory(method,initial_weights,features,labels,draws,cfg,rep,0,collect_states=False)
+                  values[method].append(summary['final_value'])
+                  if method=='mse_oracle': ppo_frac.append(summary['ppo_fraction'])
+          def se(x):
+              x=np.asarray(x,float); return float(np.std(x,ddof=1)/math.sqrt(len(x)))
+          raw=np.asarray(values['raw']); ppo=np.asarray(values['ppo']); oracle=np.asarray(values['mse_oracle'])
+          rows=[]
+          for method,arr in [('raw',raw),('ppo',ppo),('mse_oracle',oracle)]:
+              rows.append({
+                  'method':method,'rollout_size':320,'policy_iterations':2,'learning_rate':2.0,
+                  'minibatches':8,'minibatch_size':40,'replications':100,'seed_start':seed_start,
+                  'mean_final_value':float(arr.mean()),'se_final_value':se(arr),'median_final_value':float(np.median(arr)),
+                  'mean_ppo_fraction':float(np.mean(ppo_frac)) if method=='mse_oracle' else (1.0 if method=='ppo' else 0.0),
+                  'paired_gain_vs_raw':float(np.mean(arr-raw)),'paired_gain_vs_raw_se':se(arr-raw),
+                  'paired_gain_vs_ppo':float(np.mean(arr-ppo)),'paired_gain_vs_ppo_se':se(arr-ppo),
+              })
+          out=root/'simulation'/'results'/'optdigits_batchsize_holdout.csv'
+          with out.open('w',newline='',encoding='utf-8') as f:
+              w=csv.DictWriter(f,fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
+          print(rows)
+          PY
+      - name: Commit holdout and remove temporary workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add simulation/results/optdigits_batchsize_holdout.csv
+          git rm .github/workflows/optdigits-batchsize-holdout.yml
+          git commit -m 'Validate smaller Optdigits rollout setting'
+          git push
