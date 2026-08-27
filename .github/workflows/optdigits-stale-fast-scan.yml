@@ -1,0 +1,30 @@
+name: Run targeted fast stale-rollout scan
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r simulation/requirements.txt
+      - name: Run targeted scan
+        run: python simulation/optdigits_stale_fast_scan.py
+      - name: Commit scan and remove workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add simulation/optdigits_stale_fast_scan.py simulation/results/optdigits_stale_fast_scan.csv
+          git rm .github/workflows/optdigits-stale-fast-scan.yml
+          git commit -m 'Run targeted fast stale-rollout scan'
+          git push
