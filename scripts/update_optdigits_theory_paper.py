@@ -1,4 +1,4 @@
-"""Patch the paper after running the Optdigits theory-validation experiment."""
+"""Patch the paper after the final Optdigits estimator comparison."""
 
 from __future__ import annotations
 
@@ -30,110 +30,93 @@ def pm(mean: float, se: float, digits: int = 3) -> str:
 
 def build_main_section(summary: dict[str, float]) -> str:
     low_ess = summary["low_ess_median"]
+    low_raw = summary["low_ess_raw_mse"]
+    low_ppo = summary["low_ess_ppo_mse"]
+    low_ppo_fraction = 100 * summary["low_ess_ppo_lower_mse_fraction"]
     high_ess = summary["high_ess_median"]
-    low_mse = summary["low_ess_raw_mse"]
-    high_mse = summary["high_ess_raw_mse"]
-    below_count = int(summary["relative_error_below_one_count"])
-    above_count = int(summary["relative_error_above_one_count"])
-    below_harm = 100 * summary["relative_error_below_one_harm_rate"]
-    above_harm = 100 * summary["relative_error_above_one_harm_rate"]
-    low_ppo = 100 * summary["low_ess_ppo_lower_risk_fraction"]
-    high_ppo = 100 * summary["high_ess_ppo_lower_risk_fraction"]
-    raw = summary["final_raw"]
-    raw_se = summary["final_raw_se"]
-    ppo = summary["final_ppo"]
-    ppo_se = summary["final_ppo_se"]
-    oracle = summary["final_oracle"]
-    oracle_se = summary["final_oracle_se"]
-    oracle_frac = 100 * summary["oracle_ppo_fraction"]
-    ppo_raw = summary["ppo_minus_raw"]
-    ppo_raw_se = summary["ppo_minus_raw_se"]
-    oracle_raw = summary["oracle_minus_raw"]
-    oracle_raw_se = summary["oracle_minus_raw_se"]
-    oracle_ppo = summary["oracle_minus_ppo"]
-    oracle_ppo_se = summary["oracle_minus_ppo_se"]
+    high_raw = summary["high_ess_raw_mse"]
+    high_ppo = summary["high_ess_ppo_mse"]
+    high_ppo_fraction = 100 * summary["high_ess_ppo_lower_mse_fraction"]
+    raw_below = int(summary["raw_relative_error_below_one_count"])
+    raw_below_harm = 100 * summary["raw_relative_error_below_one_harm_rate"]
+    raw_above = int(summary["raw_relative_error_above_one_count"])
+    raw_above_harm = 100 * summary["raw_relative_error_above_one_harm_rate"]
+    ppo_below = int(summary["ppo_relative_error_below_one_count"])
+    ppo_below_harm = 100 * summary["ppo_relative_error_below_one_harm_rate"]
+    ppo_above = int(summary["ppo_relative_error_above_one_count"])
+    ppo_above_harm = 100 * summary["ppo_relative_error_above_one_harm_rate"]
+    lambda_max = summary["feature_cov_lambda_max"]
+    smoothness = summary["global_smoothness_bound"]
+    eta_max = summary["certified_eta_max"]
+    eta = summary["used_learning_rate"]
+    raw_final = summary["final_raw"]
+    raw_final_se = summary["final_raw_se"]
+    ppo_final = summary["final_ppo"]
+    ppo_final_se = summary["final_ppo_se"]
+    raw_minus_ppo = summary["raw_minus_ppo"]
+    raw_minus_ppo_se = summary["raw_minus_ppo_se"]
 
     section = r"""
 \section{Theoretical validation on Optdigits}
 \label{sec:simulation}
 
-Optdigits is used only as a finite-population test of the theoretical claims. The experiment is not an ESS-gated algorithm and does not tune an ESS threshold. It tests two statements: normalized ESS controls the reliability of the unmodified gradient estimator, and the lower-MSE estimator gives the stronger update certificate.
+Optdigits is used only as a finite-population test of the theoretical claims. The section compares the unmodified and PPO-masked gradient estimators. It does not define or tune an ESS-gated update rule.
 
 \paragraph{Categorical contextual bandit.}
-We convert Optdigits into a one-step contextual bandit \citep{alpaydin1998optdigits}. Each handwritten-digit image is a context, the action is a digit in $\{0,\ldots,9\}$, and the reward is one only for the correct class. The policy is a linear softmax classifier. At each policy iteration, we draw 320 contexts from the finite population and sample one action per context from a frozen rollout policy. The exact baseline is the rollout policy's probability of the correct class, so the advantage is $A=R-Q(y\mid x)$. The 320 observations are divided into eight minibatches of 40 and used for one optimization epoch. A fresh rollout is collected at the next policy iteration.
+We convert Optdigits into a one-step contextual bandit \citep{alpaydin1998optdigits}. Each handwritten-digit image is a context, the action is a digit in $\{0,\ldots,9\}$, and the reward is one only for the correct class. The policy is a linear softmax classifier. At each policy iteration, we draw 320 contexts from the finite population and sample one action per context from a frozen rollout policy. Since the value of an image under the rollout policy is exactly its probability of the correct class, the advantage is $A=R-Q(y\mid x)$. The observations are divided into eight minibatches of 40 and used for one optimization epoch.
 
-\paragraph{Validation of the reliability theorem.}
-To cover a wide range of policy mismatch, we generate diagnostic states from six policy iterations of the static unmodified and PPO updates. We freeze 30 states across the observed population-ESS range and draw 80 independent minibatches at each state. The exact population gradient gives the squared error of every sampled gradient. The first 12 redraws also receive a common diagnostic step, after which the exact population objective is recomputed.
+\paragraph{Step-size condition.}
+The smoothness condition is checked rather than assumed numerically. Appendix~\ref{app:bandit} shows that the Optdigits objective is globally $\bar L$-smooth with $\bar L\le\tfrac12\lambda_{\max}(M^{-1}\sum_jx_jx_j^\top)$. In this population, $\lambda_{\max}=@@LAMBDA@@$, giving $\bar L=@@SMOOTHNESS@@$ and $1/\bar L=@@ETA_MAX@@$. Every one-step evaluation in Figure~\ref{fig:optdigits-theory} and every learning update in Figure~\ref{fig:optdigits-learning} uses $\eta=@@ETA@@$, so the condition $\eta\le1/\bar L$ holds. A separate stress trajectory is used only to generate a broad collection of frozen policy pairs and is not used to evaluate the smoothness guarantee.
 
-Figure~\ref{fig:optdigits-theory} verifies both links used by the main theorem. The lowest-support bin has median population ESS @@LOW_ESS@@ and unmodified gradient MSE @@LOW_MSE@@, whereas the highest-support bin has ESS @@HIGH_ESS@@ and MSE @@HIGH_MSE@@. Among the @@BELOW_COUNT@@ redraws for which the realized squared gradient error is smaller than the population gradient signal, @@BELOW_HARM@@\% decrease the objective. Once the error reaches or exceeds the signal, @@ABOVE_HARM@@\% of the @@ABOVE_COUNT@@ updates are harmful. The exact population-gradient step remains improving across the diagnostic states.
+\paragraph{Comparing the two estimators.}
+We freeze 30 policy pairs across the observed population-ESS range. At each pair, the finite context-action space gives the exact MSE of the unmodified and PPO estimators for a minibatch of 40. We also draw 80 independent minibatches and apply the first 20 sampled directions with the certified step size.
+
+Figure~\ref{fig:optdigits-theory} shows how PPO changes each link in the theory. In the lowest-support bin, the median ESS is @@LOW_ESS@@, the unmodified MSE is @@LOW_RAW@@, and the PPO MSE is @@LOW_PPO@@. PPO has lower exact MSE at @@LOW_PPO_FRAC@@\% of the states in this bin. In the highest-support bin, the corresponding MSEs are @@HIGH_RAW@@ and @@HIGH_PPO@@, and PPO has lower MSE at only @@HIGH_PPO_FRAC@@\% of states. Thus masking reduces estimator risk when support is poor, but adds unnecessary distortion in much of the high-support regime.
+
+For the unmodified estimator, none of the @@RAW_BELOW@@ updates with realized squared error below the gradient signal is harmful, while @@RAW_ABOVE_HARM@@\% of the @@RAW_ABOVE@@ updates above that boundary decrease the population objective. The corresponding rates for PPO are @@PPO_BELOW_HARM@@\% among @@PPO_BELOW@@ updates below the boundary and @@PPO_ABOVE_HARM@@\% among @@PPO_ABOVE@@ updates above it. These comparisons show that the same error-to-signal boundary governs both estimators, while PPO changes how frequently each estimator enters the unreliable regime.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures/optdigits_theory_validation.pdf}
-  \caption{Validation of the ESS-to-improvement mechanism in the ten-action Optdigits contextual bandit. (a) Unmodified gradient MSE increases as population normalized ESS decreases. Equal-count ESS-bin means with standard errors are shown on logarithmic axes. (b) Harmful updates appear after the realized squared gradient error reaches the population-gradient signal. (c) The exact population-gradient direction remains improving while sampled-gradient updates lose reliability as effective support deteriorates.}
+  \includegraphics[width=\linewidth]{figures/optdigits_estimator_comparison.pdf}
+  \caption{Theoretical validation with the unmodified and PPO-masked estimators. (a) Exact gradient MSE across population normalized ESS. PPO lowers MSE in the low-support region, while the unmodified estimator is more reliable in much of the high-support region. (b) Harmful-update rate as realized squared gradient error crosses the population-gradient signal. (c) One-step population change under the certified step size. The population-gradient direction remains improving, while the two sampled estimators exhibit different bias and variance profiles.}
   \label{fig:optdigits-theory}
 \end{figure}
 
-\paragraph{Validation of the estimator crossover.}
-The first experiment validates the unmodified-estimator theorem but does not yet test Proposition~\ref{prop:clipping-crossover}. We therefore construct an infeasible oracle that knows the exact conditional MSE of the unmodified and PPO estimators before each update. The calculation includes both the sampling variance and the bias introduced by PPO masking. The oracle selects the estimator with smaller total risk:
-\begin{equation}
- \widehat g_{\mathrm{MSE}}
- =\begin{cases}
- \widehat g_{\mathrm{raw}},&m_{\mathrm{raw}}\le m_{\mathrm{PPO}},\\
- \widehat g_{\mathrm{PPO}},&m_{\mathrm{PPO}}<m_{\mathrm{raw}}.
- \end{cases}
- \label{eq:optdigits-mse-oracle}
-\end{equation}
-This oracle uses no ESS threshold. Its purpose is to implement the exact MSE crossover in the proposition.
-
-For the repeated-optimization comparison, all methods use the same rollout samples and minibatch order within each of 100 paired replications. We run two policy iterations, each with one fresh rollout and one optimization epoch. The oracle reaches a final population value of $@@ORACLE@@$, compared with $@@RAW@@$ for the unmodified update and $@@PPO@@$ for PPO. Its paired gain is $@@ORACLE_RAW@@$ over the unmodified estimator and $@@ORACLE_PPO@@$ over PPO. The oracle applies PPO on @@ORACLE_FRAC@@\% of updates and uses the unmodified estimator on the remainder.
-
-Figure~\ref{fig:optdigits-crossover} connects this optimization result directly to the estimator theorem. In the lowest-ESS bin, PPO has lower exact MSE in @@LOW_PPO@@\% of states, while the corresponding fraction in the highest-ESS bin is @@HIGH_PPO@@\%. The preferred estimator therefore changes across support regimes, and selecting by exact total risk outperforms either static choice.
+\paragraph{Learning across all minibatch updates.}
+Figure~\ref{fig:optdigits-learning} restores the full optimization trajectory rather than showing only policy-iteration endpoints. One minibatch update uses 40 images. Five policy iterations with eight minibatches each therefore produce 40 updates, and a fresh rollout is collected after updates 8, 16, 24, and 32. Across 100 paired replications, the final population value is $@@RAW_FINAL@@$ for the unmodified estimator and $@@PPO_FINAL@@$ for PPO, with paired difference $@@RAW_MINUS_PPO@@$. Under the theorem-certified step size, the unmodified estimator retains a small advantage because the rollouts remain sufficiently well supported for PPO masking to remove more signal than variance over much of the trajectory.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures/optdigits_mse_crossover.pdf}
-  \caption{Validation of the estimator-crossover proposition. (a) Exact conditional MSE of the unmodified and PPO estimators across population-ESS bins. (b) Fraction of frozen states in which PPO has lower exact MSE. (c) Population value after each policy iteration for the two static estimators and the exact MSE oracle. Curves show means and 95\% confidence intervals across 100 paired replications.}
-  \label{fig:optdigits-crossover}
+  \includegraphics[width=0.72\linewidth]{figures/optdigits_certified_learning.pdf}
+  \caption{Population value across all 40 minibatch updates. Curves show means and 95\% confidence intervals over 100 paired replications. Dotted vertical lines mark collection of a fresh rollout. Every update uses $\eta=@@ETA@@$, which satisfies the global smoothness condition derived in Appendix~\ref{app:bandit}.}
+  \label{fig:optdigits-learning}
 \end{figure}
 
-\begin{table}[htbp]
-\centering
-\small
-\caption{Optdigits crossover validation over 100 paired replications. Paired gain is relative to the unmodified estimator.}
-\label{tab:optdigits-crossover}
-\begin{tabular}{lrrr}
-\toprule
-Update rule & Final value & Paired gain & PPO updates (\%) \\
-\midrule
-Unmodified & $@@RAW@@$ & $0$ & $0.0$ \\
-PPO & $@@PPO@@$ & $@@PPO_RAW@@$ & $100.0$ \\
-Exact MSE oracle & $@@ORACLE@@$ & $@@ORACLE_RAW@@$ & $@@ORACLE_FRAC@@$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The two Optdigits experiments serve only as theoretical validation. Figure~\ref{fig:optdigits-theory} tests the ESS-dependent reliability mechanism, and Figure~\ref{fig:optdigits-crossover} tests the bias-variance crossover using exact risks unavailable in realistic training. No practical ESS gate is proposed or evaluated in this section. The next section asks whether the same loss of effective support accompanies delayed failure in language-model training.
+Together, the two figures validate the theoretical interpretation. ESS controls the reliability of the unmodified estimator, PPO changes the bias-variance tradeoff rather than uniformly improving it, and aggressive masking can be unnecessarily restrictive while effective support remains broad. No practical ESS gate is proposed or evaluated in Optdigits.
 """
 
     replacements = {
+        "@@LAMBDA@@": f"${lambda_max:.3f}$",
+        "@@SMOOTHNESS@@": f"${smoothness:.3f}$",
+        "@@ETA_MAX@@": f"${eta_max:.3f}$",
+        "@@ETA@@": f"{eta:.2f}",
         "@@LOW_ESS@@": f"${low_ess:.3f}$",
-        "@@LOW_MSE@@": f"${low_mse:.4f}$",
-        "@@HIGH_ESS@@": f"${high_ess:.3f}$",
-        "@@HIGH_MSE@@": f"${high_mse:.4f}$",
-        "@@BELOW_COUNT@@": str(below_count),
-        "@@ABOVE_COUNT@@": str(above_count),
-        "@@BELOW_HARM@@": f"{below_harm:.1f}",
-        "@@ABOVE_HARM@@": f"{above_harm:.1f}",
-        "@@LOW_PPO@@": f"{low_ppo:.1f}",
-        "@@HIGH_PPO@@": f"{high_ppo:.1f}",
-        "@@RAW@@": pm(raw, raw_se),
-        "@@PPO@@": pm(ppo, ppo_se),
-        "@@ORACLE@@": pm(oracle, oracle_se),
-        "@@PPO_RAW@@": pm(ppo_raw, ppo_raw_se),
-        "@@ORACLE_RAW@@": pm(oracle_raw, oracle_raw_se),
-        "@@ORACLE_PPO@@": pm(oracle_ppo, oracle_ppo_se),
-        "@@ORACLE_FRAC@@": f"{oracle_frac:.1f}",
+        "@@LOW_RAW@@": f"${low_raw:.4f}$",
+        "@@LOW_PPO@@": f"${low_ppo:.4f}$",
+        "@@LOW_PPO_FRAC@@": f"{low_ppo_fraction:.1f}",
+        "@@HIGH_RAW@@": f"${high_raw:.4f}$",
+        "@@HIGH_PPO@@": f"${high_ppo:.4f}$",
+        "@@HIGH_PPO_FRAC@@": f"{high_ppo_fraction:.1f}",
+        "@@RAW_BELOW@@": str(raw_below),
+        "@@RAW_ABOVE@@": str(raw_above),
+        "@@RAW_ABOVE_HARM@@": f"{raw_above_harm:.1f}",
+        "@@PPO_BELOW@@": str(ppo_below),
+        "@@PPO_ABOVE@@": str(ppo_above),
+        "@@PPO_BELOW_HARM@@": f"{ppo_below_harm:.1f}",
+        "@@PPO_ABOVE_HARM@@": f"{ppo_above_harm:.1f}",
+        "@@RAW_FINAL@@": pm(raw_final, raw_final_se),
+        "@@PPO_FINAL@@": pm(ppo_final, ppo_final_se),
+        "@@RAW_MINUS_PPO@@": pm(raw_minus_ppo, raw_minus_ppo_se),
     }
     for key, value in replacements.items():
         section = section.replace(key, value)
@@ -141,31 +124,28 @@ The two Optdigits experiments serve only as theoretical validation. Figure~\ref{
 
 
 def build_appendix(
+    summary: dict[str, float],
     ess_bins: list[dict[str, str]],
-    cross_bins: list[dict[str, str]],
 ) -> str:
-    ess_rows = []
+    rows = []
     for row in ess_bins:
-        ess_rows.append(
+        rows.append(
             f"${float(row['rho_median']):.3f}$ & "
-            f"${float(row['raw_mse']):.4f}$ & "
-            f"${float(row['ppo_mse']):.4f}$ & "
-            f"${100 * float(row['raw_harm_rate']):.1f}$ \\\\"
+            f"${float(row['raw_exact_mse']):.4f}$ & "
+            f"${float(row['ppo_exact_mse']):.4f}$ & "
+            f"${100 * float(row['raw_harm_rate']):.1f}$ & "
+            f"${100 * float(row['ppo_harm_rate']):.1f}$ \\\\"
         )
-    cross_rows = []
-    for row in cross_bins:
-        cross_rows.append(
-            f"${float(row['rho_median']):.3f}$ & "
-            f"${float(row['raw_risk']):.4f}$ & "
-            f"${float(row['ppo_risk']):.4f}$ & "
-            f"${100 * float(row['ppo_lower_risk_fraction']):.1f}$ \\\\"
-        )
+    eta = summary["used_learning_rate"]
+    lambda_max = summary["feature_cov_lambda_max"]
+    smoothness = summary["global_smoothness_bound"]
+    eta_max = summary["certified_eta_max"]
 
     appendix = r"""
 \section{Categorical Optdigits protocol}
 \label{app:bandit}
 
-This appendix gives the full construction used in Section~\ref{sec:simulation}. The experiment is a one-step contextual bandit with ten categorical actions. It is designed only to validate the ESS-dependent reliability theorem and the estimator-crossover proposition.
+This appendix gives the full construction used in Section~\ref{sec:simulation}. The experiment is a one-step contextual bandit with ten categorical actions. It is designed only to validate the ESS-dependent reliability theorem and to compare the unmodified and PPO-masked estimators.
 
 \subsection{Finite population and policy}
 
@@ -187,34 +167,63 @@ The reward is $R(x_j,a)=\mathbf 1\{a=y_j\}$, so the exact population objective a
  \{e_{y_j}-\pi_\theta(\cdot\mid x_j)\}x_j^\top.
  \label{eq:categorical-gradient}
 \end{align}
-Both quantities are evaluated by summing over all images. The policy is initialized by 400 full-population cross-entropy steps with step size $0.5$, after which the fitted weights are multiplied by $0.35$. This retains sufficient action randomness for policy-gradient sampling.
+Both quantities are evaluated by summing over all images. The policy is initialized by 400 full-population cross-entropy steps with step size $0.5$, after which the fitted weights are multiplied by $0.35$.
+
+\subsection{A global smoothness certificate}
+
+Let $p=\operatorname{softmax}(z)$ and $q=p_y$. The Hessian of one correct-class probability with respect to the logits is
+\begin{equation}
+ \nabla_z^2q
+ =q\left[
+ (e_y-p)(e_y-p)^\top-\{\operatorname{diag}(p)-pp^\top\}
+ \right].
+ \label{eq:categorical-logit-hessian}
+\end{equation}
+The categorical covariance satisfies $\|\operatorname{diag}(p)-pp^\top\|_{\mathrm{op}}\le1/2$, and $\|e_y-p\|_2^2\le2(1-q)^2$. Hence
+\begin{equation}
+ \|\nabla_z^2q\|_{\mathrm{op}}
+ \le q\{2(1-q)^2+1/2\}
+ \le1/2.
+ \label{eq:categorical-logit-bound}
+\end{equation}
+For a perturbation $U$ of the softmax parameter matrix, Equation~\eqref{eq:categorical-logit-bound} gives
+\begin{align}
+ \left|\nabla^2J(\theta)[U,U]\right|
+ &\le\frac{1}{2M}\sum_{j=1}^M\|Ux_j\|_2^2
+ \nonumber\\
+ &\le\frac12\lambda_{\max}\left(
+ \frac1M\sum_{j=1}^Mx_jx_j^\top
+ \right)\|U\|_F^2.
+ \label{eq:categorical-smoothness-bound}
+\end{align}
+Thus a valid global smoothness constant is $\bar L=\tfrac12\lambda_{\max}(M^{-1}\sum_jx_jx_j^\top)$. For Optdigits, $\lambda_{\max}=@@LAMBDA@@$, so $\bar L=@@SMOOTHNESS@@$ and $1/\bar L=@@ETA_MAX@@$. All evaluated updates use $\eta=@@ETA@@\le1/\bar L$.
 
 \subsection{Sampling and gradient estimators}
 
-At each policy iteration, we freeze the current policy as $Q$, draw 320 contexts independently and uniformly from the finite population, and sample one action from $Q(\cdot\mid x)$ for each context. Since the reward is exact class match, the state value under $Q$ is $Q(y\mid x)$. We therefore use the exact detached baseline and set $A=R-Q(y\mid x)$. The 320 observations are randomly partitioned into eight minibatches of size $n=40$ and traversed once. The rollout is then discarded.
+At each policy iteration, we freeze the current policy as $Q$, draw 320 contexts independently and uniformly from the finite population, and sample one action from $Q(\cdot\mid x)$ for each context. Since the reward is exact class match, the state value under $Q$ is $Q(y\mid x)$. We use the detached exact baseline and set $A=R-Q(y\mid x)$. The 320 observations are randomly partitioned into eight minibatches of size $N=40$ and traversed once. The rollout is then discarded.
 
 The unmodified estimator is
 \begin{equation}
  \widehat g_{\mathrm{raw}}(\theta)
- =\frac1n\sum_{i=1}^n
+ =\frac1N\sum_{i=1}^N
  \frac{\pi_\theta(a_i\mid x_i)}{Q(a_i\mid x_i)}
  A_i\nabla_\theta\log\pi_\theta(a_i\mid x_i).
  \label{eq:categorical-raw-gradient}
 \end{equation}
-The PPO estimator multiplies each sampled contribution by the standard advantage-dependent mask with radius $0.2$. Both estimators use learning rate $2.0$.
+The PPO estimator multiplies each sampled contribution by the standard advantage-dependent mask with radius $0.2$.
 
-For $e\in\{\mathrm{raw},\mathrm{PPO}\}$, let $Z_e$ denote one gradient contribution. Since the context population and action space are finite, the exact conditional risk is
+For $e\in\{\mathrm{raw},\mathrm{PPO}\}$, let $Z_e$ denote one gradient contribution. Since the context population and action space are finite, the exact conditional MSE is
 \begin{equation}
  m_e(\theta,Q)
  =\left\|\E_Q[Z_e]-g(\theta)\right\|_2^2
- +\frac1n\E_Q\left\|Z_e-\E_Q[Z_e]\right\|_2^2.
+ +\frac1N\E_Q\left\|Z_e-\E_Q[Z_e]\right\|_2^2.
  \label{eq:categorical-exact-risk}
 \end{equation}
-We calculate Equation~\eqref{eq:categorical-exact-risk} by summing over all $5{,}620\times10$ context-action pairs. The exact MSE oracle selects the estimator with smaller conditional risk before each update. It therefore implements Proposition~\ref{prop:clipping-crossover} without using ESS.
+We calculate Equation~\eqref{eq:categorical-exact-risk} by summing over all $5{,}620\times10$ context-action pairs.
 
-\subsection{Frozen-state validation of the reliability theorem}
+\subsection{Frozen-state estimator comparison}
 
-We run six policy iterations of the static unmodified and PPO updates solely to generate a broad collection of mismatch states. We order the pre-update states by exact population ESS,
+To obtain policy pairs spanning a wide ESS range, we generate a separate state library from six policy iterations of the static unmodified and PPO updates under a stress step size. This trajectory is used only to define fixed pairs $(P_\theta,Q)$. No population-change result is computed using the stress step. We order the resulting pre-update states by exact population ESS,
 \begin{equation}
  \rho(\theta,Q)
  =\left\{
@@ -223,63 +232,47 @@ We run six policy iterations of the static unmodified and PPO updates solely to 
  \right\}^{-1},
  \label{eq:categorical-population-ess}
 \end{equation}
-and retain 30 approximately equally spaced states. At each state, 80 independent minibatches of 128 context-action pairs estimate realized gradient error. The first 12 redraws also receive a common step of size $0.25$, after which the exact objective is recomputed. These redraws do not alter any training trajectory.
+and retain 30 approximately equally spaced states. At each state, the exact MSE uses minibatch size 40, and 80 independent minibatches estimate realized gradient error. The first 20 redraws receive the certified step $\eta=@@ETA@@$, after which the exact objective is recomputed.
 
 \begin{table}[htbp]
 \centering
 \small
-\caption{Optdigits diagnostics across equal-count population-ESS bins. MSE values average 80 redraws at each retained state.}
+\caption{Optdigits estimator comparison across equal-count population-ESS bins. Exact MSE includes both squared bias and variance divided by 40. Harmful-update rates use the certified step size.}
 \label{tab:categorical-ess-bins}
-\begin{tabular}{rrrr}
+\begin{tabular}{rrrrr}
 \toprule
-Median ESS & Raw MSE & PPO MSE & Raw harmful updates (\%) \\
+Median ESS & Raw MSE & PPO MSE & Raw harmful (\%) & PPO harmful (\%) \\
 \midrule
-@@ESS_ROWS@@
+@@ROWS@@
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Exact validation of the estimator crossover}
+\subsection{Full certified learning curve}
 
-The crossover comparison uses two policy iterations and 100 paired replications on a seed set disjoint from the exploratory batch-size and learning-rate scans. Static raw, static PPO, and the exact MSE oracle share the context draws, action-sampling uniforms, and minibatch order within each replication. The oracle is infeasible outside this finite model because it requires the exact target gradient and exact conditional moments. Its role is only to test the estimator-comparison theorem.
-
-\begin{table}[htbp]
-\centering
-\small
-\caption{Exact gradient risks across equal-count population-ESS bins. The last column reports how often PPO has lower exact MSE among the retained states in each bin.}
-\label{tab:categorical-crossover-bins}
-\begin{tabular}{rrrr}
-\toprule
-Median ESS & Raw risk & PPO risk & PPO lower risk (\%) \\
-\midrule
-@@CROSS_ROWS@@
-\bottomrule
-\end{tabular}
-\end{table}
-
-No ESS-gated update is defined, tuned, or evaluated in the Optdigits study.
+The learning comparison uses five policy iterations and 100 paired replications. Each iteration consists of eight minibatch updates followed by collection of a fresh rollout, giving 40 updates in total. The unmodified and PPO trajectories share context draws, action-sampling uniforms, and minibatch order within every replication. Both use $\eta=@@ETA@@$, which satisfies Equation~\eqref{eq:categorical-smoothness-bound}. No ESS gate or oracle update is used.
 """
-    appendix = appendix.replace("@@ESS_ROWS@@", "\n".join(ess_rows))
-    appendix = appendix.replace("@@CROSS_ROWS@@", "\n".join(cross_rows))
+    appendix = appendix.replace("@@ROWS@@", "\n".join(rows))
+    appendix = appendix.replace("@@LAMBDA@@", f"${lambda_max:.3f}$")
+    appendix = appendix.replace("@@SMOOTHNESS@@", f"${smoothness:.3f}$")
+    appendix = appendix.replace("@@ETA_MAX@@", f"${eta_max:.3f}$")
+    appendix = appendix.replace("@@ETA@@", f"{eta:.2f}")
     return appendix.strip()
 
 
 def update_main_tex() -> None:
     summary = read_summary(
-        ROOT / "simulation" / "results" / "optdigits_theory_summary.txt"
+        ROOT / "simulation" / "results" / "optdigits_estimator_summary.txt"
     )
     ess_bins = read_csv(
-        ROOT / "simulation" / "results" / "optdigits_theory_ess_bins.csv"
-    )
-    cross_bins = read_csv(
-        ROOT / "simulation" / "results" / "optdigits_crossover_bins.csv"
+        ROOT / "simulation" / "results" / "optdigits_estimator_ess_bins.csv"
     )
     section = build_main_section(summary)
-    appendix = build_appendix(ess_bins, cross_bins)
+    appendix = build_appendix(summary, ess_bins)
 
     path = ROOT / "main.tex"
     text = path.read_text(encoding="utf-8")
-    section_start = text.index("\\section{Policy optimization on OptDigits}")
+    section_start = text.index("\\section{Theoretical validation on Optdigits}")
     section_end = text.index(
         "\\section{Language-model evidence for delayed failure and recovery}"
     )
@@ -289,18 +282,19 @@ def update_main_tex() -> None:
     appendix_end = text.index("\\section{Additional RLVR diagnostics}")
     text = text[:appendix_start] + appendix + "\n\n" + text[appendix_end:]
 
-    conclusion_start = text.index("The categorical contextual bandit confirms")
+    conclusion_start = text.index("The categorical contextual bandit validates")
     conclusion_end = text.index("Future work", conclusion_start)
     conclusion = (
-        "The categorical contextual bandit validates both theoretical links. "
-        "Lower normalized ESS coincides with larger gradient-estimation error, and "
-        "harmful updates appear after the realized error reaches the population-gradient "
-        "signal. The exact MSE oracle then validates the estimator-crossover proposition "
-        "by selecting the lower-risk rule at each update and outperforming both static "
-        "estimators. This oracle is used only for theoretical validation and does not "
-        "define a practical ESS-gated algorithm. The language-model runs show a related "
-        "temporal ordering at scale: permissive learning succeeds while effective support "
-        "is broad, and selective protection becomes useful only after support deteriorates.\n"
+        "The categorical contextual bandit validates the theoretical links for both the "
+        "unmodified and PPO-masked estimators. Lower normalized ESS coincides with larger "
+        "gradient MSE, and harmful updates appear after the realized error reaches the "
+        "population-gradient signal. PPO reduces MSE in the low-support regime but is more "
+        "distorting in much of the high-support regime. A separate 40-update learning curve "
+        "uses a globally certified step size and shows the corresponding loss of learning "
+        "speed from static masking while support remains broad. No practical ESS-gated "
+        "algorithm is defined in Optdigits. The language-model runs show a related temporal "
+        "ordering at scale: permissive learning succeeds while effective support is broad, "
+        "and selective protection becomes useful only after support deteriorates.\n"
     )
     text = text[:conclusion_start] + conclusion + text[conclusion_end:]
     path.write_text(text, encoding="utf-8")
@@ -311,19 +305,20 @@ def update_readme() -> None:
 
 `optdigits_theory_validation.py` is the Optdigits experiment used in the paper. The task is a one-step contextual bandit with the ten digit labels as actions.
 
-- The complete Optdigits dataset is treated as a finite context population of 5,620 images.
+- The complete Optdigits dataset is treated as a finite population of 5,620 contexts.
 - Each policy iteration draws 320 contexts.
 - One digit action is sampled per context from a frozen rollout policy.
 - The exact baseline is the rollout probability of the correct class, so the advantage is `reward - Q(correct | image)`.
 - Each rollout is divided into 8 minibatches of 40 and used for one optimization epoch.
 - A fresh rollout is collected at the next policy iteration.
+- All evaluated policy updates use learning rate `0.17`, below the global certified limit computed from the feature covariance.
 
 The script performs two theory-validation studies.
 
-1. It freezes policy states across a wide population-ESS range and tests the link from normalized ESS to gradient MSE and one-step population improvement.
-2. It compares static unmodified and PPO estimators with an infeasible oracle that computes their exact conditional MSEs and selects the lower-risk estimator. This directly tests the estimator-crossover proposition.
+1. It freezes policy pairs across a wide population-ESS range and compares the exact MSE, harmful-update rate, and one-step population change of the unmodified and PPO-masked estimators.
+2. It reports the full 40-update learning curves for the two estimators under the certified step size.
 
-No ESS-gated update rule or ESS threshold is evaluated in the Optdigits study.
+No ESS-gated update rule, ESS threshold, or oracle update is evaluated in the reported Optdigits study.
 
 Run from the repository root:
 
@@ -334,17 +329,16 @@ python simulation/optdigits_theory_validation.py --replications 100 --diagnostic
 
 Main outputs:
 
-- `simulation/results/optdigits_theory_frozen_states.csv`
-- `simulation/results/optdigits_theory_redraws.csv`
-- `simulation/results/optdigits_theory_ess_bins.csv`
-- `simulation/results/optdigits_theory_error_bins.csv`
-- `simulation/results/optdigits_crossover_bins.csv`
-- `simulation/results/optdigits_crossover_final.csv`
-- `simulation/results/optdigits_crossover_pairwise.csv`
-- `figures/optdigits_theory_validation.pdf`
-- `figures/optdigits_mse_crossover.pdf`
+- `simulation/results/optdigits_estimator_states.csv`
+- `simulation/results/optdigits_estimator_redraws.csv`
+- `simulation/results/optdigits_estimator_ess_bins.csv`
+- `simulation/results/optdigits_estimator_error_bins.csv`
+- `simulation/results/optdigits_certified_learning_paths.csv`
+- `simulation/results/optdigits_certified_learning_final.csv`
+- `figures/optdigits_estimator_comparison.pdf`
+- `figures/optdigits_certified_learning.pdf`
 
-`optdigits_categorical_theory.py` and `ess_policy_optimization.py` are retained as exploratory and legacy scripts. They are not used for the reported Optdigits results.
+`optdigits_categorical_theory.py` and `ess_policy_optimization.py` are retained as exploratory and legacy scripts. They are not used for the reported Optdigits figures.
 """
     (ROOT / "simulation" / "README.md").write_text(readme, encoding="utf-8")
 
