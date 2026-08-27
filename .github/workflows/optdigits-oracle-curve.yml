@@ -1,0 +1,33 @@
+name: Run exact-MSE oracle endpoint curve
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r simulation/requirements.txt
+      - name: Run oracle endpoint curve
+        run: python simulation/optdigits_oracle_curve.py
+      - name: Commit oracle curve and remove workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add simulation/optdigits_oracle_curve.py
+          git add simulation/results/optdigits_regime_curve_with_oracle.csv
+          git add simulation/results/optdigits_oracle_curve_summary.txt
+          git add figures/optdigits_policy_iterations.pdf figures/optdigits_policy_iterations.png
+          git rm .github/workflows/optdigits-oracle-curve.yml
+          git commit -m 'Add exact-MSE oracle relative-improvement curve'
+          git push
