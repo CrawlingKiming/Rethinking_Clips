@@ -1,0 +1,122 @@
+name: Explore update-level Optdigits crossover regimes
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  explore:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r simulation/requirements.txt
+      - name: Run update-level exploratory sweep
+        run: |
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+          import numpy as np
+          from simulation import optdigits_categorical_theory as ex
+
+          root = Path.cwd()
+          base = ex.Config(seed=20280826)
+          features, labels = ex.load_optdigits(root / 'simulation' / 'data', synthetic=False)
+          initial_weights = ex.fit_initial_policy(features, labels, base)
+
+          learning_rates = [1.50, 2.00, 2.50, 3.00]
+          minibatch_counts = [8, 12]
+          rollout_cycles_grid = [1, 2, 3]
+          replications = 12
+          rows = []
+
+          for cycles in rollout_cycles_grid:
+              for minibatches in minibatch_counts:
+                  for lr in learning_rates:
+                      cfg = ex.Config(
+                          seed=20280826,
+                          replications=replications,
+                          rollout_cycles=cycles,
+                          minibatches=minibatches,
+                          training_learning_rate=lr,
+                      )
+                      summaries = []
+                      for replication in range(replications):
+                          rng = np.random.default_rng(cfg.seed + replication)
+                          draws = ex.common_randomness(rng, len(features), cfg)
+                          for method in ('raw', 'ppo', 'mse_oracle'):
+                              _, _, summary = ex.run_trajectory(
+                                  method,
+                                  initial_weights,
+                                  features,
+                                  labels,
+                                  draws,
+                                  cfg,
+                                  replication,
+                                  0,
+                                  collect_states=False,
+                              )
+                              summaries.append(summary)
+
+                      by = {}
+                      per_method = {}
+                      for method in ('raw', 'ppo', 'mse_oracle'):
+                          selected = [r for r in summaries if r['method'] == method]
+                          arr = np.asarray([r['final_value'] for r in selected], dtype=float)
+                          per_method[method] = arr
+                          by[method] = {
+                              'mean': float(np.mean(arr)),
+                              'se': ex.standard_error(arr),
+                              'ppo_fraction': float(np.mean([r['ppo_fraction'] for r in selected])),
+                          }
+                      static_best = max(by['raw']['mean'], by['ppo']['mean'])
+                      oracle = per_method['mse_oracle']
+                      best_name = 'raw' if by['raw']['mean'] >= by['ppo']['mean'] else 'ppo'
+                      best_arr = per_method[best_name]
+                      rows.append({
+                          'rollout_cycles': cycles,
+                          'learning_rate': lr,
+                          'minibatches': minibatches,
+                          'minibatch_size': cfg.minibatch_size,
+                          'replications': replications,
+                          'raw_mean': by['raw']['mean'],
+                          'raw_se': by['raw']['se'],
+                          'ppo_mean': by['ppo']['mean'],
+                          'ppo_se': by['ppo']['se'],
+                          'oracle_mean': by['mse_oracle']['mean'],
+                          'oracle_se': by['mse_oracle']['se'],
+                          'oracle_ppo_fraction': by['mse_oracle']['ppo_fraction'],
+                          'best_static': best_name,
+                          'oracle_gain_vs_best_static': by['mse_oracle']['mean'] - static_best,
+                          'paired_oracle_gain_vs_best_static': float(np.mean(oracle - best_arr)),
+                          'paired_oracle_gain_vs_best_static_se': ex.standard_error(oracle - best_arr),
+                      })
+                      print(rows[-1])
+
+          out = root / 'simulation' / 'results' / 'optdigits_update_level_explore.csv'
+          with out.open('w', newline='', encoding='utf-8') as f:
+              writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+              writer.writeheader()
+              writer.writerows(rows)
+          PY
+      - name: Commit sweep and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm .github/workflows/optdigits-update-level-explore.yml
+          git add simulation/results/optdigits_update_level_explore.csv
+          git add -A .github/workflows
+          git commit -m "Add update-level Optdigits crossover sweep"
+          git push origin HEAD:main
