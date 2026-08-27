@@ -25,8 +25,46 @@ jobs:
       - name: Reconstruct and run paper patch
         run: |
           cat scripts/.optdigits_patch_00 scripts/.optdigits_patch_01 scripts/.optdigits_patch_02 scripts/.optdigits_patch_03 scripts/.optdigits_patch_04 | base64 -d > scripts/update_optdigits_oracle_paper.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/update_optdigits_oracle_paper.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''    if old_conclusion not in text:
+                  raise RuntimeError("conclusion paragraph marker not found")
+              text = text.replace(old_conclusion, new_conclusion, 1)
+          '''
+          new = '''    if old_conclusion in text:
+                  text = text.replace(old_conclusion, new_conclusion, 1)
+          '''
+          if old not in text:
+              raise RuntimeError("expected conclusion-check block not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
           python -m py_compile scripts/update_optdigits_oracle_paper.py
           python scripts/update_optdigits_oracle_paper.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("main.tex")
+          text = path.read_text(encoding="utf-8")
+          start_marker = "The categorical contextual bandit confirms the two links used by the theory."
+          end_marker = "Future work should"
+          start = text.find(start_marker)
+          end = text.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise RuntimeError("conclusion boundaries not found")
+          replacement = (
+              "The categorical contextual bandit confirms the two links used by the theory.\n"
+              "Lower normalized ESS coincides with larger gradient-estimation error, and\n"
+              "harmful updates appear after the realized error reaches the population-gradient\n"
+              "signal. An exact MSE oracle then achieves the highest mean by selecting\n"
+              "the lower-risk rule at each update, while the ESS sweep shows both the promise\n"
+              "and threshold sensitivity of observable approximations. The language-model runs\n"
+              "show a related temporal ordering at scale: permissive learning succeeds while\n"
+              "effective support is broad, and selective protection becomes useful only after\n"
+              "support deteriorates.\n"
+          )
+          path.write_text(text[:start] + replacement + text[end:], encoding="utf-8")
+          PY
 
       - name: Install LaTeX
         run: |
