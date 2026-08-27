@@ -58,10 +58,9 @@ jobs:
               r"$\1\\%$\2",
               text,
           )
-          text = re.sub(
-              r"For each \$\\tau\\in\\\{0\.01, 0\.03, 0\.05, 0\.1, 0\.2, 0\.4, 0\.6, 0\.8\\\}\$,","
+          text = text.replace(
+              r"For each $\tau\in\{0.01, 0.03, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8\}$,",
               "We sweep eight thresholds from $0.01$ to $0.8$. For each threshold,",
-              text,
           )
           start_marker = "The categorical contextual bandit confirms the two links used by the theory."
           end_marker = "Future work should"
