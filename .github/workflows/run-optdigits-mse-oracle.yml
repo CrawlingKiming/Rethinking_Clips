@@ -28,7 +28,7 @@ jobs:
         run: pip install -r simulation/requirements.txt
 
       - name: Run Optdigits experiment
-        run: python simulation/optdigits_categorical_theory.py --replications 40
+        run: python simulation/optdigits_categorical_theory.py --replications 100
 
       - name: Commit generated results
         run: |
