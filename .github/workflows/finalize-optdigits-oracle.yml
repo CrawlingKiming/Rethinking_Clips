@@ -46,6 +46,7 @@ jobs:
           from pathlib import Path
           path = Path("main.tex")
           text = path.read_text(encoding="utf-8")
+          text = text.replace(r"\,$\pm\,$", r"\pm")
           start_marker = "The categorical contextual bandit confirms the two links used by the theory."
           end_marker = "Future work should"
           start = text.find(start_marker)
