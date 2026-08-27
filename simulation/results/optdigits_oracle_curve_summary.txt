@@ -1,0 +1,13 @@
+initial_value=0.26409195
+replications=100
+raw_final=0.71620450
+ppo_final=0.74760637
+oracle_final=0.74760637
+oracle_final_se=0.00209233
+raw_final_relative_improvement=171.19512568
+ppo_final_relative_improvement=183.08563303
+oracle_final_relative_improvement=183.08563303
+oracle_mean_ppo_fraction=0.49603000
+oracle_mean_distinct_fraction=0.49603000
+oracle_minus_raw_mean=0.03140187
+oracle_minus_ppo_mean=0.00000000
