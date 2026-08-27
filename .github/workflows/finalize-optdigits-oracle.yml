@@ -24,9 +24,9 @@ jobs:
 
       - name: Reconstruct and run paper patch
         run: |
-          cat scripts/.optdigits_patch_00 scripts/.optdigits_patch_01 scripts/.optdigits_patch_02 scripts/.optdigits_patch_03 scripts/.optdigits_patch_04 | base64 -d > /tmp/update_optdigits_oracle_paper.py
-          python -m py_compile /tmp/update_optdigits_oracle_paper.py
-          python /tmp/update_optdigits_oracle_paper.py
+          cat scripts/.optdigits_patch_00 scripts/.optdigits_patch_01 scripts/.optdigits_patch_02 scripts/.optdigits_patch_03 scripts/.optdigits_patch_04 | base64 -d > scripts/update_optdigits_oracle_paper.py
+          python -m py_compile scripts/update_optdigits_oracle_paper.py
+          python scripts/update_optdigits_oracle_paper.py
 
       - name: Install LaTeX
         run: |
@@ -40,11 +40,13 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm scripts/update_optdigits_oracle_paper.py
           rm scripts/.optdigits_patch_00 scripts/.optdigits_patch_01 scripts/.optdigits_patch_02 scripts/.optdigits_patch_03 scripts/.optdigits_patch_04
           rm .github/workflows/finalize-optdigits-oracle.yml
           git add main.tex
           git add simulation/README.md
           git add simulation/results/optdigits_categorical_pairwise.csv
+          git add -A scripts/update_optdigits_oracle_paper.py
           git add -A scripts/.optdigits_patch_00 scripts/.optdigits_patch_01 scripts/.optdigits_patch_02 scripts/.optdigits_patch_03 scripts/.optdigits_patch_04
           git add -A .github/workflows/finalize-optdigits-oracle.yml
           git commit -m "Finalize Optdigits MSE-oracle and ESS-threshold results"
