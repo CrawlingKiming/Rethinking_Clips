@@ -1,0 +1,48 @@
+name: Run Optdigits MSE-oracle study
+
+on:
+  push:
+    branches:
+      - optdigits-mse-oracle
+
+permissions:
+  contents: write
+
+jobs:
+  run-and-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: optdigits-mse-oracle
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r simulation/requirements.txt
+
+      - name: Run Optdigits experiment
+        run: python simulation/optdigits_categorical_theory.py --replications 40
+
+      - name: Commit generated results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add figures/optdigits_categorical_theory.pdf
+          git add figures/optdigits_categorical_theory.png
+          git add figures/optdigits_categorical_control.pdf
+          git add figures/optdigits_categorical_control.png
+          git add simulation/results/optdigits_categorical_*.csv
+          git add simulation/results/optdigits_categorical_summary.txt
+          if git diff --cached --quiet; then
+            echo "No generated changes"
+          else
+            git commit -m "Run Optdigits MSE-oracle and ESS-threshold study"
+            git push origin HEAD:optdigits-mse-oracle
+          fi
