@@ -1,0 +1,130 @@
+name: Check Optdigits smoothness condition
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r simulation/requirements.txt
+      - name: Compute global and update-direction smoothness certificates
+        run: |
+          python - <<'PY'
+          import csv
+          import importlib.util
+          import sys
+          from dataclasses import replace
+          from pathlib import Path
+          import numpy as np
+
+          root = Path.cwd()
+          spec = importlib.util.spec_from_file_location('optdigits_base', root/'simulation'/'optdigits_categorical_theory.py')
+          exp = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = exp
+          spec.loader.exec_module(exp)
+
+          features, labels = exp.load_optdigits(root/'simulation'/'data', False)
+          covariance = features.T @ features / len(features)
+          lambda_max = float(np.linalg.eigvalsh(covariance)[-1])
+          global_L_bound = 0.5 * lambda_max
+          global_eta_max = 1.0 / global_L_bound
+
+          def directional_L_bound(direction):
+              norm_sq = float(np.sum(direction**2))
+              if norm_sq <= 0.0:
+                  return 0.0
+              projected = features @ direction.T
+              return 0.5 * float(np.mean(np.sum(projected**2, axis=1))) / norm_sq
+
+          rows = []
+          for learning_rate in (0.25, 2.0):
+              config = exp.Config(
+                  replications=10,
+                  rollout_cycles=2,
+                  rollout_size=320,
+                  minibatches=8,
+                  training_learning_rate=learning_rate,
+              )
+              initial_weights = exp.fit_initial_policy(features, labels, config)
+              for replication in range(config.replications):
+                  rng = np.random.default_rng(20330826 + replication)
+                  draws = exp.common_randomness(rng, len(features), config)
+                  for method in ('raw', 'ppo', 'mse_oracle'):
+                      weights = initial_weights.copy()
+                      update = 0
+                      for cycle, draw in enumerate(draws, start=1):
+                          rollout_weights = weights.copy()
+                          rollout = exp.collect_rollout(
+                              rollout_weights,
+                              features,
+                              labels,
+                              draw['contexts'],
+                              draw['uniforms'],
+                          )
+                          for minibatch, indices in enumerate(np.split(draw['order'], config.minibatches), start=1):
+                              gradients, sample_rho, _ = exp.estimate_gradients(weights, rollout, indices, config)
+                              if method == 'raw':
+                                  selected = 'raw'
+                              elif method == 'ppo':
+                                  selected = 'ppo'
+                              else:
+                                  risks = exp.exact_estimator_risks(
+                                      weights,
+                                      rollout_weights,
+                                      features,
+                                      labels,
+                                      len(indices),
+                                      config,
+                                  )
+                                  selected = 'ppo' if risks['ppo_risk'] < risks['raw_risk'] else 'raw'
+                              gradient = gradients[selected]
+                              local_bound = directional_L_bound(gradient)
+                              update += 1
+                              rows.append({
+                                  'learning_rate': learning_rate,
+                                  'replication': replication,
+                                  'method': method,
+                                  'update': update,
+                                  'selected': selected,
+                                  'sample_rho': sample_rho,
+                                  'feature_cov_lambda_max': lambda_max,
+                                  'global_L_bound': global_L_bound,
+                                  'global_eta_max': global_eta_max,
+                                  'directional_L_bound': local_bound,
+                                  'eta_times_directional_L': learning_rate * local_bound,
+                                  'condition_holds': float(learning_rate * local_bound <= 1.0),
+                              })
+                              weights = weights + learning_rate * gradient
+
+          output = root/'simulation'/'results'/'optdigits_curvature_check.csv'
+          with output.open('w', newline='', encoding='utf-8') as handle:
+              writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+              writer.writeheader()
+              writer.writerows(rows)
+
+          print('lambda_max=', lambda_max)
+          print('global_L_bound=', global_L_bound)
+          print('global_eta_max=', global_eta_max)
+          for eta in (0.25, 2.0):
+              selected = [row for row in rows if row['learning_rate'] == eta]
+              products = np.asarray([row['eta_times_directional_L'] for row in selected])
+              print('eta=', eta, 'fraction_holds=', np.mean(products <= 1.0), 'max_product=', np.max(products), 'median_product=', np.median(products))
+          PY
+      - name: Commit check and remove temporary workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add simulation/results/optdigits_curvature_check.csv
+          git rm .github/workflows/optdigits-curvature-check.yml
+          git commit -m 'Check Optdigits smoothness condition'
+          git push
