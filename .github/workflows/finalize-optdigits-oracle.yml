@@ -1,0 +1,51 @@
+name: Finalize Optdigits oracle paper
+
+on:
+  push:
+    branches:
+      - optdigits-lr2-clean
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: optdigits-lr2-clean
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Reconstruct and run paper patch
+        run: |
+          cat scripts/.optdigits_patch_00 scripts/.optdigits_patch_01 scripts/.optdigits_patch_02 scripts/.optdigits_patch_03 scripts/.optdigits_patch_04 | base64 -d > /tmp/update_optdigits_oracle_paper.py
+          python -m py_compile /tmp/update_optdigits_oracle_paper.py
+          python /tmp/update_optdigits_oracle_paper.py
+
+      - name: Install LaTeX
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y latexmk texlive-latex-base texlive-latex-extra texlive-fonts-recommended
+
+      - name: Compile paper
+        run: latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex
+
+      - name: Commit validated changes and remove temporary files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm scripts/.optdigits_patch_00 scripts/.optdigits_patch_01 scripts/.optdigits_patch_02 scripts/.optdigits_patch_03 scripts/.optdigits_patch_04
+          rm .github/workflows/finalize-optdigits-oracle.yml
+          git add main.tex
+          git add simulation/README.md
+          git add simulation/results/optdigits_categorical_pairwise.csv
+          git add -A scripts/.optdigits_patch_00 scripts/.optdigits_patch_01 scripts/.optdigits_patch_02 scripts/.optdigits_patch_03 scripts/.optdigits_patch_04
+          git add -A .github/workflows/finalize-optdigits-oracle.yml
+          git commit -m "Finalize Optdigits MSE-oracle and ESS-threshold results"
+          git push origin HEAD:optdigits-lr2-clean
