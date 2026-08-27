@@ -1,0 +1,105 @@
+name: Explore smaller Optdigits rollout sizes
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  explore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r simulation/requirements.txt
+      - name: Run smaller-rollout exploratory sweep
+        run: |
+          python - <<'PY'
+          import csv
+          import importlib.util
+          import math
+          from dataclasses import replace
+          from pathlib import Path
+          import numpy as np
+
+          root = Path.cwd()
+          spec = importlib.util.spec_from_file_location('exp', root/'simulation'/'optdigits_categorical_theory.py')
+          exp = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(exp)
+
+          base = exp.Config(replications=12, rollout_cycles=2)
+          features, labels = exp.load_optdigits(root/'simulation'/'data', False)
+          initial_weights = exp.fit_initial_policy(features, labels, base)
+
+          layouts = [
+              (128,4),
+              (256,8),
+              (320,8),
+              (384,12),
+              (512,8),
+              (512,16),
+              (600,12),
+          ]
+          learning_rates = [1.5,2.0,2.5]
+          rows=[]
+          seed_start=20300826
+
+          def se(x):
+              x=np.asarray(x,float)
+              return float(np.std(x,ddof=1)/math.sqrt(len(x))) if len(x)>1 else 0.0
+
+          for rollout_size, minibatches in layouts:
+              for lr in learning_rates:
+                  cfg = replace(base, rollout_size=rollout_size, minibatches=minibatches, training_learning_rate=lr)
+                  vals={m:[] for m in ('raw','ppo','mse_oracle')}
+                  ppo_fr=[]
+                  paired=[]
+                  for rep in range(cfg.replications):
+                      rng=np.random.default_rng(seed_start+rep)
+                      draws=exp.common_randomness(rng,len(features),cfg)
+                      repvals={}
+                      for method in ('raw','ppo','mse_oracle'):
+                          _,_,summary=exp.run_trajectory(method,initial_weights,features,labels,draws,cfg,rep,0,collect_states=False)
+                          vals[method].append(summary['final_value'])
+                          repvals[method]=summary['final_value']
+                          if method=='mse_oracle':
+                              ppo_fr.append(summary['ppo_fraction'])
+                      paired.append(repvals['mse_oracle']-max(repvals['raw'],repvals['ppo']))
+                  raw=np.asarray(vals['raw']); ppo=np.asarray(vals['ppo']); oracle=np.asarray(vals['mse_oracle']); paired=np.asarray(paired)
+                  best_static_mean=max(float(raw.mean()),float(ppo.mean()))
+                  rows.append({
+                      'rollout_size':rollout_size,
+                      'minibatches':minibatches,
+                      'minibatch_size':cfg.minibatch_size,
+                      'policy_iterations':cfg.rollout_cycles,
+                      'learning_rate':lr,
+                      'replications':cfg.replications,
+                      'seed_start':seed_start,
+                      'raw_mean':float(raw.mean()),'raw_se':se(raw),
+                      'ppo_mean':float(ppo.mean()),'ppo_se':se(ppo),
+                      'oracle_mean':float(oracle.mean()),'oracle_se':se(oracle),
+                      'oracle_ppo_fraction':float(np.mean(ppo_fr)),
+                      'oracle_gain_vs_best_static_mean':float(oracle.mean()-best_static_mean),
+                      'paired_oracle_gain_vs_best_static':float(paired.mean()),
+                      'paired_oracle_gain_vs_best_static_se':se(paired),
+                  })
+                  print(rows[-1])
+
+          out=root/'simulation'/'results'/'optdigits_batchsize_explore.csv'
+          out.parent.mkdir(parents=True,exist_ok=True)
+          with out.open('w',newline='',encoding='utf-8') as f:
+              w=csv.DictWriter(f,fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
+          PY
+      - name: Commit sweep and remove temporary workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add simulation/results/optdigits_batchsize_explore.csv
+          git rm .github/workflows/optdigits-batchsize-explore.yml
+          git commit -m 'Explore smaller Optdigits rollout sizes'
+          git push
