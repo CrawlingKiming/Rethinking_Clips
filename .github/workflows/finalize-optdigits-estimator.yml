@@ -17,6 +17,28 @@ jobs:
           python-version: '3.12'
       - name: Install Python dependencies
         run: pip install -r simulation/requirements.txt
+      - name: Remove threshold-rule wording from the updater
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/update_optdigits_theory_paper.py')
+          text = path.read_text(encoding='utf-8')
+          replacements = {
+              'The section compares the unmodified and PPO-masked gradient estimators. It does not define or tune an ESS-gated update rule.':
+                  'The section compares the unmodified and PPO-masked gradient estimators as two estimators of the same population gradient.',
+              'No practical ESS gate is proposed or evaluated in Optdigits.':
+                  'No threshold-based update rule is considered in Optdigits.',
+              'No practical ESS-gated algorithm is defined in Optdigits.':
+                  'No threshold-based switching algorithm is defined in Optdigits.',
+              'No ESS-gated update rule, ESS threshold, or oracle update is evaluated in the reported Optdigits study.':
+                  'No threshold-based update rule or oracle update is evaluated in the reported Optdigits study.',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise RuntimeError(f'missing source phrase: {old}')
+              text = text.replace(old, new)
+          path.write_text(text, encoding='utf-8')
+          PY
       - name: Run final Optdigits experiments
         run: python simulation/optdigits_theory_validation.py --replications 100 --diagnostic-replications 40
       - name: Rewrite paper and README
@@ -46,6 +68,7 @@ jobs:
           end = text.index(r'\section{Language-model evidence for delayed failure and recovery}')
           section = text[start:end]
           assert 'ESS gate' not in section
+          assert 'ESS-gated' not in section
           assert 'MSE oracle' not in section
           assert 'optdigits_estimator_comparison.pdf' in section
           assert 'optdigits_certified_learning.pdf' in section
