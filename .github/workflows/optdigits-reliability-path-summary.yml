@@ -1,0 +1,88 @@
+name: Summarize Optdigits reliability path
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Summarize reliability crossings
+        run: |
+          python - <<'PY'
+          import csv
+          import math
+          from pathlib import Path
+
+          with Path('simulation/results/optdigits_controlled_path_search.csv').open(encoding='utf-8') as handle:
+              rows = list(csv.DictReader(handle))
+          for row in rows:
+              for key in row:
+                  row[key] = float(row[key])
+
+          output = []
+          for batch_size in sorted({int(r['batch_size']) for r in rows}):
+              for epsilon in sorted({r['ppo_epsilon'] for r in rows}):
+                  selected = [r for r in rows if int(r['batch_size']) == batch_size and r['ppo_epsilon'] == epsilon]
+                  selected.sort(key=lambda r: r['path_scale'])
+                  for row in selected:
+                      row['raw_relative_risk'] = row['raw_risk'] / max(row['signal_sq'], 1e-16)
+                      row['ppo_relative_risk'] = row['ppo_risk'] / max(row['signal_sq'], 1e-16)
+                  recovery = [r for r in selected if r['raw_relative_risk'] > 1.0 and r['ppo_relative_risk'] < 1.0]
+                  high_supported = [r for r in selected if r['raw_relative_risk'] < 1.0]
+                  raw_crossings = []
+                  ppo_crossings = []
+                  for i in range(1, len(selected)):
+                      for key, bucket in (
+                          ('raw_relative_risk', raw_crossings),
+                          ('ppo_relative_risk', ppo_crossings),
+                      ):
+                          left = selected[i-1][key] - 1.0
+                          right = selected[i][key] - 1.0
+                          if left * right < 0.0:
+                              bucket.append((selected[i-1], selected[i]))
+                  high = max(selected, key=lambda r: r['population_rho'])
+                  low = min(selected, key=lambda r: r['population_rho'])
+                  output.append({
+                      'batch_size': batch_size,
+                      'ppo_epsilon': epsilon,
+                      'high_rho': high['population_rho'],
+                      'high_raw_relative_risk': high['raw_relative_risk'],
+                      'high_ppo_relative_risk': high['ppo_relative_risk'],
+                      'low_rho': low['population_rho'],
+                      'low_raw_relative_risk': low['raw_relative_risk'],
+                      'low_ppo_relative_risk': low['ppo_relative_risk'],
+                      'raw_crossing_count': len(raw_crossings),
+                      'first_raw_cross_rho_left': raw_crossings[0][0]['population_rho'] if raw_crossings else math.nan,
+                      'first_raw_cross_rho_right': raw_crossings[0][1]['population_rho'] if raw_crossings else math.nan,
+                      'ppo_crossing_count': len(ppo_crossings),
+                      'first_ppo_cross_rho_left': ppo_crossings[0][0]['population_rho'] if ppo_crossings else math.nan,
+                      'first_ppo_cross_rho_right': ppo_crossings[0][1]['population_rho'] if ppo_crossings else math.nan,
+                      'recovery_points': len(recovery),
+                      'recovery_rho_min': min((r['population_rho'] for r in recovery), default=math.nan),
+                      'recovery_rho_max': max((r['population_rho'] for r in recovery), default=math.nan),
+                      'high_supported_points': len(high_supported),
+                      'score': 10.0 * len(recovery) + len(high_supported),
+                  })
+          output.sort(key=lambda r: (r['recovery_points'], r['high_supported_points']), reverse=True)
+          path = Path('simulation/results/optdigits_reliability_path_summary.csv')
+          with path.open('w', newline='', encoding='utf-8') as handle:
+              writer = csv.DictWriter(handle, fieldnames=list(output[0].keys()))
+              writer.writeheader()
+              writer.writerows(output)
+          for row in output:
+              print(row)
+          PY
+      - name: Commit summary and remove workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add simulation/results/optdigits_reliability_path_summary.csv
+          git rm .github/workflows/optdigits-reliability-path-summary.yml
+          git commit -m 'Summarize Optdigits reliability path'
+          git push
