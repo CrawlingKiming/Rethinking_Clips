@@ -76,7 +76,7 @@ jobs:
           assert 'MSE oracle' not in section
           assert 'optdigits_estimator_comparison.pdf' in section
           assert 'optdigits_certified_learning.pdf' in section
-          assert 'Minibatch update' in section
+          assert '40 minibatch updates' in section
           assert '0.17' in section
           assert '—' not in text
           assert '---' not in text
