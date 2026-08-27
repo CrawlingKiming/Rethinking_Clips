@@ -1,0 +1,81 @@
+name: Summarize controlled Optdigits mismatch path
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build compact crossover summary
+        run: |
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+          import numpy as np
+
+          path = Path('simulation/results/optdigits_controlled_path_search.csv')
+          with path.open(encoding='utf-8') as handle:
+              rows = list(csv.DictReader(handle))
+          for row in rows:
+              for key in row:
+                  row[key] = float(row[key])
+
+          output = []
+          for batch_size in sorted({int(r['batch_size']) for r in rows}):
+              for epsilon in sorted({r['ppo_epsilon'] for r in rows}):
+                  selected = [r for r in rows if int(r['batch_size']) == batch_size and r['ppo_epsilon'] == epsilon]
+                  selected.sort(key=lambda r: r['path_scale'])
+                  ratios = np.asarray([r['risk_ratio'] for r in selected])
+                  rhos = np.asarray([r['population_rho'] for r in selected])
+                  raw_better = ratios > 1.0 + 1e-6
+                  ppo_better = ratios < 1.0 - 1e-6
+                  crossings = []
+                  for i in range(1, len(selected)):
+                      if (ratios[i-1] - 1.0) * (ratios[i] - 1.0) < 0.0:
+                          crossings.append((selected[i-1]['path_scale'], selected[i]['path_scale'], rhos[i-1], rhos[i]))
+                  output.append({
+                      'batch_size': batch_size,
+                      'ppo_epsilon': epsilon,
+                      'min_rho': float(np.min(rhos)),
+                      'max_rho': float(np.max(rhos)),
+                      'min_risk_ratio': float(np.min(ratios)),
+                      'min_ratio_rho': float(rhos[np.argmin(ratios)]),
+                      'min_ratio_scale': float(selected[int(np.argmin(ratios))]['path_scale']),
+                      'max_risk_ratio': float(np.max(ratios)),
+                      'max_ratio_rho': float(rhos[np.argmax(ratios)]),
+                      'max_ratio_scale': float(selected[int(np.argmax(ratios))]['path_scale']),
+                      'raw_better_fraction': float(np.mean(raw_better)),
+                      'ppo_better_fraction': float(np.mean(ppo_better)),
+                      'has_both_regimes': float(np.any(raw_better) and np.any(ppo_better)),
+                      'crossing_count': len(crossings),
+                      'first_cross_scale_left': crossings[0][0] if crossings else float('nan'),
+                      'first_cross_scale_right': crossings[0][1] if crossings else float('nan'),
+                      'first_cross_rho_left': crossings[0][2] if crossings else float('nan'),
+                      'first_cross_rho_right': crossings[0][3] if crossings else float('nan'),
+                      'risk_ratio_at_rho_approx_1': float(ratios[np.argmax(rhos)]),
+                      'risk_ratio_at_min_rho': float(ratios[np.argmin(rhos)]),
+                  })
+
+          output.sort(key=lambda r: (r['has_both_regimes'], r['max_risk_ratio'] - 1.0, 1.0 - r['min_risk_ratio']), reverse=True)
+          out = Path('simulation/results/optdigits_controlled_path_summary.csv')
+          with out.open('w', newline='', encoding='utf-8') as handle:
+              writer = csv.DictWriter(handle, fieldnames=list(output[0].keys()))
+              writer.writeheader()
+              writer.writerows(output)
+          for row in output:
+              print(row)
+          PY
+      - name: Commit summary and remove workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add simulation/results/optdigits_controlled_path_summary.csv
+          git rm .github/workflows/optdigits-controlled-path-summary.yml
+          git commit -m 'Summarize controlled Optdigits mismatch path'
+          git push
