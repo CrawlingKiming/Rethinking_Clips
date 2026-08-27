@@ -388,29 +388,65 @@ It is computed from the complete-response ratios before any token coefficient is
 \section{Policy optimization on OptDigits}
 \label{sec:simulation}
 
-The theory gives two implications that can be tested without introducing an ESS-based decision rule. First, lower effective support should increase the error of the importance-weighted gradient estimate. Second, the sampled update should become vulnerable when its realized gradient error is comparable to or larger than the population gradient signal. The experiment below tests these two links directly. No ESS threshold is used to choose an update.
+The theory makes two distinct predictions. First, effective support controls the accuracy of the unmodified gradient estimator. Second, among two update rules, the rule with smaller total gradient risk gives the stronger policy-improvement certificate. Optdigits lets us test both statements because the population objective, gradient, ESS, and estimator risks can all be evaluated exactly.
 
 \paragraph{Categorical contextual bandit.}
-We convert the Optdigits classification dataset into a one-step contextual bandit \citep{alpaydin1998optdigits}. Each handwritten-digit image is a context $x$, the action is a digit $a\in\{0,\ldots,9\}$, and the reward is $R(x,a)=\mathbf 1\{a=y(x)\}$. The policy is a linear softmax classifier. The complete dataset is treated as a finite context population, so its population value and gradient can be evaluated exactly.
+We convert Optdigits into a one-step contextual bandit \citep{alpaydin1998optdigits}. Each handwritten-digit image is a context, the action is a digit in $\{0,\ldots,9\}$, and the reward is one only for the correct class. The policy is a linear softmax classifier. At each policy iteration, we draw 600 contexts independently from the finite population, sample one action per context from a frozen rollout policy, and perform one optimization epoch consisting of 12 sequential minibatch updates. A new rollout is collected after the epoch.
 
-At each policy iteration, we sample 600 images without replacement and draw one action per image from a frozen rollout policy. We use the rollout policy's exact success probability as a detached context-dependent baseline. The 600 observations are shuffled into 12 minibatches, and the policy is updated sequentially for one epoch. The rollout is then discarded and a new batch is collected from the updated policy. We run static unmodified and static PPO trajectories to generate policy states with different levels of mismatch. Neither trajectory switches its update rule according to ESS.
+\paragraph{Validation of the reliability theorem.}
+We first use static unmodified and static PPO trajectories only to generate policy states with different levels of mismatch. We freeze 30 states across the observed population-ESS range and draw 80 independent minibatches at each state. The exact population gradient then gives the squared error of each sampled gradient. The first 12 redraws also receive a common diagnostic step, after which the exact population objective is recomputed.
 
-\paragraph{Oracle diagnostics.}
-To measure estimator reliability independently of a particular realized minibatch, we select 30 pre-update policy states spanning the observed population ESS range. At each state, we draw 80 fresh minibatches of 128 independent context-action pairs from the frozen rollout policy. The exact finite-population gradient gives the squared error of every sampled gradient. For the first 12 redraws at each state, we also evaluate the exact population reward change produced by a common diagnostic step. These redraws are used only for evaluation and never affect training.
-
-\paragraph{Results.}
-Figure~\ref{fig:optdigits-theory} verifies both links in the theory. In the lowest-ESS bin, whose median population ESS is $0.007$, the mean squared error of the unmodified gradient is $0.198$. In the on-policy bin, where the median ESS is $1.000$, the corresponding error is $0.0065$, a reduction by more than a factor of thirty. Thus the same nominal minibatch size can provide very different gradient accuracy as effective support changes.
-
-The second panel compares realized squared gradient error with the population gradient signal. Across 209 redraws for which $\|\widehat g-g\|_2^2<\|g\|_2^2$, none produces a negative population change. Once the realized error exceeds the gradient signal, 21 of 151 updates, or $13.9\%$, are harmful. The population-gradient step improves the objective at all 30 frozen states. The harmful sampled updates therefore arise from estimation error rather than from the absence of a locally improving direction.
+Figure~\ref{fig:optdigits-theory} verifies both links used by the theorem. The lowest-support bin has median population ESS $0.119$ and unmodified gradient MSE $0.229$, whereas the on-policy bin has ESS $1.000$ and MSE $0.0134$. Among the 130 redraws for which the realized squared gradient error is smaller than the population gradient signal, none decreases the objective. Once the error reaches or exceeds the signal, 2.6\% of the 230 updates are harmful. The exact population-gradient step remains improving at every frozen state.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/optdigits_categorical_theory.pdf}
-  \caption{Theory validation in a ten-action Optdigits contextual bandit. (a) The mean-squared error of the unmodified gradient increases as population normalized ESS decreases. Points denote frozen policy states, and the connected values are ESS-bin averages. (b) Harmful updates appear only after the realized squared gradient error reaches the scale of the population gradient signal. The dotted line marks equality of these two quantities. (c) The exact population-gradient step remains improving across the ESS range, while sampled-gradient steps become less reliable as effective support deteriorates. No ESS-conditioned update rule is used in this experiment.}
+  \caption{Theory validation in the ten-action Optdigits contextual bandit. (a) Unmodified gradient MSE increases as population normalized ESS decreases. We show equal-count ESS-bin means with standard errors on logarithmic axes, which keeps the low-support states visible without allowing a single extreme state to determine the scale. (b) Harmful updates appear only after the realized squared gradient error reaches the population-gradient signal. (c) The exact population-gradient direction remains improving across the ESS range, while sampled-gradient updates lose reliability as effective support deteriorates.}
   \label{fig:optdigits-theory}
 \end{figure}
 
-The categorical experiment isolates the two statistical links with exact oracle quantities. It is not intended to validate a fixed ESS threshold. The next section examines whether the same loss of effective support accompanies delayed failure in language-model training, where the population gradient is unavailable.
+\paragraph{MSE-oracle update selection.}
+The preceding diagnostic does not yet test Proposition~\ref{prop:clipping-crossover}. For this purpose, we construct an oracle that knows the exact conditional MSE of the unmodified and PPO estimators at every update. The oracle does not threshold ESS. It selects the estimator with smaller total risk, including the bias of PPO masking:
+\begin{equation}
+ \widehat g_{\mathrm{MSE}}
+ =\begin{cases}
+ \widehat g_{\mathrm{raw}},&m_{\mathrm{raw}}\le m_{\mathrm{PPO}},\\
+ \widehat g_{\mathrm{PPO}},&m_{\mathrm{PPO}}<m_{\mathrm{raw}}.
+ \end{cases}
+ \label{eq:optdigits-mse-oracle}
+\end{equation}
+All methods use the same rollout samples and minibatch order within each of 100 paired replications. The MSE oracle reaches a final population value of $0.726\pm0.005$, compared with $0.476\pm0.025$ for the unmodified update and $0.724\pm0.005$ for PPO. Its paired gain over the unmodified baseline is $0.250\pm0.027$, while its paired difference from PPO is $0.003\pm0.007$. The oracle applies PPO on $77.1\%$ of updates and keeps the unmodified estimator on the remaining $22.9\%$, directly demonstrating that masking is useful only in part of the trajectory.
+
+\paragraph{ESS heuristics.}
+The exact risks in Equation~\eqref{eq:optdigits-mse-oracle} are unavailable in realistic training. We therefore evaluate sample-ESS gates as observable approximations. We sweep eight thresholds from $0.01$ to $0.8$. For each threshold, the gate uses PPO when $\widehat\rho<\tau$ and otherwise uses the unmodified update. No threshold is designated as the proposed rule. The sweep measures sensitivity and shows how closely a one-dimensional ESS heuristic can approximate the risk oracle.
+
+Figure~\ref{fig:optdigits-control} reports the result. The best value in this finite sweep occurs at $\tau=0.8$, which reaches $0.680\pm0.013$ and applies PPO on $44.3\%$ of updates. In contrast, agreement with the MSE oracle on frozen redraws peaks at $\tau=0.4$ with $92.4\%$ agreement. The difference between the performance-maximizing and oracle-agreement thresholds is important: ESS is an informative reliability coordinate, but a fixed numerical cutoff remains a path-dependent heuristic rather than a theorem constant.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/optdigits_categorical_control.pdf}
+  \caption{Estimator selection in Optdigits. (a) Population-value trajectories for the unmodified update, PPO, the exact MSE oracle, and the best-performing ESS threshold in the reported sweep. Curves show means and 95\% confidence intervals across 100 paired replications. (b) Final population value across all sample-ESS thresholds, with static and oracle references. (c) Frozen-redraw agreement between each ESS gate and the exact MSE oracle, together with the fraction of training updates assigned to PPO. The MSE oracle uses no ESS threshold.}
+  \label{fig:optdigits-control}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Optdigits final population value over 100 paired replications. Paired gain is relative to the unmodified update.}
+\label{tab:optdigits-control}
+\begin{tabular}{lrrr}
+\toprule
+Update rule & Final value & Paired gain & PPO updates (\%) \\
+\midrule
+Unmodified & $0.476\pm0.025$ & $0$ & $0.0$ \\
+PPO & $0.724\pm0.005$ & $0.247\pm0.026$ & $100.0$ \\
+MSE oracle & $0.726\pm0.005$ & $0.250\pm0.027$ & $77.1$ \\
+ESS gate, $\tau=0.8$ & $0.680\pm0.013$ & $0.204\pm0.028$ & $44.3$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The two Optdigits results play different roles. Figure~\ref{fig:optdigits-theory} validates the statistical mechanism in the main theorem. Figure~\ref{fig:optdigits-control} validates the estimator-comparison result by giving the oracle access to the exact MSE crossover, then evaluates ESS thresholds only as practical approximations. The next section asks whether the same loss of effective support accompanies delayed failure in language-model training.
 
 \section{Language-model evidence for delayed failure and recovery}
 \label{sec:llm-experiments}
@@ -541,10 +577,13 @@ theory points to fresh data rather than stronger clipping.
 
 The categorical contextual bandit confirms the two links used by the theory.
 Lower normalized ESS coincides with larger gradient-estimation error, and
-harmful updates appear after the realized error reaches the scale of the
-population gradient signal. The language-model runs show a related temporal
-ordering at scale: permissive learning succeeds while effective support is
-broad, and selective protection becomes useful only after support deteriorates.
+harmful updates appear after the realized error reaches the population-gradient
+signal. An exact MSE oracle then achieves the highest mean by selecting
+the lower-risk rule at each update, while the ESS sweep shows both the promise
+and threshold sensitivity of observable approximations. The language-model runs
+show a related temporal ordering at scale: permissive learning succeeds while
+effective support is broad, and selective protection becomes useful only after
+support deteriorates.
 Future work should develop tighter online estimates of the contribution scale
 and test whether the resulting reliability boundary transfers across models,
 rollout sizes, and verifier tasks.
@@ -554,89 +593,147 @@ rollout sizes, and verifier tasks.
 \section{Categorical Optdigits protocol}
 \label{app:bandit}
 
-This appendix gives the full construction used in Section~\ref{sec:simulation}. The experiment is a one-step contextual bandit with a ten-class action space. It contains no ESS-conditioned update rule.
+This appendix gives the full construction used in Section~\ref{sec:simulation}. The experiment is a one-step contextual bandit with ten categorical actions. It contains two components: frozen-state validation of the reliability theorem and a repeated-optimization comparison of static, oracle, and ESS-gated update rules.
 
 \subsection{Finite population and policy}
 
-Optdigits contains 5,620 labeled handwritten-digit images \citep{alpaydin1998optdigits}. We concatenate the supplied training and test files, divide each of the 64 pixel-count features by 16, and append an intercept. The resulting finite population is $\{(x_j,y_j)\}_{j=1}^{M}$ with $M=5{,}620$, $x_j\in\mathbb R^{65}$, and $y_j\in\{0,\ldots,9\}$. The original split is not used because the target is finite-population policy optimization rather than classification generalization.
+Optdigits contains 5,620 labeled handwritten-digit images \citep{alpaydin1998optdigits}. We concatenate the supplied training and test files, divide each of the 64 pixel-count features by 16, and append an intercept. The resulting finite population is $\{(x_j,y_j)\}_{j=1}^M$ with $M=5{,}620$, $x_j\in\mathbb R^{65}$, and $y_j\in\{0,\ldots,9\}$. The original split is not used because the target is finite-population policy optimization rather than classification generalization.
 
 The policy is a linear softmax model,
 \begin{equation}
  \pi_\theta(a\mid x)
- =\frac{\exp(\theta_a^\top x)}{\sum_{c=0}^{9}\exp(\theta_c^\top x)},
+ =\frac{\exp(\theta_a^\top x)}{\sum_{c=0}^9\exp(\theta_c^\top x)},
  \qquad a\in\{0,\ldots,9\}.
  \label{eq:categorical-policy}
 \end{equation}
-The reward is $R(x_j,a)=\mathbf 1\{a=y_j\}$, so the exact population objective is
-\begin{equation}
- J(\theta)=\frac1M\sum_{j=1}^{M}\pi_\theta(y_j\mid x_j).
- \label{eq:categorical-value}
-\end{equation}
-Writing $e_y$ for the one-hot vector of class $y$, the exact population gradient is
-\begin{equation}
- g(\theta)
- =\frac1M\sum_{j=1}^{M}
+The reward is $R(x_j,a)=\mathbf 1\{a=y_j\}$, so the exact population objective and gradient are
+\begin{align}
+ J(\theta)&=\frac1M\sum_{j=1}^M\pi_\theta(y_j\mid x_j),
+ \label{eq:categorical-value}\\
+ g(\theta)&=\frac1M\sum_{j=1}^M
  \pi_\theta(y_j\mid x_j)
  \{e_{y_j}-\pi_\theta(\cdot\mid x_j)\}x_j^\top.
  \label{eq:categorical-gradient}
-\end{equation}
-Both Equations~\eqref{eq:categorical-value} and \eqref{eq:categorical-gradient} are evaluated by summing over all images. The policy is initialized by 400 full-population cross-entropy steps with step size $0.5$, after which the fitted weights are multiplied by $0.35$. This produces an initial population value of $0.4382$ while retaining substantial action randomness.
+\end{align}
+Both quantities are evaluated by summing over all images. The policy is initialized by 400 full-population cross-entropy steps with step size $0.5$, after which the fitted weights are multiplied by $0.35$. This gives initial population value $0.4382$ while retaining action randomness.
 
-\subsection{One-epoch rollout and update}
+\subsection{One-epoch rollout and estimators}
 
-Each policy iteration uses the following procedure.
-\begin{enumerate}
- \item Freeze the current parameters as the rollout policy $Q$.
- \item Sample 600 images without replacement and draw one action from $Q(\cdot\mid x)$ for each image.
- \item Set $A=R-Q(y\mid x)$, where $Q(y\mid x)$ is used as a detached context-dependent baseline.
- \item Shuffle the 600 observations into 12 minibatches of size 50 and traverse them once.
- \item Discard the rollout and collect a new batch from the updated policy.
-\end{enumerate}
-Thus each rollout is used for one optimization epoch. At a minibatch update, the unmodified estimator is
+At each policy iteration, we freeze the current policy as $Q$, draw 600 contexts independently and uniformly from the finite population, and sample one action from $Q(\cdot\mid x)$ for each context. We use the detached baseline $Q(y\mid x)$ and set $A=R-Q(y\mid x)$. The 600 observations are randomly partitioned into 12 minibatches of size $n=50$ and traversed once. The rollout is then discarded.
+
+The unmodified estimator is
 \begin{equation}
- \widehat g(\theta)
- =\frac1n\sum_{i=1}^{n}
+ \widehat g_{\mathrm{raw}}(\theta)
+ =\frac1n\sum_{i=1}^n
  \frac{\pi_\theta(a_i\mid x_i)}{Q(a_i\mid x_i)}
  A_i\nabla_\theta\log\pi_\theta(a_i\mid x_i).
  \label{eq:categorical-raw-gradient}
 \end{equation}
-The static PPO trajectory uses the usual advantage-dependent mask with radius $0.2$. Both static trajectories use learning rate $3.0$ and six rollout cycles. They are used only to generate a broad collection of pre-update policy states. No trajectory changes its update rule according to ESS.
-
-\subsection{Population ESS and frozen-state redraws}
-
-For a current policy $P_\theta$ and rollout policy $Q$, the normalized population ESS is exact in this categorical model:
-\begin{equation}
- \rho(\theta,Q)
- =\left\{
- \frac1M\sum_{j=1}^{M}\sum_{a=0}^{9}
- \frac{\pi_\theta(a\mid x_j)^2}{Q(a\mid x_j)}
- \right\}^{-1}.
- \label{eq:categorical-population-ess}
-\end{equation}
-We order all pre-update states by Equation~\eqref{eq:categorical-population-ess} and select 30 approximately equally spaced states over the observed range. At each state, 80 independent minibatches of 128 context-action pairs are redrawn from the frozen rollout policy. These redraws estimate the conditional gradient MSE. The first 12 redraws also receive a common diagnostic step of size $0.25$, after which Equation~\eqref{eq:categorical-value} is recomputed exactly. None of these diagnostic redraws changes the training trajectory.
-
-Table~\ref{tab:categorical-ess-bins} reports the six equal-count ESS bins used in Figure~\ref{fig:optdigits-theory}. Each bin contains five frozen states. The MSE is averaged over 80 redraws per state, and the harmful-update rate is computed from the 12 diagnostic steps per state.
+The PPO estimator multiplies each contribution by the usual advantage-dependent mask with radius $0.2$. The control study uses learning rate $2.0$ and six rollout cycles. We chose this stress-test step size before the 100-replication comparison using the 12-replication diagnostic sweep in Table~\ref{tab:categorical-lr-sweep}. The sweep is reported in full because the practical value of estimator selection depends on update scale.
 
 \begin{table}[htbp]
 \centering
 \small
-\caption{Categorical Optdigits diagnostics across population-ESS bins.}
-\label{tab:categorical-ess-bins}
-\begin{tabular}{rrr}
+\caption{Diagnostic learning-rate sweep with 12 paired replications per setting. The 100-replication control experiment uses learning rate $2.0$.}
+\label{tab:categorical-lr-sweep}
+\begin{tabular}{llr}
 \toprule
-Median population ESS & Unmodified gradient MSE & Harmful updates (\%) \\
+Learning rate & Update rule & Final value \\\\
 \midrule
-$0.007$ & $0.1981$ & $30.0$ \\
-$0.293$ & $0.1980$ & $1.7$ \\
-$0.554$ & $0.0325$ & $1.7$ \\
-$0.720$ & $0.0216$ & $1.7$ \\
-$0.843$ & $0.0168$ & $0.0$ \\
-$1.000$ & $0.0065$ & $0.0$ \\
+$0.25$ & raw & $0.574\pm0.001$ \\
+$0.25$ & ppo & $0.570\pm0.001$ \\
+$0.25$ & mse oracle & $0.571\pm0.001$ \\
+$0.5$ & raw & $0.650\pm0.001$ \\
+$0.5$ & ppo & $0.640\pm0.001$ \\
+$0.5$ & mse oracle & $0.640\pm0.001$ \\
+$1$ & raw & $0.725\pm0.004$ \\
+$1$ & ppo & $0.707\pm0.001$ \\
+$1$ & mse oracle & $0.708\pm0.003$ \\
+$2$ & raw & $0.537\pm0.070$ \\
+$2$ & ppo & $0.725\pm0.016$ \\
+$2$ & mse oracle & $0.748\pm0.005$ \\
+$3$ & raw & $0.276\pm0.057$ \\
+$3$ & ppo & $0.359\pm0.058$ \\
+$3$ & mse oracle & $0.371\pm0.060$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The second diagnostic uses the realized ratio $\|\widehat g-g\|_2^2/\|g\|_2^2$. Among 209 redraws below one, no update decreases the population objective. Among 151 redraws at or above one, 21 updates decrease it. The exact population-gradient step is positive at every frozen state. This separates estimator failure from the absence of an improving population direction.
+For $e\in\{\mathrm{raw},\mathrm{PPO}\}$, let $Z_e$ denote one gradient contribution. Since the context population and action space are finite, we calculate the exact conditional risk
+\begin{equation}
+ m_e(\theta,Q)
+ =\left\|\E_Q[Z_e]-g(\theta)\right\|_2^2
+ +\frac1n\E_Q\left\|Z_e-\E_Q[Z_e]\right\|_2^2
+ \label{eq:categorical-exact-risk}
+\end{equation}
+by summing over all $5{,}620\times10$ context-action pairs. The MSE oracle selects the estimator with the smaller value of Equation~\eqref{eq:categorical-exact-risk} before each update. Thus it implements the crossover in Proposition~\ref{prop:clipping-crossover} without using ESS.
+
+The observable ESS gates use
+\begin{equation}
+ \widehat\rho
+ =\frac{(\sum_{i=1}^n W_i)^2}{n\sum_{i=1}^nW_i^2}
+ \label{eq:categorical-sample-ess}
+\end{equation}
+and select PPO when $\widehat\rho<\tau$. We evaluate $\tau\in\{0.01, 0.03, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8\}$. Static raw, static PPO, the MSE oracle, and every ESS threshold share the context draws, action-sampling uniforms, and minibatch order within each of 100 replications.
+
+\subsection{Frozen-state diagnostics}
+
+We collect pre-update states from the static raw and PPO trajectories, order them by exact population ESS,
+\begin{equation}
+ \rho(\theta,Q)
+ =\left\{
+ \frac1M\sum_{j=1}^M\sum_{a=0}^9
+ \frac{\pi_\theta(a\mid x_j)^2}{Q(a\mid x_j)}
+ \right\}^{-1},
+ \label{eq:categorical-population-ess}
+\end{equation}
+and retain 30 approximately equally spaced states. At each state, 80 independent minibatches of 128 context-action pairs estimate realized gradient error. The first 12 redraws also receive a common step of size $0.25$, after which the exact objective is recomputed. These redraws do not alter any training trajectory.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Categorical Optdigits diagnostics across equal-count population-ESS bins. MSE values average 80 redraws at each of five states.}
+\label{tab:categorical-ess-bins}
+\begin{tabular}{rrrr}
+\toprule
+Median ESS & Raw MSE & PPO MSE & Raw harmful updates (\%) \\
+\midrule
+$0.119$ & $0.2294$ & $0.1241$ & $5.0$ \\
+$0.628$ & $0.0482$ & $0.0531$ & $1.7$ \\
+$0.788$ & $0.0302$ & $0.0329$ & $1.7$ \\
+$0.863$ & $0.0239$ & $0.0320$ & $1.7$ \\
+$0.912$ & $0.0211$ & $0.0230$ & $0.0$ \\
+$1.000$ & $0.0134$ & $0.0142$ & $0.0$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Oracle and ESS-threshold results}
+
+The MSE oracle is infeasible outside this finite model because it requires the exact target gradient and exact conditional moments. Its role is to test the estimator-comparison theorem. The ESS sweep asks how well a statistic available from the sampled ratios can approximate that oracle across a moving optimization trajectory.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Sample-ESS threshold sweep over 100 paired Optdigits replications. Oracle agreement is measured on the frozen-state redraws.}
+\label{tab:categorical-thresholds}
+\begin{tabular}{rrrr}
+\toprule
+Threshold & Final value & PPO updates (\%) & MSE-oracle agreement (\%) \\
+\midrule
+$0.01$ & $0.476\pm0.025$ & $0.0$ & $83.8$ \\
+$0.03$ & $0.493\pm0.025$ & $0.5$ & $85.4$ \\
+$0.05$ & $0.497\pm0.025$ & $1.3$ & $86.3$ \\
+$0.1$ & $0.504\pm0.024$ & $3.2$ & $88.4$ \\
+$0.2$ & $0.512\pm0.023$ & $6.8$ & $90.5$ \\
+$0.4$ & $0.582\pm0.020$ & $13.0$ & $92.4$ \\
+$0.6$ & $0.600\pm0.018$ & $23.5$ & $88.2$ \\
+$0.8$ & $0.680\pm0.013$ & $44.3$ & $70.7$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The threshold sweep is reported as a sensitivity analysis. The value that performs best in this finite set is not treated as a universal threshold, and the threshold that best matches the oracle decisions need not maximize repeated-optimization return.
 
 \section{Additional RLVR diagnostics}
 \label{app:llm-diagnostics}
