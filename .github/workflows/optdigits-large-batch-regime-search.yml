@@ -1,0 +1,193 @@
+name: Search large-batch Optdigits regimes
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r simulation/requirements.txt
+      - name: Run targeted large-batch search
+        run: |
+          python - <<'PY'
+          import csv
+          import importlib.util
+          import math
+          import sys
+          from pathlib import Path
+          import numpy as np
+
+          root = Path.cwd()
+          spec = importlib.util.spec_from_file_location(
+              'optdigits_base', root/'simulation'/'optdigits_categorical_theory.py'
+          )
+          exp = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = exp
+          spec.loader.exec_module(exp)
+          features, labels = exp.load_optdigits(root/'simulation'/'data', False)
+
+          configs = []
+          for rollout_size in (320, 640):
+              for minibatches in (2, 4, 8):
+                  for learning_rate in (0.14, 0.17):
+                      for epsilon in (0.05, 0.10, 0.20):
+                          for init_scale in (0.20, 0.35):
+                              configs.append((rollout_size, minibatches, learning_rate, epsilon, init_scale))
+
+          policy_iterations = 40
+          replications = 2
+          seed_start = 20420826
+          rows = []
+
+          def run_method(method, initial_weights, draws, cfg, collect_metrics):
+              weights = initial_weights.copy()
+              values = [exp.population_value(weights, features, labels)]
+              endpoint_rho = []
+              endpoint_relative_raw_risk = []
+              endpoint_relative_ppo_risk = []
+              for draw in draws:
+                  rollout_weights = weights.copy()
+                  rollout = exp.collect_rollout(
+                      rollout_weights, features, labels,
+                      draw['contexts'], draw['uniforms']
+                  )
+                  minibatches = np.split(draw['order'], cfg.minibatches)
+                  last_rho = 1.0
+                  last_raw_relative = float('nan')
+                  last_ppo_relative = float('nan')
+                  for minibatch_index, indices in enumerate(minibatches, start=1):
+                      last_rho = exp.population_rho(weights, rollout_weights, features)
+                      if collect_metrics and minibatch_index == cfg.minibatches:
+                          _, true_gradient = exp.population_value_and_gradient(weights, features, labels)
+                          signal_sq = float(np.sum(true_gradient**2))
+                          risks = exp.exact_estimator_risks(
+                              weights, rollout_weights, features, labels, len(indices), cfg
+                          )
+                          last_raw_relative = risks['raw_risk'] / max(signal_sq, 1e-16)
+                          last_ppo_relative = risks['ppo_risk'] / max(signal_sq, 1e-16)
+                      gradients, _, _ = exp.estimate_gradients(weights, rollout, indices, cfg)
+                      weights = weights + cfg.training_learning_rate * gradients[method]
+                  values.append(exp.population_value(weights, features, labels))
+                  endpoint_rho.append(last_rho)
+                  endpoint_relative_raw_risk.append(last_raw_relative)
+                  endpoint_relative_ppo_risk.append(last_ppo_relative)
+              return (
+                  np.asarray(values),
+                  np.asarray(endpoint_rho),
+                  np.asarray(endpoint_relative_raw_risk),
+                  np.asarray(endpoint_relative_ppo_risk),
+              )
+
+          for config_id, values in enumerate(configs):
+              rollout_size, minibatches, learning_rate, epsilon, init_scale = values
+              cfg = exp.Config(
+                  rollout_cycles=policy_iterations,
+                  rollout_size=rollout_size,
+                  minibatches=minibatches,
+                  training_learning_rate=learning_rate,
+                  ppo_epsilon=epsilon,
+                  initialization_scale=init_scale,
+              )
+              initial_weights = exp.fit_initial_policy(features, labels, cfg)
+              raw_curves = []
+              ppo_curves = []
+              rho_curves = []
+              raw_relative_curves = []
+              ppo_relative_curves = []
+              for replication in range(replications):
+                  rng = np.random.default_rng(seed_start + 1000 * config_id + replication)
+                  draws = exp.common_randomness(rng, len(features), cfg)
+                  raw_values, rho, raw_relative, ppo_relative = run_method(
+                      'raw', initial_weights, draws, cfg, True
+                  )
+                  ppo_values, _, _, _ = run_method(
+                      'ppo', initial_weights, draws, cfg, False
+                  )
+                  raw_curves.append(raw_values)
+                  ppo_curves.append(ppo_values)
+                  rho_curves.append(rho)
+                  raw_relative_curves.append(raw_relative)
+                  ppo_relative_curves.append(ppo_relative)
+
+              raw = np.mean(np.asarray(raw_curves), axis=0)
+              ppo = np.mean(np.asarray(ppo_curves), axis=0)
+              rho = np.mean(np.asarray(rho_curves), axis=0)
+              raw_relative = np.mean(np.asarray(raw_relative_curves), axis=0)
+              ppo_relative = np.mean(np.asarray(ppo_relative_curves), axis=0)
+              gap = raw - ppo
+              early_gap = float(np.max(gap[1:11]))
+              final_gap = float(gap[-1])
+              persistent_cross = -1
+              for iteration in range(1, policy_iterations + 1):
+                  if np.all(gap[iteration:] < 0.0):
+                      persistent_cross = iteration
+                      break
+              reliable_early = float(np.mean(raw_relative[:5]) < 1.0)
+              unreliable_late = float(np.mean(raw_relative[-5:]) > 1.0)
+              ppo_recovery_late = float(np.mean(ppo_relative[-5:]) < np.mean(raw_relative[-5:]))
+              score = (
+                  100.0 * max(early_gap, 0.0)
+                  + 100.0 * max(-final_gap, 0.0)
+                  + 10.0 * float(persistent_cross > 0)
+                  + 5.0 * reliable_early
+                  + 5.0 * unreliable_late
+                  + 3.0 * ppo_recovery_late
+              )
+              row = {
+                  'config_id': config_id,
+                  'rollout_size': rollout_size,
+                  'minibatches': minibatches,
+                  'minibatch_size': cfg.minibatch_size,
+                  'learning_rate': learning_rate,
+                  'ppo_epsilon': epsilon,
+                  'initialization_scale': init_scale,
+                  'replications': replications,
+                  'policy_iterations': policy_iterations,
+                  'initial_value': raw[0],
+                  'raw_final': raw[-1],
+                  'ppo_final': ppo[-1],
+                  'max_early_raw_advantage': early_gap,
+                  'final_raw_minus_ppo': final_gap,
+                  'persistent_crossover_iteration': persistent_cross,
+                  'early_rho': float(np.mean(rho[:5])),
+                  'late_rho': float(np.mean(rho[-5:])),
+                  'early_raw_relative_risk': float(np.mean(raw_relative[:5])),
+                  'late_raw_relative_risk': float(np.mean(raw_relative[-5:])),
+                  'early_ppo_relative_risk': float(np.mean(ppo_relative[:5])),
+                  'late_ppo_relative_risk': float(np.mean(ppo_relative[-5:])),
+                  'reliable_early': reliable_early,
+                  'unreliable_late': unreliable_late,
+                  'ppo_recovery_late': ppo_recovery_late,
+                  'score': score,
+              }
+              rows.append(row)
+              print(row)
+
+          rows.sort(key=lambda r: r['score'], reverse=True)
+          output = root/'simulation'/'results'/'optdigits_large_batch_regime_search.csv'
+          with output.open('w', newline='', encoding='utf-8') as handle:
+              writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+              writer.writeheader()
+              writer.writerows(rows)
+          print('TOP')
+          for row in rows[:20]:
+              print(row)
+          PY
+      - name: Commit results and remove workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add simulation/results/optdigits_large_batch_regime_search.csv
+          git rm .github/workflows/optdigits-large-batch-regime-search.yml
+          git commit -m 'Search large-batch Optdigits regimes'
+          git push
