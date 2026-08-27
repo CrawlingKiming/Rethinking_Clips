@@ -17,7 +17,7 @@ jobs:
           python-version: '3.12'
       - name: Install Python dependencies
         run: pip install -r simulation/requirements.txt
-      - name: Remove threshold-rule wording from the updater
+      - name: Patch final paper updater
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -41,6 +41,9 @@ jobs:
           )
           text = text.replace('ESS-gated', 'threshold-based')
           text = text.replace('ESS gate', 'threshold rule')
+          text = text.replace('f"${lambda_max:.3f}$"', 'f"{lambda_max:.3f}"')
+          text = text.replace('f"${smoothness:.3f}$"', 'f"{smoothness:.3f}"')
+          text = text.replace('f"${eta_max:.3f}$"', 'f"{eta_max:.3f}"')
           path.write_text(text, encoding='utf-8')
           PY
       - name: Run final Optdigits experiments
@@ -78,6 +81,7 @@ jobs:
           assert 'optdigits_certified_learning.pdf' in section
           assert '40 minibatch updates' in section
           assert '0.17' in section
+          assert '$$' not in section
           assert '—' not in text
           assert '---' not in text
           PY
