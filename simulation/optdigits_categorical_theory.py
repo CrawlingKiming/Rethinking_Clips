@@ -1,11 +1,10 @@
-"""Theory-focused Optdigits contextual-bandit experiment.
+"""Optdigits contextual-bandit experiments for theory validation and update selection.
 
 The action space is the ten digit classes. Each policy iteration draws a fresh
 on-policy rollout, performs one epoch of sequential minibatch updates, and then
-discards the rollout. No ESS threshold is used for training or estimator
-selection. The experiment freezes policy states spanning the observed ESS range
-and uses independent redraws to measure gradient-estimator risk and one-step
-population improvement.
+discards the rollout. The first experiment freezes policy states and measures
+gradient error and one-step population change. The second experiment compares
+static raw and PPO updates with an MSE oracle and several sample-ESS gates.
 """
 
 from __future__ import annotations
@@ -27,19 +26,26 @@ DATA_URL = (
     "https://archive.ics.uci.edu/static/public/80/"
     "optical+recognition+of+handwritten+digits.zip"
 )
+ESS_THRESHOLDS = (0.01, 0.03, 0.05, 0.10, 0.20, 0.40, 0.60, 0.80)
+RAW_COLOR = "#3B6FB6"
+PPO_COLOR = "#E07A1F"
+ORACLE_COLOR = "#2A9D8F"
+ESS_COLOR = "#7A5195"
+HARM_COLOR = "#D1495B"
+NEUTRAL_COLOR = "#667085"
+LIGHT_GRID = "#D9DEE8"
 
 
 @dataclass(frozen=True)
 class Config:
     seed: int = 20260826
-    replications: int = 12
+    replications: int = 40
     rollout_cycles: int = 6
     rollout_size: int = 600
     minibatches: int = 12
     training_learning_rate: float = 3.0
     diagnostic_step_size: float = 0.25
     ppo_epsilon: float = 0.2
-    truncation_cap: float = 2.0
     classifier_steps: int = 400
     classifier_learning_rate: float = 0.5
     initialization_scale: float = 0.35
@@ -47,6 +53,12 @@ class Config:
     redraws: int = 80
     improvement_redraws: int = 12
     redraw_batch_size: int = 128
+
+    @property
+    def minibatch_size(self) -> int:
+        if self.rollout_size % self.minibatches != 0:
+            raise ValueError("rollout_size must be divisible by minibatches")
+        return self.rollout_size // self.minibatches
 
 
 @dataclass
@@ -73,7 +85,10 @@ def softmax(logits: np.ndarray) -> np.ndarray:
     return exponentiated / np.sum(exponentiated, axis=-1, keepdims=True)
 
 
-def load_optdigits(data_dir: Path, synthetic: bool = False) -> tuple[np.ndarray, np.ndarray]:
+def load_optdigits(
+    data_dir: Path,
+    synthetic: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
     if synthetic:
         rng = np.random.default_rng(7)
         features = rng.normal(size=(1200, 65))
@@ -201,17 +216,20 @@ def estimate_gradients(
     indices: np.ndarray,
     config: Config,
 ) -> tuple[dict[str, np.ndarray], float, np.ndarray]:
-    features = rollout["features"][indices]
+    batch_features = rollout["features"][indices]
     actions = rollout["actions"][indices]
     advantages = rollout["advantages"][indices]
     old_action_probabilities = rollout["old_action_probabilities"][indices]
-    probabilities = softmax(features @ weights.T)
+    probabilities = softmax(batch_features @ weights.T)
     current_action_probabilities = probabilities[np.arange(len(actions)), actions]
-    ratios = current_action_probabilities / np.clip(old_action_probabilities, 1e-12, None)
+    ratios = current_action_probabilities / np.clip(
+        old_action_probabilities,
+        1e-12,
+        None,
+    )
     scores = score_rows(probabilities, actions)
 
     raw_coefficients = ratios * advantages
-    truncation_coefficients = np.minimum(ratios, config.truncation_cap) * advantages
     positive = advantages >= 0.0
     ppo_mask = np.where(
         positive,
@@ -221,16 +239,77 @@ def estimate_gradients(
     ppo_coefficients = raw_coefficients * ppo_mask
 
     gradients = {
-        "raw": gradient_from_coefficients(raw_coefficients, scores, features),
-        "truncation": gradient_from_coefficients(
-            truncation_coefficients, scores, features
-        ),
-        "ppo": gradient_from_coefficients(ppo_coefficients, scores, features),
+        "raw": gradient_from_coefficients(raw_coefficients, scores, batch_features),
+        "ppo": gradient_from_coefficients(ppo_coefficients, scores, batch_features),
     }
-    sample_rho = float(
-        np.sum(ratios) ** 2 / (len(ratios) * np.sum(ratios**2))
-    )
+    denominator = len(ratios) * np.sum(ratios**2)
+    sample_rho = float(np.sum(ratios) ** 2 / denominator) if denominator > 0 else 0.0
     return gradients, sample_rho, ratios
+
+
+def exact_estimator_risks(
+    weights: np.ndarray,
+    rollout_weights: np.ndarray,
+    features: np.ndarray,
+    labels: np.ndarray,
+    batch_size: int,
+    config: Config,
+) -> dict[str, float]:
+    """Return exact iid minibatch MSE for raw and PPO gradient estimators."""
+    current = np.clip(softmax(features @ weights.T), 1e-12, 1.0)
+    rollout = np.clip(softmax(features @ rollout_weights.T), 1e-12, 1.0)
+    population_size, classes = current.shape
+    correct_current = current[np.arange(population_size), labels]
+    target_coefficients = -correct_current[:, None] * current
+    target_coefficients[np.arange(population_size), labels] += correct_current
+    true_gradient = target_coefficients.T @ features / population_size
+
+    correct_rollout = rollout[np.arange(population_size), labels]
+    one_hot = np.eye(classes)[labels]
+    advantages = one_hot - correct_rollout[:, None]
+    ratios = current / rollout
+    raw_coefficients = ratios * advantages
+    positive = advantages >= 0.0
+    ppo_mask = np.where(
+        positive,
+        ratios <= 1.0 + config.ppo_epsilon,
+        ratios >= 1.0 - config.ppo_epsilon,
+    )
+    ppo_coefficients = raw_coefficients * ppo_mask
+
+    feature_norm_sq = np.sum(features**2, axis=1)
+    probability_norm_sq = np.sum(current**2, axis=1, keepdims=True)
+    score_norm_sq = feature_norm_sq[:, None] * (
+        1.0 - 2.0 * current + probability_norm_sq
+    )
+
+    risks: dict[str, float] = {}
+    for name, coefficients in (
+        ("raw", raw_coefficients),
+        ("ppo", ppo_coefficients),
+    ):
+        weighted_coefficients = rollout * coefficients
+        adjusted = weighted_coefficients - current * np.sum(
+            weighted_coefficients,
+            axis=1,
+            keepdims=True,
+        )
+        mean_gradient = adjusted.T @ features / population_size
+        second_moment = float(
+            np.mean(
+                np.sum(
+                    rollout * coefficients**2 * score_norm_sq,
+                    axis=1,
+                )
+            )
+        )
+        mean_norm_sq = float(np.sum(mean_gradient**2))
+        variance_trace = max(second_moment - mean_norm_sq, 0.0)
+        bias_sq = float(np.sum((mean_gradient - true_gradient) ** 2))
+        risks[f"{name}_bias_sq"] = bias_sq
+        risks[f"{name}_variance"] = variance_trace
+        risks[f"{name}_risk"] = bias_sq + variance_trace / batch_size
+    return risks
 
 
 def common_randomness(
@@ -243,7 +322,7 @@ def common_randomness(
         contexts = rng.choice(
             population_size,
             size=config.rollout_size,
-            replace=False,
+            replace=True,
         )
         uniforms = rng.random(config.rollout_size)
         order = rng.permutation(config.rollout_size)
@@ -251,8 +330,12 @@ def common_randomness(
     return draws
 
 
+def method_name(threshold: float) -> str:
+    return f"ess_{threshold:.2f}"
+
+
 def run_trajectory(
-    trajectory: str,
+    method: str,
     initial_weights: np.ndarray,
     features: np.ndarray,
     labels: np.ndarray,
@@ -260,13 +343,39 @@ def run_trajectory(
     config: Config,
     replication: int,
     state_offset: int,
-) -> tuple[list[FrozenState], list[dict[str, float]], float]:
-    if trajectory not in {"raw", "ppo"}:
-        raise ValueError(f"unsupported trajectory {trajectory}")
+    threshold: float | None = None,
+    collect_states: bool = False,
+) -> tuple[list[FrozenState], list[dict[str, float]], dict[str, float]]:
+    valid = {"raw", "ppo", "mse_oracle", "ess"}
+    if method not in valid:
+        raise ValueError(f"unsupported method {method}")
+    if method == "ess" and threshold is None:
+        raise ValueError("ESS method requires a threshold")
+
+    label = method_name(threshold) if threshold is not None else method
     weights = initial_weights.copy()
     states: list[FrozenState] = []
     path_rows: list[dict[str, float]] = []
     state_id = state_offset
+    update = 0
+    ppo_updates = 0
+    initial_value = population_value(weights, features, labels)
+    path_rows.append(
+        {
+            "replication": float(replication),
+            "method": label,
+            "threshold": float(threshold) if threshold is not None else float("nan"),
+            "update": 0.0,
+            "rollout_cycle": 0.0,
+            "minibatch": 0.0,
+            "population_value": initial_value,
+            "population_rho": 1.0,
+            "sample_rho": 1.0,
+            "chosen_ppo": 0.0,
+            "raw_risk": float("nan"),
+            "ppo_risk": float("nan"),
+        }
+    )
 
     for cycle, draw in enumerate(draws, start=1):
         rollout_weights = weights.copy()
@@ -280,36 +389,77 @@ def run_trajectory(
         minibatches = np.split(draw["order"], config.minibatches)
         for minibatch, indices in enumerate(minibatches, start=1):
             rho = population_rho(weights, rollout_weights, features)
-            states.append(
-                FrozenState(
-                    state_id=state_id,
-                    trajectory=trajectory,
-                    replication=replication,
-                    rollout_cycle=cycle,
-                    minibatch=minibatch,
-                    approximate_rho=rho,
-                    weights=weights.copy(),
-                    rollout_weights=rollout_weights.copy(),
+            if collect_states:
+                states.append(
+                    FrozenState(
+                        state_id=state_id,
+                        trajectory=label,
+                        replication=replication,
+                        rollout_cycle=cycle,
+                        minibatch=minibatch,
+                        approximate_rho=rho,
+                        weights=weights.copy(),
+                        rollout_weights=rollout_weights.copy(),
+                    )
                 )
-            )
-            state_id += 1
+                state_id += 1
+
             gradients, sample_rho, _ = estimate_gradients(
-                weights, rollout, indices, config
+                weights,
+                rollout,
+                indices,
+                config,
             )
-            weights = weights + config.training_learning_rate * gradients[trajectory]
+            raw_risk = float("nan")
+            ppo_risk = float("nan")
+            if method == "raw":
+                selected = "raw"
+            elif method == "ppo":
+                selected = "ppo"
+            elif method == "ess":
+                selected = "ppo" if sample_rho < float(threshold) else "raw"
+            else:
+                risks = exact_estimator_risks(
+                    weights,
+                    rollout_weights,
+                    features,
+                    labels,
+                    len(indices),
+                    config,
+                )
+                raw_risk = risks["raw_risk"]
+                ppo_risk = risks["ppo_risk"]
+                selected = "ppo" if ppo_risk < raw_risk else "raw"
+
+            weights = weights + config.training_learning_rate * gradients[selected]
+            update += 1
+            ppo_updates += int(selected == "ppo")
             path_rows.append(
                 {
                     "replication": float(replication),
-                    "trajectory": trajectory,
+                    "method": label,
+                    "threshold": float(threshold) if threshold is not None else float("nan"),
+                    "update": float(update),
                     "rollout_cycle": float(cycle),
                     "minibatch": float(minibatch),
+                    "population_value": population_value(weights, features, labels),
                     "population_rho": rho,
                     "sample_rho": sample_rho,
+                    "chosen_ppo": float(selected == "ppo"),
+                    "raw_risk": raw_risk,
+                    "ppo_risk": ppo_risk,
                 }
             )
 
     final_value = population_value(weights, features, labels)
-    return states, path_rows, final_value
+    summary = {
+        "replication": float(replication),
+        "method": label,
+        "threshold": float(threshold) if threshold is not None else float("nan"),
+        "final_value": final_value,
+        "ppo_fraction": ppo_updates / max(update, 1),
+    }
+    return states, path_rows, summary
 
 
 def choose_states(states: list[FrozenState], count: int) -> list[FrozenState]:
@@ -347,7 +497,8 @@ def draw_fresh_batch(
         "actions": actions,
         "advantages": rewards - baseline,
         "old_action_probabilities": old_probabilities[
-            np.arange(len(indices)), actions
+            np.arange(len(indices)),
+            actions,
         ],
     }
 
@@ -363,20 +514,34 @@ def evaluate_frozen_states(
     draw_rows: list[dict[str, float]] = []
     for ordinal, state in enumerate(states, start=1):
         value, true_gradient = population_value_and_gradient(
-            state.weights, features, labels
+            state.weights,
+            features,
+            labels,
         )
         rho = population_rho(state.weights, state.rollout_weights, features)
         signal_sq = float(np.sum(true_gradient**2))
-        errors = {name: [] for name in ("raw", "truncation", "ppo")}
-        changes = {name: [] for name in ("raw", "truncation", "ppo")}
-        harm = {name: [] for name in ("raw", "truncation", "ppo")}
+        exact_risks = exact_estimator_risks(
+            state.weights,
+            state.rollout_weights,
+            features,
+            labels,
+            config.redraw_batch_size,
+            config,
+        )
+        oracle_ppo = float(exact_risks["ppo_risk"] < exact_risks["raw_risk"])
+        errors = {name: [] for name in ("raw", "ppo")}
+        changes = {name: [] for name in ("raw", "ppo")}
+        harm = {name: [] for name in ("raw", "ppo")}
         sample_rhos: list[float] = []
 
         for redraw in range(config.redraws):
             rollout = draw_fresh_batch(rng, state, features, labels, config)
             indices = np.arange(config.redraw_batch_size)
             gradients, sample_rho, _ = estimate_gradients(
-                state.weights, rollout, indices, config
+                state.weights,
+                rollout,
+                indices,
+                config,
             )
             sample_rhos.append(sample_rho)
             for name, gradient in gradients.items():
@@ -401,6 +566,7 @@ def evaluate_frozen_states(
                         "population_rho": rho,
                         "sample_rho": sample_rho,
                         "signal_sq": signal_sq,
+                        "oracle_ppo": oracle_ppo,
                         "estimator": name,
                         "error_sq": error_sq,
                         "relative_error": error_sq / max(signal_sq, 1e-16),
@@ -425,6 +591,9 @@ def evaluate_frozen_states(
             "signal_sq": signal_sq,
             "current_value": value,
             "oracle_change": oracle_value - value,
+            "exact_raw_risk": exact_risks["raw_risk"],
+            "exact_ppo_risk": exact_risks["ppo_risk"],
+            "oracle_ppo": oracle_ppo,
         }
         for name in errors:
             array = np.asarray(errors[name], dtype=float)
@@ -439,7 +608,10 @@ def evaluate_frozen_states(
     return state_rows, draw_rows
 
 
-def quantile_bin_rows(state_rows: list[dict[str, float]], bins: int = 6) -> list[dict[str, float]]:
+def quantile_bin_rows(
+    state_rows: list[dict[str, float]],
+    bins: int = 6,
+) -> list[dict[str, float]]:
     rho = np.asarray([row["population_rho"] for row in state_rows], dtype=float)
     edges = np.unique(np.quantile(rho, np.linspace(0.0, 1.0, bins + 1)))
     if len(edges) < 3:
@@ -461,7 +633,7 @@ def quantile_bin_rows(state_rows: list[dict[str, float]], bins: int = 6) -> list
         oracle = np.asarray([item["oracle_change"] for item in selected])
         row["oracle_mean_change"] = float(np.mean(oracle))
         row["oracle_change_se"] = standard_error(oracle)
-        for name in ("raw", "truncation", "ppo"):
+        for name in ("raw", "ppo"):
             values = np.asarray([item[f"{name}_mse"] for item in selected])
             row[f"{name}_mse"] = float(np.mean(values))
             row[f"{name}_mse_se"] = standard_error(values)
@@ -474,8 +646,14 @@ def quantile_bin_rows(state_rows: list[dict[str, float]], bins: int = 6) -> list
     return output
 
 
-def relative_error_bin_rows(draw_rows: list[dict[str, float]]) -> list[dict[str, float]]:
-    raw = [row for row in draw_rows if row["estimator"] == "raw" and np.isfinite(row["reward_change"])]
+def relative_error_bin_rows(
+    draw_rows: list[dict[str, float]],
+) -> list[dict[str, float]]:
+    raw = [
+        row
+        for row in draw_rows
+        if row["estimator"] == "raw" and np.isfinite(row["reward_change"])
+    ]
     boundaries = np.asarray([0.0, 0.25, 0.5, 1.0, 2.0, 4.0, np.inf])
     ratios = np.asarray([row["relative_error"] for row in raw])
     assignments = np.digitize(ratios, boundaries[1:-1], right=False)
@@ -502,6 +680,62 @@ def relative_error_bin_rows(draw_rows: list[dict[str, float]]) -> list[dict[str,
     return output
 
 
+def aggregate_final_values(
+    run_rows: list[dict[str, float]],
+) -> list[dict[str, float]]:
+    methods = sorted({str(row["method"]) for row in run_rows})
+    output: list[dict[str, float]] = []
+    for method in methods:
+        selected = [row for row in run_rows if row["method"] == method]
+        values = np.asarray([row["final_value"] for row in selected], dtype=float)
+        fractions = np.asarray([row["ppo_fraction"] for row in selected], dtype=float)
+        threshold_values = [
+            row["threshold"] for row in selected if np.isfinite(row["threshold"])
+        ]
+        output.append(
+            {
+                "method": method,
+                "threshold": (
+                    float(threshold_values[0]) if threshold_values else float("nan")
+                ),
+                "replications": float(len(values)),
+                "mean_final_value": float(np.mean(values)),
+                "se_final_value": standard_error(values),
+                "median_final_value": float(np.median(values)),
+                "mean_ppo_fraction": float(np.mean(fractions)),
+                "se_ppo_fraction": standard_error(fractions),
+            }
+        )
+    return output
+
+
+def threshold_summary_rows(
+    final_rows: list[dict[str, float]],
+    draw_rows: list[dict[str, float]],
+) -> list[dict[str, float]]:
+    raw_draws = [row for row in draw_rows if row["estimator"] == "raw"]
+    by_method = {str(row["method"]): row for row in final_rows}
+    output: list[dict[str, float]] = []
+    for threshold in ESS_THRESHOLDS:
+        method = method_name(threshold)
+        final = by_method[method]
+        agreements = [
+            float((row["sample_rho"] < threshold) == bool(row["oracle_ppo"]))
+            for row in raw_draws
+        ]
+        output.append(
+            {
+                "threshold": threshold,
+                "mean_final_value": final["mean_final_value"],
+                "se_final_value": final["se_final_value"],
+                "mean_ppo_fraction": final["mean_ppo_fraction"],
+                "se_ppo_fraction": final["se_ppo_fraction"],
+                "frozen_redraw_oracle_agreement": float(np.mean(agreements)),
+            }
+        )
+    return output
+
+
 def write_csv(path: Path, rows: Iterable[dict[str, float]]) -> None:
     materialized = list(rows)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -514,83 +748,258 @@ def write_csv(path: Path, rows: Iterable[dict[str, float]]) -> None:
         writer.writerows(materialized)
 
 
-def make_figure(
-    state_rows: list[dict[str, float]],
+def set_plot_defaults() -> None:
+    plt.rcParams.update(
+        {
+            "font.size": 9.5,
+            "axes.titlesize": 10.5,
+            "axes.labelsize": 9.5,
+            "legend.fontsize": 8.5,
+            "xtick.labelsize": 8.5,
+            "ytick.labelsize": 8.5,
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+            "axes.grid": True,
+            "grid.color": LIGHT_GRID,
+            "grid.linewidth": 0.6,
+            "grid.alpha": 0.7,
+        }
+    )
+
+
+def make_theory_figure(
     bin_rows: list[dict[str, float]],
     error_rows: list[dict[str, float]],
     figure_path: Path,
 ) -> None:
+    set_plot_defaults()
     figure_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(1, 3, figsize=(13.5, 3.8))
+    fig, axes = plt.subplots(1, 3, figsize=(13.2, 3.6))
+
+    rho = np.asarray([row["rho_median"] for row in bin_rows])
+    order = np.argsort(rho)
 
     ax = axes[0]
-    rho = np.asarray([row["population_rho"] for row in state_rows])
-    raw_mse = np.asarray([row["raw_mse"] for row in state_rows])
-    ax.scatter(rho, raw_mse, s=22, alpha=0.45)
-    x = np.asarray([row["rho_median"] for row in bin_rows])
-    y = np.asarray([row["raw_mse"] for row in bin_rows])
-    yerr = np.asarray([row["raw_mse_se"] for row in bin_rows])
-    order = np.argsort(x)
-    ax.errorbar(x[order], y[order], yerr=yerr[order], marker="o", capsize=3)
+    raw_mse = np.asarray([row["raw_mse"] for row in bin_rows])
+    raw_se = np.asarray([row["raw_mse_se"] for row in bin_rows])
+    ax.errorbar(
+        rho[order],
+        raw_mse[order],
+        yerr=raw_se[order],
+        color=RAW_COLOR,
+        marker="o",
+        markersize=5.5,
+        linewidth=2.0,
+        capsize=3,
+    )
+    ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("Population normalized ESS")
     ax.set_ylabel("Unmodified gradient MSE")
-    ax.set_title("ESS and estimator error")
+    ax.set_title("Effective support and gradient error")
 
     ax = axes[1]
-    x = np.asarray([row["relative_error_median"] for row in error_rows])
-    harm = np.asarray([row["harm_rate"] for row in error_rows])
-    ax.plot(x, harm, marker="o")
-    ax.axvline(1.0, linestyle=":", linewidth=1.0)
-    ax.set_xscale("log")
-    ax.set_ylim(-0.01, max(0.2, float(np.max(harm)) + 0.04))
+    labels = []
+    harms = []
+    for row in error_rows:
+        left = row["relative_error_left"]
+        right = row["relative_error_right"]
+        labels.append(f"{left:g}+" if np.isinf(right) else f"{left:g}-{right:g}")
+        harms.append(row["harm_rate"])
+    positions = np.arange(len(labels))
+    ax.bar(positions, harms, color=HARM_COLOR, alpha=0.88, width=0.72)
+    ax.axvline(2.5, color=NEUTRAL_COLOR, linestyle=":", linewidth=1.1)
+    ax.set_xticks(positions, labels, rotation=28, ha="right")
+    ax.set_ylim(0.0, max(0.18, max(harms) * 1.22))
     ax.set_xlabel(r"Realized squared error / $\|g\|_2^2$")
-    ax.set_ylabel("Probability of negative change")
-    ax.set_title("Error relative to gradient signal")
+    ax.set_ylabel("Harmful-update rate")
+    ax.set_title("Failure after error reaches signal scale")
 
     ax = axes[2]
     raw_change = np.asarray([row["raw_mean_change"] for row in bin_rows])
-    raw_se = np.asarray([row["raw_change_se"] for row in bin_rows])
+    raw_change_se = np.asarray([row["raw_change_se"] for row in bin_rows])
     oracle_change = np.asarray([row["oracle_mean_change"] for row in bin_rows])
-    oracle_se = np.asarray([row["oracle_change_se"] for row in bin_rows])
-    ax.errorbar(x=np.asarray([row["rho_median"] for row in bin_rows])[order],
-                y=raw_change[order], yerr=raw_se[order], marker="o",
-                capsize=3, label="Sampled gradient")
-    ax.errorbar(x=np.asarray([row["rho_median"] for row in bin_rows])[order],
-                y=oracle_change[order], yerr=oracle_se[order], marker="s",
-                capsize=3, label="Population gradient")
-    ax.axhline(0.0, linewidth=1.0)
+    oracle_change_se = np.asarray([row["oracle_change_se"] for row in bin_rows])
+    ax.errorbar(
+        rho[order],
+        raw_change[order],
+        yerr=raw_change_se[order],
+        color=RAW_COLOR,
+        marker="o",
+        linewidth=2.0,
+        capsize=3,
+        label="Sampled gradient",
+    )
+    ax.errorbar(
+        rho[order],
+        oracle_change[order],
+        yerr=oracle_change_se[order],
+        color=ORACLE_COLOR,
+        marker="s",
+        linewidth=2.0,
+        capsize=3,
+        label="Population gradient",
+    )
+    ax.axhline(0.0, color=NEUTRAL_COLOR, linewidth=1.0)
+    ax.set_xscale("log")
     ax.set_xlabel("Population normalized ESS")
     ax.set_ylabel("One-step population change")
-    ax.set_title("Sampled and oracle updates")
-    ax.legend(frameon=False, fontsize=8)
+    ax.set_title("Estimation failure, not absence of direction")
+    ax.legend(frameon=False)
 
-    fig.tight_layout()
+    for label, ax in zip(("(a)", "(b)", "(c)"), axes):
+        ax.text(-0.14, 1.06, label, transform=ax.transAxes, fontweight="bold")
+    fig.tight_layout(w_pad=2.0)
     fig.savefig(figure_path.with_suffix(".pdf"), bbox_inches="tight")
-    fig.savefig(figure_path.with_suffix(".png"), dpi=220, bbox_inches="tight")
+    fig.savefig(figure_path.with_suffix(".png"), dpi=240, bbox_inches="tight")
     plt.close(fig)
 
 
-def aggregate_final_values(final_values: dict[str, list[float]]) -> list[dict[str, float]]:
-    rows: list[dict[str, float]] = []
-    for trajectory, values in final_values.items():
-        array = np.asarray(values)
-        rows.append(
-            {
-                "trajectory": trajectory,
-                "replications": float(len(array)),
-                "mean_final_value": float(np.mean(array)),
-                "se_final_value": standard_error(array),
-                "median_final_value": float(np.median(array)),
-            }
+def curve_statistics(
+    path_rows: list[dict[str, float]],
+    method: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    selected = [row for row in path_rows if row["method"] == method]
+    updates = np.asarray(sorted({int(row["update"]) for row in selected}))
+    means = []
+    ses = []
+    for update in updates:
+        values = np.asarray(
+            [
+                row["population_value"]
+                for row in selected
+                if int(row["update"]) == update
+            ]
         )
-    return rows
+        means.append(float(np.mean(values)))
+        ses.append(standard_error(values))
+    return updates, np.asarray(means), np.asarray(ses)
 
 
-def correlation_summary(
+def make_control_figure(
+    path_rows: list[dict[str, float]],
+    final_rows: list[dict[str, float]],
+    threshold_rows: list[dict[str, float]],
+    figure_path: Path,
+) -> str:
+    set_plot_defaults()
+    figure_path.parent.mkdir(parents=True, exist_ok=True)
+    by_method = {str(row["method"]): row for row in final_rows}
+    best_threshold_row = max(threshold_rows, key=lambda row: row["mean_final_value"])
+    best_method = method_name(best_threshold_row["threshold"])
+
+    fig, axes = plt.subplots(1, 3, figsize=(13.2, 3.6))
+
+    ax = axes[0]
+    curve_specs = [
+        ("raw", "Unmodified", RAW_COLOR, "-"),
+        ("ppo", "PPO", PPO_COLOR, "-"),
+        ("mse_oracle", "MSE oracle", ORACLE_COLOR, "-"),
+        (
+            best_method,
+            rf"ESS gate, $\tau={best_threshold_row['threshold']:.2g}$",
+            ESS_COLOR,
+            "--",
+        ),
+    ]
+    for method, label, color, linestyle in curve_specs:
+        updates, mean, se = curve_statistics(path_rows, method)
+        ax.plot(
+            updates,
+            mean,
+            color=color,
+            linewidth=2.0,
+            linestyle=linestyle,
+            label=label,
+        )
+        ax.fill_between(
+            updates,
+            mean - 1.96 * se,
+            mean + 1.96 * se,
+            color=color,
+            alpha=0.13,
+            linewidth=0,
+        )
+    ax.set_xlabel("Minibatch updates")
+    ax.set_ylabel("Population value")
+    ax.set_title("Static rules and MSE-oracle selection")
+    ax.legend(frameon=False, loc="best")
+
+    ax = axes[1]
+    thresholds = np.asarray([row["threshold"] for row in threshold_rows])
+    values = np.asarray([row["mean_final_value"] for row in threshold_rows])
+    errors = np.asarray([row["se_final_value"] for row in threshold_rows])
+    ax.errorbar(
+        thresholds,
+        values,
+        yerr=errors,
+        color=ESS_COLOR,
+        marker="o",
+        linewidth=2.0,
+        capsize=3,
+        label="Sample-ESS gate",
+    )
+    for method, label, color, style in (
+        ("raw", "Unmodified", RAW_COLOR, ":"),
+        ("ppo", "PPO", PPO_COLOR, ":"),
+        ("mse_oracle", "MSE oracle", ORACLE_COLOR, "--"),
+    ):
+        ax.axhline(
+            by_method[method]["mean_final_value"],
+            color=color,
+            linestyle=style,
+            linewidth=1.5,
+            label=label,
+        )
+    ax.set_xscale("log")
+    ax.set_xlabel(r"ESS threshold $\tau$")
+    ax.set_ylabel("Final population value")
+    ax.set_title("Heuristic threshold sweep")
+    ax.legend(frameon=False, fontsize=7.5)
+
+    ax = axes[2]
+    agreements = np.asarray(
+        [row["frozen_redraw_oracle_agreement"] for row in threshold_rows]
+    )
+    fractions = np.asarray([row["mean_ppo_fraction"] for row in threshold_rows])
+    ax.plot(
+        thresholds,
+        agreements,
+        color=ORACLE_COLOR,
+        marker="s",
+        linewidth=2.0,
+        label="Agreement with MSE oracle",
+    )
+    ax.plot(
+        thresholds,
+        fractions,
+        color=ESS_COLOR,
+        marker="o",
+        linewidth=2.0,
+        label="PPO update fraction",
+    )
+    ax.set_xscale("log")
+    ax.set_ylim(0.0, 1.02)
+    ax.set_xlabel(r"ESS threshold $\tau$")
+    ax.set_ylabel("Fraction")
+    ax.set_title("What the heuristic approximates")
+    ax.legend(frameon=False, fontsize=7.8)
+
+    for label, ax in zip(("(a)", "(b)", "(c)"), axes):
+        ax.text(-0.14, 1.06, label, transform=ax.transAxes, fontweight="bold")
+    fig.tight_layout(w_pad=2.0)
+    fig.savefig(figure_path.with_suffix(".pdf"), bbox_inches="tight")
+    fig.savefig(figure_path.with_suffix(".png"), dpi=240, bbox_inches="tight")
+    plt.close(fig)
+    return best_method
+
+
+def summary_text(
+    initial_value: float,
     state_rows: list[dict[str, float]],
     draw_rows: list[dict[str, float]],
     final_rows: list[dict[str, float]],
+    threshold_rows: list[dict[str, float]],
 ) -> str:
     rho = np.asarray([row["population_rho"] for row in state_rows])
     raw_mse = np.asarray([row["raw_mse"] for row in state_rows])
@@ -605,37 +1014,46 @@ def correlation_summary(
     ]
     below = [row for row in raw_draws if row["relative_error"] < 1.0]
     above = [row for row in raw_draws if row["relative_error"] >= 1.0]
-    below_harm = float(np.mean([row["reward_change"] < 0.0 for row in below]))
-    above_harm = float(np.mean([row["reward_change"] < 0.0 for row in above]))
+    below_harm = (
+        float(np.mean([row["reward_change"] < 0.0 for row in below]))
+        if below
+        else float("nan")
+    )
+    above_harm = (
+        float(np.mean([row["reward_change"] < 0.0 for row in above]))
+        if above
+        else float("nan")
+    )
     oracle_negative = float(np.mean([row["oracle_change"] < 0.0 for row in state_rows]))
-
-    lowest = min(state_rows, key=lambda row: row["population_rho"])
-    highest = max(state_rows, key=lambda row: row["population_rho"])
+    by_method = {str(row["method"]): row for row in final_rows}
+    best = max(threshold_rows, key=lambda row: row["mean_final_value"])
     lines = [
+        f"initial_value={initial_value:.8f}",
         f"states={len(state_rows)}",
         f"population_rho_min={np.min(rho):.10f}",
         f"population_rho_median={np.median(rho):.6f}",
         f"population_rho_max={np.max(rho):.6f}",
         f"corr_log_rho_log_raw_mse={log_corr:.6f}",
-        f"lowest_rho_raw_mse={lowest['raw_mse']:.8f}",
-        f"highest_rho_raw_mse={highest['raw_mse']:.8f}",
-        f"low_to_high_mse_ratio={lowest['raw_mse']/highest['raw_mse']:.6f}",
         f"relative_error_below_one_count={len(below)}",
         f"relative_error_below_one_harm_rate={below_harm:.6f}",
         f"relative_error_above_one_count={len(above)}",
         f"relative_error_above_one_harm_rate={above_harm:.6f}",
-        f"oracle_negative_rate={oracle_negative:.6f}",
+        f"population_gradient_negative_rate={oracle_negative:.6f}",
+        f"final_value_raw_mean={by_method['raw']['mean_final_value']:.8f}",
+        f"final_value_ppo_mean={by_method['ppo']['mean_final_value']:.8f}",
+        f"final_value_mse_oracle_mean={by_method['mse_oracle']['mean_final_value']:.8f}",
+        f"mse_oracle_ppo_fraction={by_method['mse_oracle']['mean_ppo_fraction']:.8f}",
+        f"best_ess_threshold={best['threshold']:.6f}",
+        f"best_ess_final_value={best['mean_final_value']:.8f}",
+        f"best_ess_ppo_fraction={best['mean_ppo_fraction']:.8f}",
+        f"best_ess_oracle_agreement={best['frozen_redraw_oracle_agreement']:.8f}",
     ]
-    for row in final_rows:
-        lines.append(
-            f"final_value_{row['trajectory']}_mean={row['mean_final_value']:.8f}"
-        )
     return "\n".join(lines) + "\n"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--replications", type=int, default=12)
+    parser.add_argument("--replications", type=int, default=40)
     parser.add_argument("--synthetic", action="store_true")
     return parser.parse_args()
 
@@ -650,15 +1068,23 @@ def main() -> None:
 
     all_states: list[FrozenState] = []
     path_rows: list[dict[str, float]] = []
-    final_values = {"raw": [], "ppo": []}
+    run_rows: list[dict[str, float]] = []
     next_state_id = 0
 
     for replication in range(config.replications):
         rng = np.random.default_rng(config.seed + replication)
         draws = common_randomness(rng, len(features), config)
-        for trajectory in ("raw", "ppo"):
-            states, rows, final_value = run_trajectory(
-                trajectory,
+        method_specs: list[tuple[str, float | None, bool]] = [
+            ("raw", None, True),
+            ("ppo", None, True),
+            ("mse_oracle", None, False),
+        ]
+        method_specs.extend(
+            ("ess", threshold, False) for threshold in ESS_THRESHOLDS
+        )
+        for method, threshold, collect_states in method_specs:
+            states, rows, run_summary = run_trajectory(
+                method,
                 initial_weights,
                 features,
                 labels,
@@ -666,40 +1092,59 @@ def main() -> None:
                 config,
                 replication,
                 next_state_id,
+                threshold=threshold,
+                collect_states=collect_states,
             )
             next_state_id += len(states)
             all_states.extend(states)
             path_rows.extend(rows)
-            final_values[trajectory].append(final_value)
+            run_rows.append(run_summary)
 
     selected_states = choose_states(all_states, config.checkpoints)
     diagnostic_rng = np.random.default_rng(config.seed + 100000)
     state_rows, draw_rows = evaluate_frozen_states(
-        selected_states, features, labels, config, diagnostic_rng
+        selected_states,
+        features,
+        labels,
+        config,
+        diagnostic_rng,
     )
     bin_rows = quantile_bin_rows(state_rows)
     error_rows = relative_error_bin_rows(draw_rows)
-    final_rows = aggregate_final_values(final_values)
+    final_rows = aggregate_final_values(run_rows)
+    threshold_rows = threshold_summary_rows(final_rows, draw_rows)
 
     result_dir = root / "simulation" / "results"
     write_csv(result_dir / "optdigits_categorical_paths.csv", path_rows)
+    write_csv(result_dir / "optdigits_categorical_runs.csv", run_rows)
     write_csv(result_dir / "optdigits_categorical_frozen_states.csv", state_rows)
     write_csv(result_dir / "optdigits_categorical_redraws.csv", draw_rows)
     write_csv(result_dir / "optdigits_categorical_ess_bins.csv", bin_rows)
     write_csv(result_dir / "optdigits_categorical_error_bins.csv", error_rows)
     write_csv(result_dir / "optdigits_categorical_final_values.csv", final_rows)
+    write_csv(result_dir / "optdigits_categorical_thresholds.csv", threshold_rows)
 
-    summary = f"initial_value={initial_value:.8f}\n" + correlation_summary(
-        state_rows, draw_rows, final_rows
-    )
-    (result_dir / "optdigits_categorical_summary.txt").write_text(
-        summary, encoding="utf-8"
-    )
-    make_figure(
-        state_rows,
+    make_theory_figure(
         bin_rows,
         error_rows,
         root / "figures" / "optdigits_categorical_theory",
+    )
+    make_control_figure(
+        path_rows,
+        final_rows,
+        threshold_rows,
+        root / "figures" / "optdigits_categorical_control",
+    )
+    summary = summary_text(
+        initial_value,
+        state_rows,
+        draw_rows,
+        final_rows,
+        threshold_rows,
+    )
+    (result_dir / "optdigits_categorical_summary.txt").write_text(
+        summary,
+        encoding="utf-8",
     )
     print(summary)
 
