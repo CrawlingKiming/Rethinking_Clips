@@ -53,6 +53,11 @@ jobs:
               r"$\1\\pm\2$\3",
               text,
           )
+          text = re.sub(
+              r"\$(-?\d+(?:\.\d+)?)\\%([,.)\s])",
+              r"$\1\\%$\2",
+              text,
+          )
           start_marker = "The categorical contextual bandit confirms the two links used by the theory."
           end_marker = "Future work should"
           start = text.find(start_marker)
