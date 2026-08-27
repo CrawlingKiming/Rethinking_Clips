@@ -1,0 +1,113 @@
+name: Optdigits crossover hyperparameter sweep
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  explore:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r simulation/requirements.txt
+      - name: Run exploratory common-hyperparameter sweep
+        run: |
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+          import numpy as np
+          from simulation import optdigits_categorical_theory as ex
+
+          root = Path.cwd()
+          base = ex.Config()
+          features, labels = ex.load_optdigits(root / 'simulation' / 'data', synthetic=False)
+          initial_weights = ex.fit_initial_policy(features, labels, base)
+
+          learning_rates = [1.00, 1.25, 1.50, 1.75, 2.00, 2.25, 2.50]
+          minibatch_counts = [8, 12, 20]
+          replications = 8
+          rows = []
+
+          for minibatches in minibatch_counts:
+              for lr in learning_rates:
+                  cfg = ex.Config(
+                      replications=replications,
+                      minibatches=minibatches,
+                      training_learning_rate=lr,
+                  )
+                  summaries = []
+                  for replication in range(replications):
+                      rng = np.random.default_rng(cfg.seed + replication)
+                      draws = ex.common_randomness(rng, len(features), cfg)
+                      for method in ('raw', 'ppo', 'mse_oracle'):
+                          _, _, summary = ex.run_trajectory(
+                              method,
+                              initial_weights,
+                              features,
+                              labels,
+                              draws,
+                              cfg,
+                              replication,
+                              0,
+                              collect_states=False,
+                          )
+                          summaries.append(summary)
+
+                  by_method = {}
+                  for method in ('raw', 'ppo', 'mse_oracle'):
+                      selected = [r for r in summaries if r['method'] == method]
+                      values = np.asarray([r['final_value'] for r in selected], dtype=float)
+                      fractions = np.asarray([r['ppo_fraction'] for r in selected], dtype=float)
+                      by_method[method] = {
+                          'mean': float(np.mean(values)),
+                          'se': ex.standard_error(values),
+                          'ppo_fraction': float(np.mean(fractions)),
+                      }
+
+                  static_best = max(by_method['raw']['mean'], by_method['ppo']['mean'])
+                  rows.append({
+                      'learning_rate': lr,
+                      'minibatches': minibatches,
+                      'minibatch_size': cfg.minibatch_size,
+                      'replications': replications,
+                      'raw_mean': by_method['raw']['mean'],
+                      'raw_se': by_method['raw']['se'],
+                      'ppo_mean': by_method['ppo']['mean'],
+                      'ppo_se': by_method['ppo']['se'],
+                      'oracle_mean': by_method['mse_oracle']['mean'],
+                      'oracle_se': by_method['mse_oracle']['se'],
+                      'oracle_ppo_fraction': by_method['mse_oracle']['ppo_fraction'],
+                      'oracle_gain_vs_best_static': by_method['mse_oracle']['mean'] - static_best,
+                      'oracle_gain_vs_raw': by_method['mse_oracle']['mean'] - by_method['raw']['mean'],
+                      'oracle_gain_vs_ppo': by_method['mse_oracle']['mean'] - by_method['ppo']['mean'],
+                  })
+                  print(rows[-1])
+
+          out = root / 'simulation' / 'results' / 'optdigits_hparam_explore.csv'
+          with out.open('w', newline='', encoding='utf-8') as f:
+              writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+              writer.writeheader()
+              writer.writerows(rows)
+          PY
+      - name: Commit sweep and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm .github/workflows/optdigits-hparam-explore.yml
+          git add simulation/results/optdigits_hparam_explore.csv
+          git add -A .github/workflows
+          git commit -m "Add Optdigits crossover hyperparameter sweep"
+          git push origin HEAD:main
