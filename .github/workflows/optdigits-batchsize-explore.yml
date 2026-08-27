@@ -23,6 +23,7 @@ jobs:
           import csv
           import importlib.util
           import math
+          import sys
           from dataclasses import replace
           from pathlib import Path
           import numpy as np
@@ -30,6 +31,7 @@ jobs:
           root = Path.cwd()
           spec = importlib.util.spec_from_file_location('exp', root/'simulation'/'optdigits_categorical_theory.py')
           exp = importlib.util.module_from_spec(spec)
+          sys.modules['exp'] = exp
           spec.loader.exec_module(exp)
 
           base = exp.Config(replications=12, rollout_cycles=2)
