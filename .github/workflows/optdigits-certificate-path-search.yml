@@ -1,0 +1,119 @@
+name: Search Optdigits certificate transition
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r simulation/requirements.txt
+      - name: Evaluate exact certificate paths
+        run: |
+          python - <<'PY'
+          import csv
+          import importlib.util
+          import math
+          import sys
+          from dataclasses import replace
+          from pathlib import Path
+          import numpy as np
+
+          root = Path.cwd()
+          spec = importlib.util.spec_from_file_location(
+              'optdigits_base', root/'simulation'/'optdigits_categorical_theory.py'
+          )
+          exp = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = exp
+          spec.loader.exec_module(exp)
+          features, labels = exp.load_optdigits(root/'simulation'/'data', False)
+          covariance = features.T @ features / len(features)
+          L = 0.5 * float(np.linalg.eigvalsh(covariance)[-1])
+          eta = 0.17
+
+          cfg0 = exp.Config(initialization_scale=0.20, ppo_epsilon=0.20)
+          rollout_weights = exp.fit_initial_policy(features, labels, cfg0)
+          full_weights = exp.fit_initial_policy(features, labels, replace(cfg0, initialization_scale=1.00))
+          direction = full_weights - rollout_weights
+
+          rows = []
+          summaries = []
+          for batch_size in (160, 320, 480, 640, 960, 1280):
+              selected_rows = []
+              for scale in np.linspace(0.0, 2.5, 201):
+                  weights = rollout_weights + scale * direction
+                  rho = exp.population_rho(weights, rollout_weights, features)
+                  value, gradient = exp.population_value_and_gradient(weights, features, labels)
+                  signal_sq = float(np.sum(gradient**2))
+                  risks = exp.exact_estimator_risks(
+                      weights, rollout_weights, features, labels, batch_size, cfg0
+                  )
+                  raw_relative = risks['raw_risk'] / max(signal_sq, 1e-16)
+                  ppo_relative = risks['ppo_risk'] / max(signal_sq, 1e-16)
+                  raw_certificate = 0.5 * eta * (signal_sq - risks['raw_risk'])
+                  ppo_certificate = 0.5 * eta * (signal_sq - risks['ppo_risk'])
+                  row = {
+                      'batch_size': batch_size,
+                      'path_scale': scale,
+                      'population_rho': rho,
+                      'population_value': value,
+                      'signal_sq': signal_sq,
+                      'raw_mse': risks['raw_risk'],
+                      'ppo_mse': risks['ppo_risk'],
+                      'raw_relative_risk': raw_relative,
+                      'ppo_relative_risk': ppo_relative,
+                      'raw_certificate': raw_certificate,
+                      'ppo_certificate': ppo_certificate,
+                      'raw_certified': float(raw_certificate > 0.0),
+                      'ppo_certified': float(ppo_certificate > 0.0),
+                      'ppo_only_certified': float(raw_certificate <= 0.0 and ppo_certificate > 0.0),
+                  }
+                  rows.append(row)
+                  selected_rows.append(row)
+              ppo_only = [r for r in selected_rows if r['ppo_only_certified'] == 1.0]
+              both = [r for r in selected_rows if r['raw_certified'] == 1.0 and r['ppo_certified'] == 1.0]
+              neither = [r for r in selected_rows if r['raw_certified'] == 0.0 and r['ppo_certified'] == 0.0]
+              summaries.append({
+                  'batch_size': batch_size,
+                  'both_certified_points': len(both),
+                  'ppo_only_certified_points': len(ppo_only),
+                  'neither_certified_points': len(neither),
+                  'ppo_only_rho_min': min((r['population_rho'] for r in ppo_only), default=math.nan),
+                  'ppo_only_rho_max': max((r['population_rho'] for r in ppo_only), default=math.nan),
+                  'raw_first_loses_certificate_rho': next((r['population_rho'] for r in selected_rows if r['raw_certified'] == 0.0), math.nan),
+                  'ppo_first_loses_certificate_rho': next((r['population_rho'] for r in selected_rows if r['ppo_certified'] == 0.0), math.nan),
+                  'high_rho_raw_relative_risk': selected_rows[0]['raw_relative_risk'],
+                  'high_rho_ppo_relative_risk': selected_rows[0]['ppo_relative_risk'],
+                  'low_rho_raw_relative_risk': selected_rows[-1]['raw_relative_risk'],
+                  'low_rho_ppo_relative_risk': selected_rows[-1]['ppo_relative_risk'],
+              })
+
+          result_dir = root/'simulation'/'results'
+          with (result_dir/'optdigits_certificate_path_search.csv').open('w', newline='', encoding='utf-8') as handle:
+              writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+              writer.writeheader()
+              writer.writerows(rows)
+          with (result_dir/'optdigits_certificate_path_summary.csv').open('w', newline='', encoding='utf-8') as handle:
+              writer = csv.DictWriter(handle, fieldnames=list(summaries[0].keys()))
+              writer.writeheader()
+              writer.writerows(summaries)
+          for row in summaries:
+              print(row)
+          PY
+      - name: Commit results and remove workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add simulation/results/optdigits_certificate_path_search.csv simulation/results/optdigits_certificate_path_summary.csv
+          git rm .github/workflows/optdigits-certificate-path-search.yml
+          git commit -m 'Search Optdigits certificate transition'
+          git push
