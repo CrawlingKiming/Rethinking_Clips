@@ -1,8 +1,8 @@
-"""Targeted pilot search for an Optdigits regime where the exact MSE oracle
-uses both unmodified and PPO estimators and improves over both static rules.
+"""Pilot search for a theorem-compliant Optdigits regime where an exact-MSE
+oracle uses both raw and PPO estimators and improves over both static rules.
 
-All candidate learning rates satisfy the global smoothness certificate. The
-search uses pilot seeds only and is not a reported result.
+The grid is exploratory only. A selected configuration must be rerun on fresh
+seeds before it can be reported.
 """
 
 from __future__ import annotations
@@ -17,11 +17,10 @@ import numpy as np
 import optdigits_categorical_theory as base
 
 
-LEARNING_RATE = 0.17
 ROLLOUT_SIZE = 320
-POLICY_ITERATIONS = 25
-PILOT_REPLICATIONS = 12
-SEED_START = 20700826
+POLICY_ITERATIONS = 15
+PILOT_REPLICATIONS = 8
+SEED_START = 20800826
 
 
 @dataclass(frozen=True)
@@ -29,46 +28,37 @@ class Candidate:
     name: str
     minibatches: int
     epsilon: float
-    initialization_scale: float
+    learning_rate: float
+    initialization_scale: float = 0.35
 
 
-CANDIDATES = (
-    Candidate("N40_eps005_init035", 8, 0.05, 0.35),
-    Candidate("N40_eps010_init035", 8, 0.10, 0.35),
-    Candidate("N20_eps010_init035", 16, 0.10, 0.35),
-    Candidate("N20_eps020_init035", 16, 0.20, 0.35),
-    Candidate("N16_eps010_init035", 20, 0.10, 0.35),
-    Candidate("N16_eps020_init035", 20, 0.20, 0.35),
-    Candidate("N20_eps020_init020", 16, 0.20, 0.20),
-    Candidate("N16_eps020_init020", 20, 0.20, 0.20),
+CANDIDATES = tuple(
+    Candidate(
+        f"N{320 // minibatches}_eps{int(100*epsilon):03d}_lr{int(100*learning_rate):02d}",
+        minibatches,
+        epsilon,
+        learning_rate,
+    )
+    for minibatches in (8, 16)
+    for epsilon in (0.05, 0.10, 0.20)
+    for learning_rate in (0.05, 0.10, 0.14, 0.17)
 )
 
 
-def standard_error(values: np.ndarray) -> float:
+def se(values: np.ndarray) -> float:
     values = np.asarray(values, dtype=float)
     if len(values) < 2:
         return 0.0
     return float(np.std(values, ddof=1) / math.sqrt(len(values)))
 
 
-def run_static(
-    method: str,
-    initial_weights: np.ndarray,
-    features: np.ndarray,
-    labels: np.ndarray,
-    draws: list[dict[str, np.ndarray]],
-    config: base.Config,
-) -> np.ndarray:
+def run_static(method, initial_weights, features, labels, draws, config):
     weights = initial_weights.copy()
     values = [base.population_value(weights, features, labels)]
     for draw in draws:
         rollout_weights = weights.copy()
         rollout = base.collect_rollout(
-            rollout_weights,
-            features,
-            labels,
-            draw["contexts"],
-            draw["uniforms"],
+            rollout_weights, features, labels, draw["contexts"], draw["uniforms"]
         )
         for indices in np.split(draw["order"], config.minibatches):
             gradients, _, _ = base.estimate_gradients(weights, rollout, indices, config)
@@ -77,27 +67,14 @@ def run_static(
     return np.asarray(values)
 
 
-def run_oracle(
-    initial_weights: np.ndarray,
-    features: np.ndarray,
-    labels: np.ndarray,
-    draws: list[dict[str, np.ndarray]],
-    config: base.Config,
-) -> tuple[np.ndarray, float, float, float]:
+def run_oracle(initial_weights, features, labels, draws, config):
     weights = initial_weights.copy()
     values = [base.population_value(weights, features, labels)]
-    ppo = 0
-    raw_distinct = 0
-    distinct = 0
-    total = 0
+    ppo = raw_distinct = distinct = total = 0
     for draw in draws:
         rollout_weights = weights.copy()
         rollout = base.collect_rollout(
-            rollout_weights,
-            features,
-            labels,
-            draw["contexts"],
-            draw["uniforms"],
+            rollout_weights, features, labels, draw["contexts"], draw["uniforms"]
         )
         for indices in np.split(draw["order"], config.minibatches):
             gradients, _, _ = base.estimate_gradients(weights, rollout, indices, config)
@@ -135,17 +112,17 @@ def main() -> None:
     features, labels = base.load_optdigits(root / "simulation" / "data", False)
     covariance = features.T @ features / len(features)
     eta_max = 2.0 / float(np.linalg.eigvalsh(covariance)[-1])
-    if LEARNING_RATE > eta_max:
-        raise RuntimeError("pilot learning rate violates smoothness certificate")
 
-    rows: list[dict[str, float | str]] = []
+    rows = []
     for candidate in CANDIDATES:
+        if candidate.learning_rate > eta_max:
+            raise RuntimeError("candidate violates smoothness certificate")
         config = base.Config(
             replications=PILOT_REPLICATIONS,
             rollout_cycles=POLICY_ITERATIONS,
             rollout_size=ROLLOUT_SIZE,
             minibatches=candidate.minibatches,
-            training_learning_rate=LEARNING_RATE,
+            training_learning_rate=candidate.learning_rate,
             ppo_epsilon=candidate.epsilon,
             initialization_scale=candidate.initialization_scale,
         )
@@ -173,18 +150,19 @@ def main() -> None:
         raw = np.asarray(raw_curves)
         ppo_curve = np.asarray(ppo_curves)
         oracle = np.asarray(oracle_curves)
-        best_static_final = np.maximum(raw[:, -1], ppo_curve[:, -1])
-        oracle_gain = oracle[:, -1] - best_static_final
-
+        best_static = np.maximum(raw[:, -1], ppo_curve[:, -1])
+        oracle_gain = oracle[:, -1] - best_static
         early_end = min(5, POLICY_ITERATIONS)
         raw_early = np.mean(raw[:, 1 : early_end + 1], axis=1)
         ppo_early = np.mean(ppo_curve[:, 1 : early_end + 1], axis=1)
         oracle_early = np.mean(oracle[:, 1 : early_end + 1], axis=1)
 
-        mean_ppo_fraction = float(np.mean(ppo_fractions))
-        mean_raw_distinct_fraction = float(np.mean(raw_distinct_fractions))
-        mixed = min(mean_ppo_fraction, mean_raw_distinct_fraction)
-        score = float(np.mean(oracle_gain)) / (standard_error(oracle_gain) + 1e-4) + 20.0 * mixed
+        ppo_fraction = float(np.mean(ppo_fractions))
+        raw_distinct_fraction = float(np.mean(raw_distinct_fractions))
+        mixed_fraction = min(ppo_fraction, raw_distinct_fraction)
+        gain_mean = float(np.mean(oracle_gain))
+        gain_se = se(oracle_gain)
+        score = gain_mean / (gain_se + 1e-4) + 30.0 * mixed_fraction
 
         rows.append(
             {
@@ -193,7 +171,7 @@ def main() -> None:
                 "minibatches": float(candidate.minibatches),
                 "minibatch_size": float(config.minibatch_size),
                 "policy_iterations": float(POLICY_ITERATIONS),
-                "learning_rate": LEARNING_RATE,
+                "learning_rate": candidate.learning_rate,
                 "eta_max": eta_max,
                 "ppo_epsilon": candidate.epsilon,
                 "initialization_scale": candidate.initialization_scale,
@@ -201,10 +179,10 @@ def main() -> None:
                 "raw_final": float(np.mean(raw[:, -1])),
                 "ppo_final": float(np.mean(ppo_curve[:, -1])),
                 "oracle_final": float(np.mean(oracle[:, -1])),
-                "oracle_gain_vs_best_static": float(np.mean(oracle_gain)),
-                "oracle_gain_se": standard_error(oracle_gain),
-                "oracle_ppo_fraction": mean_ppo_fraction,
-                "oracle_raw_distinct_fraction": mean_raw_distinct_fraction,
+                "oracle_gain_vs_best_static": gain_mean,
+                "oracle_gain_se": gain_se,
+                "oracle_ppo_fraction": ppo_fraction,
+                "oracle_raw_distinct_fraction": raw_distinct_fraction,
                 "oracle_distinct_fraction": float(np.mean(distinct_fractions)),
                 "early_raw_minus_ppo": float(np.mean(raw_early - ppo_early)),
                 "early_oracle_minus_raw": float(np.mean(oracle_early - raw_early)),
