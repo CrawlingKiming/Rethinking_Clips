@@ -1,0 +1,142 @@
+name: Explore theorem-certified Optdigits step sizes
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  explore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r simulation/requirements.txt
+      - name: Run certified-step exploratory sweep
+        run: |
+          python - <<'PY'
+          import csv
+          import importlib.util
+          import math
+          import sys
+          from dataclasses import replace
+          from pathlib import Path
+          import numpy as np
+
+          root = Path.cwd()
+          spec = importlib.util.spec_from_file_location('optdigits_base', root/'simulation'/'optdigits_categorical_theory.py')
+          exp = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = exp
+          spec.loader.exec_module(exp)
+
+          template = exp.Config(replications=12, rollout_size=320)
+          features, labels = exp.load_optdigits(root/'simulation'/'data', False)
+          initial_weights = exp.fit_initial_policy(features, labels, template)
+
+          mean_norm_sq = float(np.mean(np.sum(features**2, axis=1)))
+          global_L_bound = 0.5 * mean_norm_sq
+          eta_max = 1.0 / global_L_bound
+
+          layouts = [
+              (1, 20),
+              (1, 32),
+              (1, 40),
+              (2, 16),
+              (2, 20),
+          ]
+          fractions = [0.50, 0.75, 0.90, 1.00]
+          seed_start = 20320826
+          rows = []
+
+          def se(values):
+              values = np.asarray(values, dtype=float)
+              return float(np.std(values, ddof=1) / math.sqrt(len(values))) if len(values) > 1 else 0.0
+
+          for policy_iterations, minibatches in layouts:
+              for fraction in fractions:
+                  learning_rate = fraction * eta_max
+                  cfg = replace(
+                      template,
+                      replications=12,
+                      rollout_cycles=policy_iterations,
+                      minibatches=minibatches,
+                      training_learning_rate=learning_rate,
+                  )
+                  values = {name: [] for name in ('raw', 'ppo', 'mse_oracle')}
+                  oracle_fractions = []
+                  gains_raw = []
+                  gains_ppo = []
+                  for replication in range(cfg.replications):
+                      rng = np.random.default_rng(seed_start + replication)
+                      draws = exp.common_randomness(rng, len(features), cfg)
+                      rep_values = {}
+                      for method in ('raw', 'ppo', 'mse_oracle'):
+                          _, _, summary = exp.run_trajectory(
+                              method,
+                              initial_weights,
+                              features,
+                              labels,
+                              draws,
+                              cfg,
+                              replication,
+                              0,
+                              collect_states=False,
+                          )
+                          value = float(summary['final_value'])
+                          values[method].append(value)
+                          rep_values[method] = value
+                          if method == 'mse_oracle':
+                              oracle_fractions.append(float(summary['ppo_fraction']))
+                      gains_raw.append(rep_values['mse_oracle'] - rep_values['raw'])
+                      gains_ppo.append(rep_values['mse_oracle'] - rep_values['ppo'])
+
+                  raw = np.asarray(values['raw'])
+                  ppo = np.asarray(values['ppo'])
+                  oracle = np.asarray(values['mse_oracle'])
+                  rows.append({
+                      'rollout_size': cfg.rollout_size,
+                      'policy_iterations': policy_iterations,
+                      'minibatches': minibatches,
+                      'minibatch_size': cfg.minibatch_size,
+                      'total_updates': policy_iterations * minibatches,
+                      'mean_feature_norm_sq': mean_norm_sq,
+                      'global_L_bound': global_L_bound,
+                      'eta_max': eta_max,
+                      'eta_fraction': fraction,
+                      'learning_rate': learning_rate,
+                      'replications': cfg.replications,
+                      'seed_start': seed_start,
+                      'raw_mean': float(np.mean(raw)),
+                      'raw_se': se(raw),
+                      'ppo_mean': float(np.mean(ppo)),
+                      'ppo_se': se(ppo),
+                      'oracle_mean': float(np.mean(oracle)),
+                      'oracle_se': se(oracle),
+                      'oracle_ppo_fraction': float(np.mean(oracle_fractions)),
+                      'oracle_gain_vs_raw': float(np.mean(gains_raw)),
+                      'oracle_gain_vs_raw_se': se(np.asarray(gains_raw)),
+                      'oracle_gain_vs_ppo': float(np.mean(gains_ppo)),
+                      'oracle_gain_vs_ppo_se': se(np.asarray(gains_ppo)),
+                  })
+                  print(rows[-1])
+
+          output = root/'simulation'/'results'/'optdigits_safe_step_explore.csv'
+          output.parent.mkdir(parents=True, exist_ok=True)
+          with output.open('w', newline='', encoding='utf-8') as handle:
+              writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+              writer.writeheader()
+              writer.writerows(rows)
+          PY
+      - name: Commit sweep and remove temporary workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add simulation/results/optdigits_safe_step_explore.csv
+          git rm .github/workflows/optdigits-safe-step-explore.yml
+          git commit -m 'Explore theorem-certified Optdigits step sizes'
+          git push
