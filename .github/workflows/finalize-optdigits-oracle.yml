@@ -58,6 +58,11 @@ jobs:
               r"$\1\\%$\2",
               text,
           )
+          text = re.sub(
+              r"For each \$\\tau\\in\\\{0\.01, 0\.03, 0\.05, 0\.1, 0\.2, 0\.4, 0\.6, 0\.8\\\}\$,","
+              "We sweep eight thresholds from $0.01$ to $0.8$. For each threshold,",
+              text,
+          )
           start_marker = "The categorical contextual bandit confirms the two links used by the theory."
           end_marker = "Future work should"
           start = text.find(start_marker)
@@ -96,8 +101,7 @@ jobs:
           git add main.tex
           git add simulation/README.md
           git add simulation/results/optdigits_categorical_pairwise.csv
-          git add -A scripts/update_optdigits_oracle_paper.py
-          git add -A scripts/.optdigits_patch_00 scripts/.optdigits_patch_01 scripts/.optdigits_patch_02 scripts/.optdigits_patch_03 scripts/.optdigits_patch_04
-          git add -A .github/workflows/finalize-optdigits-oracle.yml
+          git add -A scripts
+          git add -A .github/workflows
           git commit -m "Finalize Optdigits MSE-oracle and ESS-threshold results"
           git push origin HEAD:optdigits-lr2-clean
