@@ -1,0 +1,36 @@
+name: Run final Optdigits regime validation
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r simulation/requirements.txt
+      - name: Run final validation
+        run: python simulation/optdigits_regime_validation.py --replications 100
+      - name: Commit results and remove workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add simulation/optdigits_regime_validation.py
+          git add simulation/results/optdigits_regime_curve.csv
+          git add simulation/results/optdigits_regime_states.csv
+          git add simulation/results/optdigits_regime_redraws.csv
+          git add simulation/results/optdigits_regime_bins.csv
+          git add simulation/results/optdigits_regime_summary.txt
+          git add figures/optdigits_regime_mechanism.pdf figures/optdigits_regime_mechanism.png
+          git add figures/optdigits_policy_iterations.pdf figures/optdigits_policy_iterations.png
+          git rm .github/workflows/optdigits-final-regime-run.yml
+          git commit -m 'Run final Optdigits regime validation'
+          git push
