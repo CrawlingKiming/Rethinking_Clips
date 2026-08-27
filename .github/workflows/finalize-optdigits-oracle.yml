@@ -43,10 +43,16 @@ jobs:
           python -m py_compile scripts/update_optdigits_oracle_paper.py
           python scripts/update_optdigits_oracle_paper.py
           python - <<'PY'
+          import re
           from pathlib import Path
           path = Path("main.tex")
           text = path.read_text(encoding="utf-8")
           text = text.replace(r"\,$\pm\,$", r"\pm")
+          text = re.sub(
+              r"\$(-?\d+\.\d{3})\\pm(-?\d+\.\d{3})([,.)\s])",
+              r"$\1\\pm\2$\3",
+              text,
+          )
           start_marker = "The categorical contextual bandit confirms the two links used by the theory."
           end_marker = "Future work should"
           start = text.find(start_marker)
