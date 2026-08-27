@@ -1,0 +1,126 @@
+name: Refine certified Optdigits update setting
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  explore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r simulation/requirements.txt
+      - name: Run refined certified-step sweep
+        run: |
+          python - <<'PY'
+          import csv
+          import importlib.util
+          import math
+          import sys
+          from dataclasses import replace
+          from pathlib import Path
+          import numpy as np
+
+          root = Path.cwd()
+          spec = importlib.util.spec_from_file_location('optdigits_base', root/'simulation'/'optdigits_categorical_theory.py')
+          exp = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = exp
+          spec.loader.exec_module(exp)
+
+          template = exp.Config(replications=12, rollout_size=320, minibatches=40)
+          features, labels = exp.load_optdigits(root/'simulation'/'data', False)
+          initial_weights = exp.fit_initial_policy(features, labels, template)
+          covariance = features.T @ features / len(features)
+          lambda_max = float(np.linalg.eigvalsh(covariance)[-1])
+          L_bound = 0.5 * lambda_max
+          eta_max = 1.0 / L_bound
+
+          rows = []
+          seed_start = 20340826
+
+          def se(values):
+              values = np.asarray(values, dtype=float)
+              return float(np.std(values, ddof=1) / math.sqrt(len(values))) if len(values) > 1 else 0.0
+
+          for policy_iterations in (1, 2):
+              for learning_rate in (0.14, 0.15, 0.16, 0.17):
+                  cfg = replace(
+                      template,
+                      rollout_cycles=policy_iterations,
+                      training_learning_rate=learning_rate,
+                  )
+                  values = {method: [] for method in ('raw', 'ppo', 'mse_oracle')}
+                  fractions = []
+                  gains_raw = []
+                  gains_ppo = []
+                  for replication in range(cfg.replications):
+                      rng = np.random.default_rng(seed_start + replication)
+                      draws = exp.common_randomness(rng, len(features), cfg)
+                      rep_values = {}
+                      for method in ('raw', 'ppo', 'mse_oracle'):
+                          _, _, summary = exp.run_trajectory(
+                              method,
+                              initial_weights,
+                              features,
+                              labels,
+                              draws,
+                              cfg,
+                              replication,
+                              0,
+                              collect_states=False,
+                          )
+                          value = float(summary['final_value'])
+                          values[method].append(value)
+                          rep_values[method] = value
+                          if method == 'mse_oracle':
+                              fractions.append(float(summary['ppo_fraction']))
+                      gains_raw.append(rep_values['mse_oracle'] - rep_values['raw'])
+                      gains_ppo.append(rep_values['mse_oracle'] - rep_values['ppo'])
+                  rows.append({
+                      'rollout_size': cfg.rollout_size,
+                      'policy_iterations': policy_iterations,
+                      'minibatches': cfg.minibatches,
+                      'minibatch_size': cfg.minibatch_size,
+                      'total_updates': policy_iterations * cfg.minibatches,
+                      'lambda_max': lambda_max,
+                      'L_bound': L_bound,
+                      'eta_max': eta_max,
+                      'learning_rate': learning_rate,
+                      'condition_holds': float(learning_rate <= eta_max),
+                      'replications': cfg.replications,
+                      'seed_start': seed_start,
+                      'raw_mean': float(np.mean(values['raw'])),
+                      'raw_se': se(values['raw']),
+                      'ppo_mean': float(np.mean(values['ppo'])),
+                      'ppo_se': se(values['ppo']),
+                      'oracle_mean': float(np.mean(values['mse_oracle'])),
+                      'oracle_se': se(values['mse_oracle']),
+                      'oracle_ppo_fraction': float(np.mean(fractions)),
+                      'oracle_gain_vs_raw': float(np.mean(gains_raw)),
+                      'oracle_gain_vs_raw_se': se(gains_raw),
+                      'oracle_gain_vs_ppo': float(np.mean(gains_ppo)),
+                      'oracle_gain_vs_ppo_se': se(gains_ppo),
+                  })
+                  print(rows[-1])
+
+          output = root/'simulation'/'results'/'optdigits_certified_refine.csv'
+          with output.open('w', newline='', encoding='utf-8') as handle:
+              writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+              writer.writeheader()
+              writer.writerows(rows)
+          PY
+      - name: Commit sweep and remove temporary workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add simulation/results/optdigits_certified_refine.csv
+          git rm .github/workflows/optdigits-certified-refine.yml
+          git commit -m 'Refine certified Optdigits update setting'
+          git push
