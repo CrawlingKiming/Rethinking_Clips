@@ -1,37 +1,38 @@
-# Optdigits policy-optimization experiments
+# Optdigits theoretical validation
 
-## Main categorical experiment
+`optdigits_theory_validation.py` is the Optdigits experiment used in the paper. The task is a one-step contextual bandit with the ten digit labels as actions.
 
-`optdigits_categorical_theory.py` contains both Optdigits studies used in the paper. The task is a one-step contextual bandit with the ten digit labels as actions.
+- The complete Optdigits dataset is treated as a finite context population of 5,620 images.
+- Each policy iteration draws 320 contexts.
+- One digit action is sampled per context from a frozen rollout policy.
+- The exact baseline is the rollout probability of the correct class, so the advantage is `reward - Q(correct | image)`.
+- Each rollout is divided into 8 minibatches of 40 and used for one optimization epoch.
+- A fresh rollout is collected at the next policy iteration.
 
-- The complete Optdigits dataset is the finite context population.
-- Each policy iteration draws 600 contexts independently from that population.
-- One action in `{0, ..., 9}` is sampled per context from a frozen rollout policy.
-- The rollout is divided into 12 minibatches and used for one optimization epoch.
-- A new rollout is collected after the epoch.
+The script performs two theory-validation studies.
 
-The first study freezes 30 states and uses independent redraws to test the two theoretical links: population normalized ESS versus gradient MSE, and realized gradient error versus one-step population improvement.
+1. It freezes policy states across a wide population-ESS range and tests the link from normalized ESS to gradient MSE and one-step population improvement.
+2. It compares static unmodified and PPO estimators with an infeasible oracle that computes their exact conditional MSEs and selects the lower-risk estimator. This directly tests the estimator-crossover proposition.
 
-The second study compares static unmodified and PPO updates with an exact MSE oracle. At every update, the oracle computes the full conditional MSE of both estimators, including PPO bias, and selects the smaller-risk estimator. This is the oracle version of the crossover proposition. It does not use an ESS threshold. The script also evaluates sample-ESS gates at thresholds `0.01, 0.03, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8` as practical heuristics.
+No ESS-gated update rule or ESS threshold is evaluated in the Optdigits study.
 
-The 100-replication control study uses learning rate `2.0`. A 12-replication diagnostic learning-rate sweep is stored in `simulation/results/optdigits_oracle_lr_sweep.csv`. All optimization methods share rollout randomness within each paired replication. Run from the repository root:
+Run from the repository root:
 
 ```bash
-python -m pip install numpy matplotlib
-python simulation/optdigits_categorical_theory.py --replications 100
+python -m pip install -r simulation/requirements.txt
+python simulation/optdigits_theory_validation.py --replications 100 --diagnostic-replications 40
 ```
 
 Main outputs:
 
-- `simulation/results/optdigits_categorical_frozen_states.csv`
-- `simulation/results/optdigits_categorical_redraws.csv`
-- `simulation/results/optdigits_categorical_runs.csv`
-- `simulation/results/optdigits_categorical_final_values.csv`
-- `simulation/results/optdigits_categorical_thresholds.csv`
-- `simulation/results/optdigits_categorical_pairwise.csv`
-- `figures/optdigits_categorical_theory.pdf`
-- `figures/optdigits_categorical_control.pdf`
+- `simulation/results/optdigits_theory_frozen_states.csv`
+- `simulation/results/optdigits_theory_redraws.csv`
+- `simulation/results/optdigits_theory_ess_bins.csv`
+- `simulation/results/optdigits_theory_error_bins.csv`
+- `simulation/results/optdigits_crossover_bins.csv`
+- `simulation/results/optdigits_crossover_final.csv`
+- `simulation/results/optdigits_crossover_pairwise.csv`
+- `figures/optdigits_theory_validation.pdf`
+- `figures/optdigits_mse_crossover.pdf`
 
-## Legacy structured-action experiment
-
-`ess_policy_optimization.py` contains the earlier 16-bit structured-action study. It is retained for reference and is not the main Optdigits experiment.
+`optdigits_categorical_theory.py` and `ess_policy_optimization.py` are retained as exploratory and legacy scripts. They are not used for the reported Optdigits results.
