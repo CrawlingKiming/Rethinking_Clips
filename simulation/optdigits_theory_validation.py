@@ -1,10 +1,11 @@
 """Optdigits experiments used only for theoretical validation.
 
 The task is a one-step contextual bandit with ten categorical actions. The
-script validates two theoretical statements. First, population normalized ESS
-controls finite-sample gradient reliability. Second, the lower-MSE estimator
-between the unmodified and PPO-masked gradients gives the stronger update
-certificate. No ESS-gated update rule is evaluated.
+script compares the unmodified and PPO-masked gradient estimators at the same
+frozen policy states. It validates the relation from normalized ESS to gradient
+MSE and from gradient error to one-step population change. It also reports a
+40-update learning curve using a step size certified by a global smoothness
+bound. No ESS-gated update rule is evaluated.
 """
 
 from __future__ import annotations
@@ -24,13 +25,20 @@ import optdigits_categorical_theory as base
 
 RAW_COLOR = "#355C8A"
 PPO_COLOR = "#D9822B"
-ORACLE_COLOR = "#2E8B78"
+POPULATION_COLOR = "#2E8B78"
 HARM_COLOR = "#B84A5A"
 NEUTRAL_COLOR = "#667085"
 LIGHT_GRID = "#D9DEE8"
 
-DIAGNOSTIC_SEED_START = 20260826
-CONTROL_SEED_START = 20310826
+STATE_SEED_START = 20260826
+LEARNING_SEED_START = 20360826
+ROLLOUT_SIZE = 320
+MINIBATCHES = 8
+MINIBATCH_SIZE = 40
+STATE_GENERATION_ITERATIONS = 6
+LEARNING_ITERATIONS = 5
+LEARNING_RATE = 0.17
+PPO_EPSILON = 0.2
 
 
 def standard_error(values: np.ndarray) -> float:
@@ -40,7 +48,10 @@ def standard_error(values: np.ndarray) -> float:
     return float(np.std(values, ddof=1) / math.sqrt(len(values)))
 
 
-def write_csv(path: Path, rows: Iterable[dict[str, float | str]]) -> None:
+def write_csv(
+    path: Path,
+    rows: Iterable[dict[str, float | str]],
+) -> None:
     materialized = list(rows)
     if not materialized:
         raise RuntimeError(f"no rows for {path}")
@@ -51,7 +62,57 @@ def write_csv(path: Path, rows: Iterable[dict[str, float | str]]) -> None:
         writer.writerows(materialized)
 
 
-def crossover_bin_rows(
+def global_smoothness_bound(features: np.ndarray) -> tuple[float, float, float]:
+    covariance = features.T @ features / len(features)
+    lambda_max = float(np.linalg.eigvalsh(covariance)[-1])
+    smoothness_bound = 0.5 * lambda_max
+    return lambda_max, smoothness_bound, 1.0 / smoothness_bound
+
+
+def estimator_error_bin_rows(
+    draw_rows: list[dict[str, float]],
+    estimator: str,
+) -> list[dict[str, float | str]]:
+    selected = [
+        row
+        for row in draw_rows
+        if row["estimator"] == estimator and np.isfinite(row["reward_change"])
+    ]
+    boundaries = np.asarray([0.0, 0.25, 0.5, 1.0, 2.0, 4.0, np.inf])
+    ratios = np.asarray([row["relative_error"] for row in selected], dtype=float)
+    assignments = np.digitize(ratios, boundaries[1:-1], right=False)
+    output: list[dict[str, float | str]] = []
+    for index in range(len(boundaries) - 1):
+        subset = [selected[j] for j in np.where(assignments == index)[0]]
+        if not subset:
+            continue
+        changes = np.asarray([row["reward_change"] for row in subset], dtype=float)
+        right = boundaries[index + 1]
+        label = (
+            f"{boundaries[index]:g}+"
+            if np.isinf(right)
+            else f"{boundaries[index]:g}-{right:g}"
+        )
+        output.append(
+            {
+                "estimator": estimator,
+                "bin": float(index),
+                "label": label,
+                "relative_error_left": float(boundaries[index]),
+                "relative_error_right": float(right),
+                "relative_error_median": float(
+                    np.median([row["relative_error"] for row in subset])
+                ),
+                "count": float(len(subset)),
+                "mean_change": float(np.mean(changes)),
+                "change_se": standard_error(changes),
+                "harm_rate": float(np.mean(changes < 0.0)),
+            }
+        )
+    return output
+
+
+def ess_bin_rows(
     state_rows: list[dict[str, float]],
     bins: int = 6,
 ) -> list[dict[str, float]]:
@@ -66,34 +127,57 @@ def crossover_bin_rows(
         if not len(selected_indices):
             continue
         selected = [state_rows[j] for j in selected_indices]
-        raw = np.asarray([row["exact_raw_risk"] for row in selected], dtype=float)
-        ppo = np.asarray([row["exact_ppo_risk"] for row in selected], dtype=float)
-        output.append(
-            {
-                "bin": float(index),
-                "rho_left": float(edges[index]),
-                "rho_right": float(edges[index + 1]),
-                "rho_median": float(np.median(rho[selected_indices])),
-                "states": float(len(selected)),
-                "raw_risk": float(np.mean(raw)),
-                "raw_risk_se": standard_error(raw),
-                "ppo_risk": float(np.mean(ppo)),
-                "ppo_risk_se": standard_error(ppo),
-                "ppo_lower_risk_fraction": float(np.mean(ppo < raw)),
-            }
+        row: dict[str, float] = {
+            "bin": float(index),
+            "rho_left": float(edges[index]),
+            "rho_right": float(edges[index + 1]),
+            "rho_median": float(np.median(rho[selected_indices])),
+            "states": float(len(selected)),
+        }
+        oracle_changes = np.asarray(
+            [item["oracle_change"] for item in selected], dtype=float
         )
+        row["population_gradient_change"] = float(np.mean(oracle_changes))
+        row["population_gradient_change_se"] = standard_error(oracle_changes)
+        for estimator in ("raw", "ppo"):
+            exact_risks = np.asarray(
+                [item[f"exact_{estimator}_risk"] for item in selected], dtype=float
+            )
+            redraw_mse = np.asarray(
+                [item[f"{estimator}_mse"] for item in selected], dtype=float
+            )
+            changes = np.asarray(
+                [item[f"{estimator}_mean_change"] for item in selected], dtype=float
+            )
+            harms = np.asarray(
+                [item[f"{estimator}_harm_rate"] for item in selected], dtype=float
+            )
+            row[f"{estimator}_exact_mse"] = float(np.mean(exact_risks))
+            row[f"{estimator}_exact_mse_se"] = standard_error(exact_risks)
+            row[f"{estimator}_redraw_mse"] = float(np.mean(redraw_mse))
+            row[f"{estimator}_redraw_mse_se"] = standard_error(redraw_mse)
+            row[f"{estimator}_mean_change"] = float(np.mean(changes))
+            row[f"{estimator}_change_se"] = standard_error(changes)
+            row[f"{estimator}_harm_rate"] = float(np.mean(harms))
+        row["ppo_lower_mse_fraction"] = float(
+            np.mean(
+                [
+                    item["exact_ppo_risk"] < item["exact_raw_risk"]
+                    for item in selected
+                ]
+            )
+        )
+        output.append(row)
     return output
 
 
 def final_value_rows(
     summaries: list[dict[str, float]],
 ) -> list[dict[str, float | str]]:
-    methods = ("raw", "ppo", "mse_oracle")
     output: list[dict[str, float | str]] = []
-    for method in methods:
+    for method in ("raw", "ppo"):
         selected = [row for row in summaries if row["method"] == method]
         values = np.asarray([row["final_value"] for row in selected], dtype=float)
-        fractions = np.asarray([row["ppo_fraction"] for row in selected], dtype=float)
         output.append(
             {
                 "method": method,
@@ -101,71 +185,51 @@ def final_value_rows(
                 "mean_final_value": float(np.mean(values)),
                 "se_final_value": standard_error(values),
                 "median_final_value": float(np.median(values)),
-                "mean_ppo_fraction": float(np.mean(fractions)),
-                "se_ppo_fraction": standard_error(fractions),
             }
         )
     return output
 
 
-def paired_rows(
+def paired_learning_summary(
     summaries: list[dict[str, float]],
-) -> list[dict[str, float | str]]:
+) -> dict[str, float]:
     by_replication: dict[int, dict[str, float]] = {}
     for row in summaries:
         replication = int(row["replication"])
         by_replication.setdefault(replication, {})[str(row["method"])] = float(
             row["final_value"]
         )
-    output: list[dict[str, float | str]] = []
-    for comparison, left, right in (
-        ("ppo_minus_raw", "ppo", "raw"),
-        ("oracle_minus_raw", "mse_oracle", "raw"),
-        ("oracle_minus_ppo", "mse_oracle", "ppo"),
-    ):
-        differences = np.asarray(
-            [values[left] - values[right] for values in by_replication.values()],
-            dtype=float,
-        )
-        output.append(
-            {
-                "comparison": comparison,
-                "replications": float(len(differences)),
-                "mean_difference": float(np.mean(differences)),
-                "se_difference": standard_error(differences),
-            }
-        )
-    return output
+    differences = np.asarray(
+        [values["raw"] - values["ppo"] for values in by_replication.values()],
+        dtype=float,
+    )
+    return {
+        "replications": float(len(differences)),
+        "raw_minus_ppo": float(np.mean(differences)),
+        "raw_minus_ppo_se": standard_error(differences),
+    }
 
 
-def iteration_curve(
+def curve_statistics(
     path_rows: list[dict[str, float]],
     method: str,
-    minibatches: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    selected = [
-        row
-        for row in path_rows
-        if row["method"] == method and int(row["update"]) % minibatches == 0
-    ]
-    iterations = np.asarray(
-        sorted({int(row["update"]) // minibatches for row in selected}),
-        dtype=int,
-    )
+    selected = [row for row in path_rows if row["method"] == method]
+    updates = np.asarray(sorted({int(row["update"]) for row in selected}), dtype=int)
     means: list[float] = []
     errors: list[float] = []
-    for iteration in iterations:
+    for update in updates:
         values = np.asarray(
             [
                 row["population_value"]
                 for row in selected
-                if int(row["update"]) // minibatches == iteration
+                if int(row["update"]) == update
             ],
             dtype=float,
         )
         means.append(float(np.mean(values)))
         errors.append(standard_error(values))
-    return iterations, np.asarray(means), np.asarray(errors)
+    return updates, np.asarray(means), np.asarray(errors)
 
 
 def set_plot_defaults() -> None:
@@ -187,26 +251,29 @@ def set_plot_defaults() -> None:
     )
 
 
-def make_crossover_figure(
-    crossover_rows: list[dict[str, float]],
-    path_rows: list[dict[str, float]],
-    control_config: base.Config,
+def make_estimator_figure(
+    bin_rows: list[dict[str, float]],
+    error_rows: list[dict[str, float | str]],
     output: Path,
 ) -> None:
     set_plot_defaults()
     output.parent.mkdir(parents=True, exist_ok=True)
-    figure, axes = plt.subplots(1, 3, figsize=(13.2, 3.6))
+    figure, axes = plt.subplots(1, 3, figsize=(13.2, 3.65))
 
-    rho = np.asarray([row["rho_median"] for row in crossover_rows], dtype=float)
+    rho = np.asarray([row["rho_median"] for row in bin_rows], dtype=float)
     order = np.argsort(rho)
 
     ax = axes[0]
-    for key, label, color, marker in (
+    for estimator, label, color, marker in (
         ("raw", "Unmodified", RAW_COLOR, "o"),
         ("ppo", "PPO masking", PPO_COLOR, "s"),
     ):
-        values = np.asarray([row[f"{key}_risk"] for row in crossover_rows])
-        errors = np.asarray([row[f"{key}_risk_se"] for row in crossover_rows])
+        values = np.asarray(
+            [row[f"{estimator}_exact_mse"] for row in bin_rows], dtype=float
+        )
+        errors = np.asarray(
+            [row[f"{estimator}_exact_mse_se"] for row in bin_rows], dtype=float
+        )
         ax.errorbar(
             rho[order],
             values[order],
@@ -214,7 +281,7 @@ def make_crossover_figure(
             color=color,
             marker=marker,
             linewidth=2.0,
-            markersize=5.2,
+            markersize=5.4,
             capsize=3,
             label=label,
         )
@@ -222,60 +289,88 @@ def make_crossover_figure(
     ax.set_yscale("log")
     ax.set_xlabel("Population normalized ESS")
     ax.set_ylabel("Exact gradient MSE")
-    ax.set_title("Estimator risk across support regimes")
+    ax.set_title("PPO changes estimator reliability")
     ax.legend(frameon=False)
 
     ax = axes[1]
-    fractions = np.asarray(
-        [row["ppo_lower_risk_fraction"] for row in crossover_rows], dtype=float
+    raw_rows = [row for row in error_rows if row["estimator"] == "raw"]
+    ppo_rows = [row for row in error_rows if row["estimator"] == "ppo"]
+    labels = [str(row["label"]) for row in raw_rows]
+    positions = np.arange(len(labels), dtype=float)
+    width = 0.36
+    raw_harm = np.asarray([row["harm_rate"] for row in raw_rows], dtype=float)
+    ppo_by_label = {str(row["label"]): row for row in ppo_rows}
+    ppo_harm = np.asarray(
+        [float(ppo_by_label[label]["harm_rate"]) if label in ppo_by_label else 0.0 for label in labels],
+        dtype=float,
     )
-    ax.plot(
-        rho[order],
-        fractions[order],
-        color=ORACLE_COLOR,
-        marker="o",
-        linewidth=2.0,
-        markersize=5.5,
+    ax.bar(
+        positions - width / 2,
+        raw_harm,
+        width=width,
+        color=RAW_COLOR,
+        alpha=0.9,
+        label="Unmodified",
     )
-    ax.axhline(0.5, color=NEUTRAL_COLOR, linestyle=":", linewidth=1.1)
-    ax.set_xscale("log")
-    ax.set_ylim(-0.03, 1.03)
-    ax.set_xlabel("Population normalized ESS")
-    ax.set_ylabel("Fraction where PPO has lower MSE")
-    ax.set_title("The preferred estimator changes by regime")
+    ax.bar(
+        positions + width / 2,
+        ppo_harm,
+        width=width,
+        color=PPO_COLOR,
+        alpha=0.9,
+        label="PPO masking",
+    )
+    ax.axvline(2.5, color=NEUTRAL_COLOR, linestyle=":", linewidth=1.1)
+    ax.set_xticks(positions, labels, rotation=28, ha="right")
+    ax.set_xlabel(r"Realized squared error / $\|g\|_2^2$")
+    ax.set_ylabel("Harmful-update rate")
+    ax.set_title("Failure begins after error reaches signal scale")
+    ax.legend(frameon=False)
 
     ax = axes[2]
-    for method, label, color, marker in (
+    for estimator, label, color, marker in (
         ("raw", "Unmodified", RAW_COLOR, "o"),
-        ("ppo", "PPO", PPO_COLOR, "s"),
-        ("mse_oracle", "Exact MSE oracle", ORACLE_COLOR, "D"),
+        ("ppo", "PPO masking", PPO_COLOR, "s"),
     ):
-        iterations, means, errors = iteration_curve(
-            path_rows,
-            method,
-            control_config.minibatches,
+        values = np.asarray(
+            [row[f"{estimator}_mean_change"] for row in bin_rows], dtype=float
         )
-        ax.plot(
-            iterations,
-            means,
+        errors = np.asarray(
+            [row[f"{estimator}_change_se"] for row in bin_rows], dtype=float
+        )
+        ax.errorbar(
+            rho[order],
+            values[order],
+            yerr=errors[order],
             color=color,
             marker=marker,
             linewidth=2.0,
-            markersize=5.5,
+            markersize=5.4,
+            capsize=3,
             label=label,
         )
-        ax.fill_between(
-            iterations,
-            means - 1.96 * errors,
-            means + 1.96 * errors,
-            color=color,
-            alpha=0.13,
-            linewidth=0,
-        )
-    ax.set_xticks(np.arange(control_config.rollout_cycles + 1))
-    ax.set_xlabel("Policy iteration")
-    ax.set_ylabel("Population value")
-    ax.set_title("The MSE oracle combines both regimes")
+    population = np.asarray(
+        [row["population_gradient_change"] for row in bin_rows], dtype=float
+    )
+    population_se = np.asarray(
+        [row["population_gradient_change_se"] for row in bin_rows], dtype=float
+    )
+    ax.errorbar(
+        rho[order],
+        population[order],
+        yerr=population_se[order],
+        color=POPULATION_COLOR,
+        marker="D",
+        linewidth=2.0,
+        markersize=5.0,
+        capsize=3,
+        label="Population gradient",
+    )
+    ax.axhline(0.0, color=NEUTRAL_COLOR, linewidth=1.0)
+    ax.set_xscale("log")
+    ax.set_xlabel("Population normalized ESS")
+    ax.set_ylabel("One-step population change")
+    ax.set_title("PPO trades learning signal for stability")
     ax.legend(frameon=False)
 
     for panel, ax in zip(("(a)", "(b)", "(c)"), axes):
@@ -286,55 +381,103 @@ def make_crossover_figure(
     plt.close(figure)
 
 
+def make_learning_curve(
+    path_rows: list[dict[str, float]],
+    output: Path,
+) -> None:
+    set_plot_defaults()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    figure, ax = plt.subplots(figsize=(7.2, 4.15))
+    for method, label, color, marker in (
+        ("raw", "Unmodified", RAW_COLOR, "o"),
+        ("ppo", "PPO masking", PPO_COLOR, "s"),
+    ):
+        updates, means, errors = curve_statistics(path_rows, method)
+        ax.plot(
+            updates,
+            means,
+            color=color,
+            linewidth=2.1,
+            marker=marker,
+            markevery=4,
+            markersize=4.5,
+            label=label,
+        )
+        ax.fill_between(
+            updates,
+            means - 1.96 * errors,
+            means + 1.96 * errors,
+            color=color,
+            alpha=0.14,
+            linewidth=0,
+        )
+    for boundary in range(MINIBATCHES, LEARNING_ITERATIONS * MINIBATCHES, MINIBATCHES):
+        ax.axvline(boundary, color=NEUTRAL_COLOR, linestyle=":", linewidth=0.8)
+    ax.set_xlim(0, LEARNING_ITERATIONS * MINIBATCHES)
+    ax.set_xticks(np.arange(0, LEARNING_ITERATIONS * MINIBATCHES + 1, 5))
+    ax.set_xlabel("Minibatch update")
+    ax.set_ylabel("Population value")
+    ax.set_title("Certified-step learning across all 40 updates")
+    ax.legend(frameon=False)
+    figure.tight_layout()
+    figure.savefig(output.with_suffix(".pdf"), bbox_inches="tight")
+    figure.savefig(output.with_suffix(".png"), dpi=240, bbox_inches="tight")
+    plt.close(figure)
+
+
 def summary_text(
     initial_value: float,
+    lambda_max: float,
+    smoothness_bound: float,
+    eta_max: float,
     state_rows: list[dict[str, float]],
     draw_rows: list[dict[str, float]],
-    ess_bins: list[dict[str, float]],
-    crossover_rows: list[dict[str, float]],
+    bin_rows: list[dict[str, float]],
     final_rows: list[dict[str, float | str]],
-    comparisons: list[dict[str, float | str]],
+    paired: dict[str, float],
 ) -> str:
-    raw_draws = [
-        row
-        for row in draw_rows
-        if row["estimator"] == "raw" and np.isfinite(row["reward_change"])
-    ]
-    below = [row for row in raw_draws if row["relative_error"] < 1.0]
-    above = [row for row in raw_draws if row["relative_error"] >= 1.0]
     by_method = {str(row["method"]): row for row in final_rows}
-    by_comparison = {str(row["comparison"]): row for row in comparisons}
-    low_ess = min(ess_bins, key=lambda row: row["rho_median"])
-    high_ess = max(ess_bins, key=lambda row: row["rho_median"])
-    low_cross = min(crossover_rows, key=lambda row: row["rho_median"])
-    high_cross = max(crossover_rows, key=lambda row: row["rho_median"])
+    low = min(bin_rows, key=lambda row: row["rho_median"])
+    high = max(bin_rows, key=lambda row: row["rho_median"])
     lines = [
         f"initial_value={initial_value:.8f}",
+        f"feature_cov_lambda_max={lambda_max:.8f}",
+        f"global_smoothness_bound={smoothness_bound:.8f}",
+        f"certified_eta_max={eta_max:.8f}",
+        f"used_learning_rate={LEARNING_RATE:.8f}",
+        f"learning_rate_condition_holds={float(LEARNING_RATE <= eta_max):.0f}",
         f"diagnostic_states={len(state_rows)}",
-        f"low_ess_median={low_ess['rho_median']:.8f}",
-        f"low_ess_raw_mse={low_ess['raw_mse']:.8f}",
-        f"high_ess_median={high_ess['rho_median']:.8f}",
-        f"high_ess_raw_mse={high_ess['raw_mse']:.8f}",
-        f"relative_error_below_one_count={len(below)}",
-        f"relative_error_below_one_harm_rate={np.mean([row['reward_change'] < 0 for row in below]) if below else float('nan'):.8f}",
-        f"relative_error_above_one_count={len(above)}",
-        f"relative_error_above_one_harm_rate={np.mean([row['reward_change'] < 0 for row in above]) if above else float('nan'):.8f}",
-        f"low_ess_ppo_lower_risk_fraction={low_cross['ppo_lower_risk_fraction']:.8f}",
-        f"high_ess_ppo_lower_risk_fraction={high_cross['ppo_lower_risk_fraction']:.8f}",
+        f"low_ess_median={low['rho_median']:.8f}",
+        f"low_ess_raw_mse={low['raw_exact_mse']:.8f}",
+        f"low_ess_ppo_mse={low['ppo_exact_mse']:.8f}",
+        f"low_ess_ppo_lower_mse_fraction={low['ppo_lower_mse_fraction']:.8f}",
+        f"high_ess_median={high['rho_median']:.8f}",
+        f"high_ess_raw_mse={high['raw_exact_mse']:.8f}",
+        f"high_ess_ppo_mse={high['ppo_exact_mse']:.8f}",
+        f"high_ess_ppo_lower_mse_fraction={high['ppo_lower_mse_fraction']:.8f}",
         f"final_raw={float(by_method['raw']['mean_final_value']):.8f}",
         f"final_raw_se={float(by_method['raw']['se_final_value']):.8f}",
         f"final_ppo={float(by_method['ppo']['mean_final_value']):.8f}",
         f"final_ppo_se={float(by_method['ppo']['se_final_value']):.8f}",
-        f"final_oracle={float(by_method['mse_oracle']['mean_final_value']):.8f}",
-        f"final_oracle_se={float(by_method['mse_oracle']['se_final_value']):.8f}",
-        f"oracle_ppo_fraction={float(by_method['mse_oracle']['mean_ppo_fraction']):.8f}",
-        f"ppo_minus_raw={float(by_comparison['ppo_minus_raw']['mean_difference']):.8f}",
-        f"ppo_minus_raw_se={float(by_comparison['ppo_minus_raw']['se_difference']):.8f}",
-        f"oracle_minus_raw={float(by_comparison['oracle_minus_raw']['mean_difference']):.8f}",
-        f"oracle_minus_raw_se={float(by_comparison['oracle_minus_raw']['se_difference']):.8f}",
-        f"oracle_minus_ppo={float(by_comparison['oracle_minus_ppo']['mean_difference']):.8f}",
-        f"oracle_minus_ppo_se={float(by_comparison['oracle_minus_ppo']['se_difference']):.8f}",
+        f"raw_minus_ppo={paired['raw_minus_ppo']:.8f}",
+        f"raw_minus_ppo_se={paired['raw_minus_ppo_se']:.8f}",
     ]
+    for estimator in ("raw", "ppo"):
+        finite = [
+            row
+            for row in draw_rows
+            if row["estimator"] == estimator and np.isfinite(row["reward_change"])
+        ]
+        below = [row for row in finite if row["relative_error"] < 1.0]
+        above = [row for row in finite if row["relative_error"] >= 1.0]
+        lines.extend(
+            [
+                f"{estimator}_relative_error_below_one_count={len(below)}",
+                f"{estimator}_relative_error_below_one_harm_rate={np.mean([row['reward_change'] < 0 for row in below]) if below else float('nan'):.8f}",
+                f"{estimator}_relative_error_above_one_count={len(above)}",
+                f"{estimator}_relative_error_above_one_harm_rate={np.mean([row['reward_change'] < 0 for row in above]) if above else float('nan'):.8f}",
+            ]
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -350,24 +493,35 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
 
     template = base.Config(
-        rollout_size=320,
-        minibatches=8,
-        training_learning_rate=2.0,
+        rollout_size=ROLLOUT_SIZE,
+        minibatches=MINIBATCHES,
+        ppo_epsilon=PPO_EPSILON,
     )
     features, labels = base.load_optdigits(root / "simulation" / "data", False)
     initial_weights = base.fit_initial_policy(features, labels, template)
     initial_value = base.population_value(initial_weights, features, labels)
+    lambda_max, smoothness_bound, eta_max = global_smoothness_bound(features)
+    if LEARNING_RATE > eta_max:
+        raise RuntimeError(
+            f"learning rate {LEARNING_RATE} exceeds certified maximum {eta_max}"
+        )
 
-    diagnostic_config = replace(
+    state_config = replace(
         template,
         replications=args.diagnostic_replications,
-        rollout_cycles=6,
+        rollout_cycles=STATE_GENERATION_ITERATIONS,
+        training_learning_rate=2.0,
+        diagnostic_step_size=LEARNING_RATE,
+        redraw_batch_size=MINIBATCH_SIZE,
+        redraws=80,
+        improvement_redraws=20,
+        checkpoints=30,
     )
     all_states: list[base.FrozenState] = []
     next_state_id = 0
-    for replication in range(diagnostic_config.replications):
-        rng = np.random.default_rng(DIAGNOSTIC_SEED_START + replication)
-        draws = base.common_randomness(rng, len(features), diagnostic_config)
+    for replication in range(state_config.replications):
+        rng = np.random.default_rng(STATE_SEED_START + replication)
+        draws = base.common_randomness(rng, len(features), state_config)
         for method in ("raw", "ppo"):
             states, _, _ = base.run_trajectory(
                 method,
@@ -375,7 +529,7 @@ def main() -> None:
                 features,
                 labels,
                 draws,
-                diagnostic_config,
+                state_config,
                 replication,
                 next_state_id,
                 collect_states=True,
@@ -383,37 +537,38 @@ def main() -> None:
             next_state_id += len(states)
             all_states.extend(states)
 
-    selected_states = base.choose_states(all_states, diagnostic_config.checkpoints)
-    diagnostic_rng = np.random.default_rng(DIAGNOSTIC_SEED_START + 100000)
+    selected_states = base.choose_states(all_states, state_config.checkpoints)
+    diagnostic_rng = np.random.default_rng(STATE_SEED_START + 100000)
     state_rows, draw_rows = base.evaluate_frozen_states(
         selected_states,
         features,
         labels,
-        diagnostic_config,
+        state_config,
         diagnostic_rng,
     )
-    ess_bins = base.quantile_bin_rows(state_rows)
-    error_bins = base.relative_error_bin_rows(draw_rows)
-    crossover_rows = crossover_bin_rows(state_rows)
+    bin_rows = ess_bin_rows(state_rows)
+    error_rows = estimator_error_bin_rows(draw_rows, "raw")
+    error_rows.extend(estimator_error_bin_rows(draw_rows, "ppo"))
 
-    control_config = replace(
+    learning_config = replace(
         template,
         replications=args.replications,
-        rollout_cycles=2,
+        rollout_cycles=LEARNING_ITERATIONS,
+        training_learning_rate=LEARNING_RATE,
     )
     path_rows: list[dict[str, float]] = []
     summaries: list[dict[str, float]] = []
-    for replication in range(control_config.replications):
-        rng = np.random.default_rng(CONTROL_SEED_START + replication)
-        draws = base.common_randomness(rng, len(features), control_config)
-        for method in ("raw", "ppo", "mse_oracle"):
+    for replication in range(learning_config.replications):
+        rng = np.random.default_rng(LEARNING_SEED_START + replication)
+        draws = base.common_randomness(rng, len(features), learning_config)
+        for method in ("raw", "ppo"):
             _, rows, summary = base.run_trajectory(
                 method,
                 initial_weights,
                 features,
                 labels,
                 draws,
-                control_config,
+                learning_config,
                 replication,
                 0,
                 collect_states=False,
@@ -422,41 +577,40 @@ def main() -> None:
             summaries.append(summary)
 
     final_rows = final_value_rows(summaries)
-    comparisons = paired_rows(summaries)
+    paired = paired_learning_summary(summaries)
 
     result_dir = root / "simulation" / "results"
-    write_csv(result_dir / "optdigits_theory_frozen_states.csv", state_rows)
-    write_csv(result_dir / "optdigits_theory_redraws.csv", draw_rows)
-    write_csv(result_dir / "optdigits_theory_ess_bins.csv", ess_bins)
-    write_csv(result_dir / "optdigits_theory_error_bins.csv", error_bins)
-    write_csv(result_dir / "optdigits_crossover_bins.csv", crossover_rows)
-    write_csv(result_dir / "optdigits_crossover_paths.csv", path_rows)
-    write_csv(result_dir / "optdigits_crossover_runs.csv", summaries)
-    write_csv(result_dir / "optdigits_crossover_final.csv", final_rows)
-    write_csv(result_dir / "optdigits_crossover_pairwise.csv", comparisons)
+    write_csv(result_dir / "optdigits_estimator_states.csv", state_rows)
+    write_csv(result_dir / "optdigits_estimator_redraws.csv", draw_rows)
+    write_csv(result_dir / "optdigits_estimator_ess_bins.csv", bin_rows)
+    write_csv(result_dir / "optdigits_estimator_error_bins.csv", error_rows)
+    write_csv(result_dir / "optdigits_certified_learning_paths.csv", path_rows)
+    write_csv(result_dir / "optdigits_certified_learning_runs.csv", summaries)
+    write_csv(result_dir / "optdigits_certified_learning_final.csv", final_rows)
+    write_csv(result_dir / "optdigits_certified_learning_pairwise.csv", [paired])
 
-    base.make_theory_figure(
-        ess_bins,
-        error_bins,
-        root / "figures" / "optdigits_theory_validation",
+    make_estimator_figure(
+        bin_rows,
+        error_rows,
+        root / "figures" / "optdigits_estimator_comparison",
     )
-    make_crossover_figure(
-        crossover_rows,
+    make_learning_curve(
         path_rows,
-        control_config,
-        root / "figures" / "optdigits_mse_crossover",
+        root / "figures" / "optdigits_certified_learning",
     )
 
     summary = summary_text(
         initial_value,
+        lambda_max,
+        smoothness_bound,
+        eta_max,
         state_rows,
         draw_rows,
-        ess_bins,
-        crossover_rows,
+        bin_rows,
         final_rows,
-        comparisons,
+        paired,
     )
-    (result_dir / "optdigits_theory_summary.txt").write_text(
+    (result_dir / "optdigits_estimator_summary.txt").write_text(
         summary,
         encoding="utf-8",
     )
