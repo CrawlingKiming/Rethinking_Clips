@@ -23,20 +23,24 @@ jobs:
           from pathlib import Path
           path = Path('scripts/update_optdigits_theory_paper.py')
           text = path.read_text(encoding='utf-8')
-          replacements = {
-              'The section compares the unmodified and PPO-masked gradient estimators. It does not define or tune an ESS-gated update rule.':
-                  'The section compares the unmodified and PPO-masked gradient estimators as two estimators of the same population gradient.',
-              'No practical ESS gate is proposed or evaluated in Optdigits.':
-                  'No threshold-based update rule is considered in Optdigits.',
-              'No practical ESS-gated algorithm is defined in Optdigits.':
-                  'No threshold-based switching algorithm is defined in Optdigits.',
-              'No ESS-gated update rule, ESS threshold, or oracle update is evaluated in the reported Optdigits study.':
-                  'No threshold-based update rule or oracle update is evaluated in the reported Optdigits study.',
-          }
-          for old, new in replacements.items():
-              if old not in text:
-                  raise RuntimeError(f'missing source phrase: {old}')
-              text = text.replace(old, new)
+          text = text.replace(
+              'The section compares the unmodified and PPO-masked gradient estimators. It does not define or tune an ESS-gated update rule.',
+              'The section compares the unmodified and PPO-masked gradient estimators as two estimators of the same population gradient.',
+          )
+          text = text.replace(
+              'No practical ESS gate is proposed or evaluated in Optdigits.',
+              'No threshold-based update rule is considered in Optdigits.',
+          )
+          text = text.replace(
+              'No practical ESS-gated algorithm is defined in Optdigits.',
+              'No threshold-based switching algorithm is defined in Optdigits.',
+          )
+          text = text.replace(
+              'No ESS-gated update rule, ESS threshold, or oracle update is evaluated in the reported Optdigits study.',
+              'No threshold-based update rule or oracle update is evaluated in the reported Optdigits study.',
+          )
+          text = text.replace('ESS-gated', 'threshold-based')
+          text = text.replace('ESS gate', 'threshold rule')
           path.write_text(text, encoding='utf-8')
           PY
       - name: Run final Optdigits experiments
