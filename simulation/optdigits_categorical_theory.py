@@ -43,7 +43,7 @@ class Config:
     rollout_cycles: int = 6
     rollout_size: int = 600
     minibatches: int = 12
-    training_learning_rate: float = 3.0
+    training_learning_rate: float = 2.0
     diagnostic_step_size: float = 0.25
     ppo_epsilon: float = 0.2
     classifier_steps: int = 400
