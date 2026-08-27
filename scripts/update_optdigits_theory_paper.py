@@ -60,7 +60,7 @@ def build_main_section(summary: dict[str, float]) -> str:
 \section{Theoretical validation on Optdigits}
 \label{sec:simulation}
 
-Optdigits is used only as a finite-population test of the theoretical claims. The section compares the unmodified and PPO-masked gradient estimators. It does not define or tune an ESS-gated update rule.
+Optdigits is used only as a finite-population test of the theoretical claims. The section compares the unmodified and PPO-masked gradient estimators as two estimators of the same population gradient.
 
 \paragraph{Categorical contextual bandit.}
 We convert Optdigits into a one-step contextual bandit \citep{alpaydin1998optdigits}. Each handwritten-digit image is a context, the action is a digit in $\{0,\ldots,9\}$, and the reward is one only for the correct class. The policy is a linear softmax classifier. At each policy iteration, we draw 320 contexts from the finite population and sample one action per context from a frozen rollout policy. Since the value of an image under the rollout policy is exactly its probability of the correct class, the advantage is $A=R-Q(y\mid x)$. The observations are divided into eight minibatches of 40 and used for one optimization epoch.
@@ -92,13 +92,13 @@ Figure~\ref{fig:optdigits-learning} restores the full optimization trajectory ra
   \label{fig:optdigits-learning}
 \end{figure}
 
-Together, the two figures validate the theoretical interpretation. ESS controls the reliability of the unmodified estimator, PPO changes the bias-variance tradeoff rather than uniformly improving it, and aggressive masking can be unnecessarily restrictive while effective support remains broad. No practical ESS gate is proposed or evaluated in Optdigits.
+Together, the two figures validate the theoretical interpretation. ESS controls the reliability of the unmodified estimator, PPO changes the bias-variance tradeoff rather than uniformly improving it, and aggressive masking can be unnecessarily restrictive while effective support remains broad. No threshold-based update rule is considered in Optdigits.
 """
 
     replacements = {
-        "@@LAMBDA@@": f"${lambda_max:.3f}$",
-        "@@SMOOTHNESS@@": f"${smoothness:.3f}$",
-        "@@ETA_MAX@@": f"${eta_max:.3f}$",
+        "@@LAMBDA@@": f"{lambda_max:.3f}",
+        "@@SMOOTHNESS@@": f"{smoothness:.3f}",
+        "@@ETA_MAX@@": f"{eta_max:.3f}",
         "@@ETA@@": f"{eta:.2f}",
         "@@LOW_ESS@@": f"${low_ess:.3f}$",
         "@@LOW_RAW@@": f"${low_raw:.4f}$",
@@ -250,12 +250,12 @@ Median ESS & Raw MSE & PPO MSE & Raw harmful (\%) & PPO harmful (\%) \\
 
 \subsection{Full certified learning curve}
 
-The learning comparison uses five policy iterations and 100 paired replications. Each iteration consists of eight minibatch updates followed by collection of a fresh rollout, giving 40 updates in total. The unmodified and PPO trajectories share context draws, action-sampling uniforms, and minibatch order within every replication. Both use $\eta=@@ETA@@$, which satisfies Equation~\eqref{eq:categorical-smoothness-bound}. No ESS gate or oracle update is used.
+The learning comparison uses five policy iterations and 100 paired replications. Each iteration consists of eight minibatch updates followed by collection of a fresh rollout, giving 40 updates in total. The unmodified and PPO trajectories share context draws, action-sampling uniforms, and minibatch order within every replication. Both use $\eta=@@ETA@@$, which satisfies Equation~\eqref{eq:categorical-smoothness-bound}. No threshold rule or oracle update is used.
 """
     appendix = appendix.replace("@@ROWS@@", "\n".join(rows))
-    appendix = appendix.replace("@@LAMBDA@@", f"${lambda_max:.3f}$")
-    appendix = appendix.replace("@@SMOOTHNESS@@", f"${smoothness:.3f}$")
-    appendix = appendix.replace("@@ETA_MAX@@", f"${eta_max:.3f}$")
+    appendix = appendix.replace("@@LAMBDA@@", f"{lambda_max:.3f}")
+    appendix = appendix.replace("@@SMOOTHNESS@@", f"{smoothness:.3f}")
+    appendix = appendix.replace("@@ETA_MAX@@", f"{eta_max:.3f}")
     appendix = appendix.replace("@@ETA@@", f"{eta:.2f}")
     return appendix.strip()
 
@@ -291,7 +291,7 @@ def update_main_tex() -> None:
         "population-gradient signal. PPO reduces MSE in the low-support regime but is more "
         "distorting in much of the high-support regime. A separate 40-update learning curve "
         "uses a globally certified step size and shows the corresponding loss of learning "
-        "speed from static masking while support remains broad. No practical ESS-gated "
+        "speed from static masking while support remains broad. No practical threshold-based "
         "algorithm is defined in Optdigits. The language-model runs show a related temporal "
         "ordering at scale: permissive learning succeeds while effective support is broad, "
         "and selective protection becomes useful only after support deteriorates.\n"
@@ -318,7 +318,7 @@ The script performs two theory-validation studies.
 1. It freezes policy pairs across a wide population-ESS range and compares the exact MSE, harmful-update rate, and one-step population change of the unmodified and PPO-masked estimators.
 2. It reports the full 40-update learning curves for the two estimators under the certified step size.
 
-No ESS-gated update rule, ESS threshold, or oracle update is evaluated in the reported Optdigits study.
+No threshold-based update rule or oracle update is evaluated in the reported Optdigits study.
 
 Run from the repository root:
 
