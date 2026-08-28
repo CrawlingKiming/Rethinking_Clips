@@ -2,62 +2,62 @@
 
 ## Core argument
 
-1. Multiple updates on fixed rollout data do not by themselves make an
-   unclipped estimator unreliable.
-2. Policy drift matters through loss of sequence coverage, measured by
-   normalized sequence ESS.
-3. Exact gradient MSE depends jointly on ESS, the weighted gradient scale, and
-   the true-gradient norm. ESS alone is not a reliability certificate.
-4. Bounded verifier advantages control one component of the weighted gradient
-   scale, while score control remains necessary.
-5. Gradient MSE enters a first-order policy-optimization guarantee.
-6. Clipping is justified only when covariance reduction exceeds squared bias.
-7. The cap and any ESS gate are calibrated estimator choices, not universal
-   constants.
+1. A fixed rollout remains useful only while it retains effective support for
+   the current policy.
+2. Normalized sequence ESS isolates the likelihood-ratio contribution to the
+   finite-sample error of the Raw policy-gradient estimator.
+3. Gradient accuracy controls whether the next population update can be
+   certified through a smoothness argument.
+4. Clipping has lower estimator MSE only when variance reduction exceeds its
+   additional squared bias.
+5. Lower MSE is not the complete update criterion. Fixed-step improvement also
+   depends on population-gradient alignment and the update second moment.
+6. The correct statewise reference is therefore a full-certificate oracle,
+   with a null update when every candidate certificate is nonpositive.
+7. ESS diagnoses the reliability regime, but its numerical threshold depends
+   on the signal, estimator, batch size, and step size.
 
 ## Main-text logic
 
 | Order | Role | Reader takeaway |
 |---|---|---|
-| Introduction | Problem and thesis | Update count is not a reliability criterion; coverage and gradient influence are. |
-| Section 2 | Problem formulation | Separate the population target from finite-sample reliability. |
-| Section 3 | Main theorem | ESS governs ratio-driven MSE after isolating the weighted gradient scale. |
-| Section 3.1 | RLVR specialization | Bounded advantages help, but do not replace score control. |
-| Section 4 | Optimization bridge | Lower gradient MSE tightens a standard stationarity guarantee. |
-| Section 5 | Estimator comparison | Clipping helps exactly at a covariance-bias crossover. |
-| Section 6 | Decision rule | Calibrate the estimator using ESS, tail mass, and gradient scale. |
-| Section 7 | Empirical validation | Test the theorem, the failure of ESS alone, and the clipping crossover on an established benchmark. |
-| Appendix | Reproducibility | Define the Optdigits bandit, policies, exact population quantities, sampling protocol, and results. |
+| Introduction | Delayed failure and thesis | Effective support, rather than update count alone, determines whether a fixed rollout remains useful. |
+| Section 2 | Related work | Finite-sample reliability complements policy-deviation guarantees. |
+| Section 3 | Preliminaries | Sequence likelihood ratios define normalized population ESS. |
+| Section 4.1 | ESS to gradient error | The mismatch-driven error radius scales as `(N rho)^(-1/2)`. |
+| Section 4.2 | Gradient error to improvement | A reliable sampled direction yields a positive population-improvement certificate. |
+| Section 4.3 | Permissive reliability | Raw updates remain certifiable while signal exceeds the ESS-dependent uncertainty radius. |
+| Section 4.4 | Two estimator crossovers | The MSE oracle and full-certificate oracle can disagree because masking removes useful alignment. |
+| Gaussian example | Exact one-step mechanism | With `N=32`, PPO lowers MSE before it becomes the better update; the safe oracle has explicit ESS regimes on the displayed branch. |
+| Section 5 | Large-model evidence | Permissive learning succeeds at high ESS and selective protection activates after ESS deteriorates. |
+| Appendix A | Auxiliary Optdigits validation | Exact finite-population enumeration corroborates the mechanism without carrying the main oracle claim. |
+| Remaining appendices | Diagnostics and proofs | Reproduce the empirical details and prove every theoretical result. |
 
 The causal chain is:
 
-`coverage and gradient scale -> gradient MSE -> optimization consequence -> clipping decision`.
+`effective support -> estimator risk -> full one-step certificate -> update choice`.
 
-## Claim-evidence map
+## Claim--evidence map
 
 | Claim | Evidence | Status |
 |---|---|---|
-| Fixed-data optimization does not make the fixed-learner estimator intrinsically biased. | Change-of-measure identity and unbiasedness proof. | Supported pointwise |
-| ESS controls the ratio contribution to gradient MSE. | Exact factorization in `eq:ess-factorization`. | Supported conditional on weighted gradient scale |
-| Bounded RLVR advantages restrict one component of that scale. | Binary-reward observation and group-advantage proposition. | Supported; score control remains necessary |
-| Gradient MSE matters for policy optimization. | MSE-controlled stationarity proposition. | Supported for plain stochastic gradient ascent |
-| Clipping is preferable at a covariance-bias crossover. | Exact clipping-crossover theorem. | Supported for detached coefficients |
-| Upper truncation can cap variance with controlled bias. | Tail-excess bias and MSE corollary. | Supported under bounded sequence contributions |
-| The raw MSE identity predicts sampled error. | Optdigits contextual bandit, exact population calculation, and 100 sampled batches per condition. | Supported computationally |
-| ESS alone cannot order reliability. | Similar-ESS aligned and shifted loggers with different weighted gradient scales and MSE. | Supported computationally |
-| Calibrated clipping can reduce MSE in variance-dominated regimes. | Cap chosen on 40 calibration batches and tested on 60 separate batches. | Supported in this testbed |
-| The rule improves language-model training. | Matched-state language-model experiments. | To be tested |
+| ESS controls the mismatch contribution to Raw gradient error. | Exact importance-sampling MSE identity and the `1/(N rho)` envelope. | Supported under the stated contribution condition |
+| A reliable gradient estimate yields policy improvement. | Smoothness Lemma and the high-probability permissive-update theorem. | Supported for one-step updates |
+| Lower PPO MSE need not imply a better update. | Full-certificate theorem and Gaussian interval `0.039230 < rho < 0.122756`. | Supported analytically |
+| The Gaussian certificate is exact rather than only a bound. | Quadratic objective with global smoothness `L=1`. | Supported analytically |
+| An ESS gate can reproduce the safe oracle in the Gaussian construction. | On the stated branch, `rho=exp(-delta^2)` is one-to-one and the certificate ordering has Raw--PPO--no-update regimes. | Supported on the stated branch |
+| Optdigits exhibits related finite-population behavior. | Exact context--action enumeration and auxiliary appendix figures. | Supported computationally |
+| Selective safeguards improve late-stage large-model behavior. | Reported Qwen3-30B-A3B runs with prespecified sample-ESS threshold `0.1`. | Supported for the reported configurations |
+| One universal ESS threshold applies across settings. | Thresholds differ across the Gaussian and language-model settings. | Explicitly rejected |
 
 ## Self-review
 
-- The abstract and introduction keep notation and cap values out of the story.
-- Each section advances one link in the causal chain.
-- Proofs expose the algebra line by line and state the identity used.
-- The experiment adopts a published contextual-bandit protocol rather than an
-  invented two-state environment.
-- Main text states why the benchmark is useful, what is measured, and which
-  claim each measurement tests. The appendix contains full details.
-- Empirical claims are restricted to pointwise gradient estimation. No policy
-  return or language-model claim is inferred from the simulation.
-- Limitations, conclusion, and language-model transfer remain explicit
-  placeholders.
+- The main theoretical message is stated before estimator-specific details.
+- MSE oracle, full-certificate oracle, and cumulative performance are kept
+  distinct.
+- The Gaussian calculation is reproducible from closed-form truncated normal
+  moments and checked by committed code and data.
+- The LLM threshold is explicitly not transferred from the Gaussian example.
+- Optdigits is auxiliary and no longer determines the main story.
+- The conclusion states the remaining gap: practical online estimation of
+  alignment and second-moment terms.

@@ -37,7 +37,8 @@ INITIALIZATION_SCALE = 1.20
 PPO_EPSILON = 0.20
 ESS_THRESHOLDS = (0.20, 0.40, 0.60, 0.70, 0.80, 0.90, 0.95)
 VALIDATION_SEED_START = 21800826
-FINAL_SEED_START = 21900826
+# The original 21900826 block was touched during a pre-run audit and is retired.
+FINAL_SEED_START = 22000826
 
 
 def se(values):
@@ -53,7 +54,7 @@ def write_csv(path, rows):
 
 
 def full_rollout_sample_rho(weights, rollout):
-    probs = base.softmax(base.logits(weights, rollout["features"]))
+    probs = base.softmax(rollout["features"] @ weights.T)
     selected = probs[np.arange(len(probs)), rollout["actions"]]
     ratios = selected / np.maximum(rollout["old_action_probabilities"], 1e-12)
     return float((np.sum(ratios) ** 2) / (len(ratios) * np.sum(ratios**2) + 1e-16))
@@ -98,7 +99,7 @@ def run_method(method, threshold, initial, train_x, train_y, test_x, test_y, rol
         path.append({
             "replication": replication, "method": method, "update": update,
             "test_value": test_value,
-            "relative_improvement": (test_value - initial_test) / max(1.0 - initial_test, 1e-12),
+            "relative_improvement": (test_value - initial_test) / max(initial_test, 1e-12),
             "population_rho": population_rho, "sample_rho": sample_rho,
             "selected_ppo": float(selected == "ppo"),
             "raw_risk": raw_risk, "ppo_risk": ppo_risk,
@@ -168,7 +169,7 @@ def make_figure(curve, methods, output):
     for method in methods:
         s=sorted([r for r in curve if r["method"]==method],key=lambda r:r["update"]); x=np.asarray([r["update"] for r in s]); y=100*np.asarray([r["mean_relative_improvement"] for r in s]); e=100*np.asarray([r["se_relative_improvement"] for r in s]); label,color,marker=styles[method]
         ax.plot(x,y,color=color,linewidth=2.1,label=label,marker=marker,markevery=max(1,len(x)//12),markersize=4.0); ax.fill_between(x,y-1.96*e,y+1.96*e,color=color,alpha=.11,linewidth=0)
-    ax.set_xlabel("Stale-rollout minibatch update"); ax.set_ylabel("Relative improvement toward perfect policy (\%)"); ax.set_title("One rollout, increasingly stale updates"); ax.legend(frameon=False); fig.tight_layout(); output.parent.mkdir(parents=True,exist_ok=True); fig.savefig(output.with_suffix('.pdf'),bbox_inches='tight'); fig.savefig(output.with_suffix('.png'),dpi=260,bbox_inches='tight'); plt.close(fig)
+    ax.set_xlabel("Stale-rollout minibatch update"); ax.set_ylabel("Relative change in held-out population value (%)"); ax.set_title("One rollout, increasingly stale updates"); ax.legend(frameon=False); fig.tight_layout(); output.parent.mkdir(parents=True,exist_ok=True); fig.savefig(output.with_suffix('.pdf'),bbox_inches='tight'); fig.savefig(output.with_suffix('.png'),dpi=260,bbox_inches='tight'); plt.close(fig)
 
 
 def main():

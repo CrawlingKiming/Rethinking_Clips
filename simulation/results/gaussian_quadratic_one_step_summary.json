@@ -1,0 +1,83 @@
+{
+  "parameters": {
+    "gradient": 2.0,
+    "batch_size": 32,
+    "ppo_epsilon": 0.2,
+    "step_size": 0.4,
+    "smoothness": 1.0
+  },
+  "displayed_branch": {
+    "minimum_delta": 0.2,
+    "maximum_delta": 2.301807413001365,
+    "minimum_rho": 0.005,
+    "maximum_rho": 0.9607894391523232
+  },
+  "crossovers": {
+    "mse_crossover_delta": 1.448294028991495,
+    "mse_crossover_rho": 0.12275612757455881,
+    "certificate_crossover_delta": 1.7995345349165293,
+    "certificate_crossover_rho": 0.039229567546690026,
+    "raw_zero_delta": 1.8218241555772692,
+    "raw_zero_rho": 0.03618743738858979,
+    "ppo_zero_delta": 2.1260145528414793,
+    "ppo_zero_rho": 0.010889700127761637
+  },
+  "representative_states": [
+    {
+      "delta": 0.1999999998759436,
+      "rho": 0.9607894392,
+      "raw_mean": 2.0,
+      "ppo_mean": 0.4316881511558177,
+      "raw_single_second_moment": 11.310465704800107,
+      "ppo_single_second_moment": 0.5671014118158288,
+      "raw_variance": 0.22845205327500334,
+      "raw_second_moment": 4.228452053275003,
+      "raw_mse": 0.22845205327500334,
+      "raw_certificate": 1.2617238357379998,
+      "raw_expected_gain": 1.2617238357379998,
+      "ppo_variance": 0.011898335998984398,
+      "ppo_second_moment": 0.1982529958473125,
+      "ppo_mse": 2.471500391224042,
+      "ppo_certificate": 0.3294902812568692,
+      "ppo_expected_gain": 0.3294902812568692
+    },
+    {
+      "delta": 1.6000000001750367,
+      "rho": 0.07730474039999999,
+      "raw_mean": 2.0,
+      "ppo_mean": 0.13016837315511168,
+      "raw_single_second_moment": 210.96227627819997,
+      "ppo_single_second_moment": 1.9469824808421186,
+      "raw_variance": 6.467571133693749,
+      "raw_second_moment": 10.467571133693749,
+      "raw_mse": 6.467571133693749,
+      "raw_certificate": 0.7625943093045,
+      "raw_expected_gain": 0.7625943093045,
+      "ppo_variance": 0.060313708608508446,
+      "ppo_second_moment": 0.07725751397835684,
+      "ppo_mse": 3.55658402135791,
+      "ppo_certificate": 0.09795409740582081,
+      "ppo_expected_gain": 0.09795409740582081
+    },
+    {
+      "delta": 2.1000000005859727,
+      "rho": 0.012155178300000001,
+      "raw_mean": 2.0,
+      "ppo_mean": 0.24205041220997714,
+      "raw_single_second_moment": 1767.5787820973005,
+      "ppo_single_second_moment": 64.12086823630025,
+      "raw_variance": 55.11183694054064,
+      "raw_second_moment": 59.11183694054064,
+      "raw_mse": 55.11183694054064,
+      "raw_certificate": -3.128946955243252,
+      "raw_expected_gain": -3.128946955243252,
+      "ppo_variance": 2.0019462448202887,
+      "ppo_second_moment": 2.0605346468713086,
+      "ppo_mse": 5.0923329980314005,
+      "ppo_certificate": 0.02879755801827702,
+      "ppo_expected_gain": 0.02879755801827702
+    }
+  ],
+  "calculation": "closed-form truncated Gaussian polynomial moments",
+  "monte_carlo_replications": 0
+}

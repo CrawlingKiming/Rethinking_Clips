@@ -50,13 +50,17 @@ show that its mean-squared error is controlled by normalized sequence effective
 sample size. A smoothness argument then converts estimator reliability into a
 one-step population-improvement guarantee. The resulting theorem explains why
 permissive updates can remain effective for an extended period and why their
-reliability can deteriorate sharply after effective support collapses. We
-further characterize when clipping can recover a positive improvement
-certificate: its variance reduction must outweigh the bias it introduces. An
-exactly evaluable contextual bandit verifies the predicted relations among
-effective support, gradient error, and harmful updates. Large-model experiments
-show the same delayed transition and demonstrate that selective safeguards can
-preserve early learning while preventing late failure.
+reliability can deteriorate sharply after effective support collapses. We then
+separate two questions that are often conflated: whether clipping lowers
+gradient-estimation MSE and whether it provides a stronger fixed-step
+improvement certificate. The latter also depends on the alignment and second
+moment of the resulting update. An exactly solvable Gaussian bandit separates
+the two crossovers: PPO can lower MSE while Raw still produces the larger exact
+one-step improvement. Along a controlled off-policy branch, the resulting
+Raw--PPO--no-update oracle reduces to explicit ESS thresholds. Large-model
+experiments show the same
+delayed transition and demonstrate that selective safeguards can preserve
+early learning while preventing late failure.
 
 \end{abstract}
 
@@ -96,34 +100,38 @@ therefore remain unchanged while the amount of useful information shrinks
 dramatically. We develop a theory that measures this loss and connects it to
 the quality of the next update.
 
-The framework has two parts. First, it quantifies how accurately the fixed
-batch estimates the direction that would improve the current model. Second, it
-shows how that accuracy determines whether the next step is guaranteed to
-improve the true objective. Together, these results predict a clear
-transition: permissive updates are reliable while the batch retains broad
-support, and become vulnerable only after that support has substantially
-deteriorated.
+The framework has three layers. First, normalized sequence ESS quantifies the
+effective support retained by a fixed batch. Second, estimator MSE measures how
+accurately a coefficient rule estimates the population gradient. Third, a full
+fixed-step certificate accounts for estimation risk, mean alignment, and the
+update second moment. Together, these results explain why permissive updates
+can remain reliable while support is broad and why a low-MSE clipped estimator
+need not provide the stronger policy update.
 
 A conservative safeguard is not automatically beneficial once this transition
 begins. It helps only when the noise it removes is larger than the useful signal
 it suppresses. Our theory therefore separates two questions: when a permissive
 update loses reliability, and when a safeguard can recover it.
 
-We test the framework in a controlled task where the exact update direction and
-true performance are known, and then in large-model training. Across both
-settings, the proposed support measure tracks the rise in update error, the
-onset of harmful steps, and the point at which selective protection becomes
-useful.
+We make the distinction concrete in an exactly solvable Gaussian bandit. Its
+gradient, normalized ESS, Raw and PPO moments, and expected one-step
+improvement are all available without Monte Carlo error. We then study
+ESS-conditioned safeguards in large-model training. These experiments treat
+ESS as a diagnostic of effective support rather than as standalone proof that
+one coefficient rule is preferable.
 
 \subsection{Contributions}
 
 \begin{enumerate}
-  \item We provide a theory showing how the useful portion of a fixed rollout
-  controls the accuracy of the next update.
-  \item We show how this accuracy determines whether the next step is
-  guaranteed to improve the model.
-  \item We identify when a selective safeguard can recover that guarantee and
-  test the resulting predictions in controlled and large-scale experiments.
+  \item We show how normalized sequence ESS controls the finite-sample error of
+  the unmodified gradient estimator from a fixed rollout.
+  \item We distinguish an estimator-risk crossover from an
+  optimization-certificate crossover and derive the fixed-step condition under
+  which coefficient control provides the stronger improvement guarantee.
+  \item We derive an exactly solvable Gaussian example that separates the risk
+  and full-certificate oracles and gives explicit ESS regimes on a controlled
+  off-policy branch, then evaluate ESS-conditioned safeguards in large-model
+  training.
 \end{enumerate}
 
 \section{Related work}
@@ -220,7 +228,13 @@ Importance-sampling theory makes this quantity operational. For a bounded integr
 \section{Theoretical analysis}
 \label{sec:theory}
 
-The preliminaries identify normalized sequence ESS as the effective-support coordinate of the fixed rollout. Figure~\ref{fig:llm-motivation} asks when a decline in this support makes a permissive update unreliable. We answer the question in two steps. First, we convert $\rho_k$ into a high-probability bound on the error of the sampled policy gradient. Second, we show how that error controls the improvement produced by the next update.
+The preliminaries identify normalized sequence ESS as the effective-support
+coordinate of the fixed rollout. Figure~\ref{fig:llm-motivation} asks when a
+decline in this support makes a permissive update unreliable. We answer the
+question in three steps. First, we convert $\rho_k$ into a high-probability
+bound on sampled-gradient error. Second, we translate that error into policy
+improvement. Third, we compare Raw and controlled estimators using the complete
+fixed-step certificate rather than MSE alone.
 
 At update $k$, write $W_k:=W_{\theta_k}$, $f_k:=f_{\theta_k}$, $g_k:=g(\theta_k)$, $\widehat g_k:=\widehat g_N(\theta_k)$, and $\rho_k:=\rho_{\theta_k}$. As stated above, the current policy is fixed after conditioning on the preceding updates, and the $N$ unused sampling units are independent draws from $Q$. We use the standard bounded-integrand condition $\|f_k\|_\infty:=\sup_{z\in\mathcal Z}\|f_k(z)\|_2<\infty$. This condition fixes the scale of one response contribution, while $\rho_k$ records the additional loss of reliability caused by policy mismatch.
 
@@ -291,26 +305,54 @@ The certificate is positive exactly when the observed gradient norm exceeds its 
 
 \begin{remark}[Interpretation of the reliability boundary]
 \label{rem:rho-interpretation}
-Theorem~\ref{thm:permissive-reliability} implies zero lower bound means that the rollout no longer certifies the sampled direction at the chosen confidence level. Confidence level, observed gradient signal and all mismatch-dependent degradation enters through $\rho_k$. 
+Theorem~\ref{thm:permissive-reliability} implies that a zero lower bound means
+the rollout no longer certifies the sampled direction at the chosen confidence
+level. The confidence level enters through $\delta$, the observed signal
+through $\|\widehat g_k\|_2$, and policy-mismatch degradation through $\rho_k$.
 \end{remark}
 
 The result complements policy-deviation guarantees. Those guarantees study population-level consequences of changing the policy. The present result studies whether a fixed finite rollout still estimates the current policy gradient accurately enough. Both effects may matter, but they answer different questions.
 
-The theorem diagnoses when the unmodified estimator loses a useful guarantee, but it does not imply that clipping will repair the problem. A modification can help only if the reduction in sampling error is large enough to compensate for the bias it introduces. We now state this comparison without committing to one particular clipping implementation.
+The theorem diagnoses when the unmodified estimator loses a useful guarantee,
+but it does not imply that clipping will repair the problem. A modification has
+lower estimator risk only if its variance reduction compensates for its bias,
+and it has a stronger fixed-step certificate only if it also retains sufficient
+gradient alignment. We now separate these comparisons without committing to
+one particular clipping implementation.
 
-\subsection{When does clipping become necessary?}
+\subsection{Two crossovers: estimator risk and fixed-step progress}
 \label{sec:clipping-recovery}
 
-The preceding theorem evaluates the unmodified sequence-level estimator. It does not determine how a token-level coefficient rule should be chosen. Classical truncated importance sampling replaces the complete weight by a bounded weight and studies the resulting bias and variance as functions of the truncation level and $d_2$ \citep{metelli2020is}. Our setting is different. We modify each token coefficient, not the complete-response weight, and detached coefficient truncation keeps the score gradient active after the coefficient reaches its cap. The one-sided concentration results for nonnegative scalar estimands therefore do not transfer directly. The useful principle is instead to compare token-level rules by the reliability of the gradient estimator they induce.
+The preceding theorem evaluates the unmodified sequence-level estimator. It
+does not determine how a coefficient rule should be chosen. Classical
+truncated importance sampling replaces the complete weight by a bounded weight
+and studies the resulting bias and variance as functions of the truncation
+level and $d_2$ \citep{metelli2020is}. Our large-model setting instead modifies
+token coefficients, while controlled implementations can also mask the
+complete-response ratio. The one-sided
+concentration results for nonnegative scalar estimands therefore do not
+transfer directly to every update considered here. The useful principle is to
+compare the gradient estimators induced by all such rules on common policy
+states.
 
-Let $r_{k,t}$ denote the token likelihood ratio, let $s_{k,t}:=\nabla_\theta\log P_{\theta_k}(Y_t\mid X,Y_{<t})$ denote the token score, and let $A_k:=R-b(X)$. For any coefficient rule $u:\mathbb R_+\times\mathbb R\to\mathbb R$, define the response contribution and its estimator by
+Let $r_{k,t}$ denote the token likelihood ratio, write
+$\mathbf r_k=(r_{k,1},\ldots,r_{k,T})$, let
+$s_{k,t}:=\nabla_\theta\log P_{\theta_k}(Y_t\mid X,Y_{<t})$ denote the
+token score, and let $A_k:=R-b(X)$. A response-level coefficient rule is a
+collection $u=(u_1,\ldots,u_T)$ with
+$u_t:\mathbb R_+^T\times\mathbb R\to\mathbb R$. Define its response
+contribution and estimator by
 \begin{equation}
- \psi_k(u;Z):=A_k\sum_{t=1}^{T}u(r_{k,t},A_k)s_{k,t},
+ \psi_k(u;Z):=A_k\sum_{t=1}^{T}u_t(\mathbf r_k,A_k)s_{k,t},
  \qquad
  \widehat g_k(u):=\frac1N\sum_{i=1}^N\psi_k(u;Z_i).
  \label{eq:token-rule-estimator}
 \end{equation}
-The target remains the population gradient $g_k$. Thus any discrepancy caused by using a token-local coefficient rather than the complete-response weight is included in the estimator bias. Define
+This class includes token-local rules, for which $u_t$ depends only on
+$r_{k,t}$, and sequence-level rules, for which every $u_t$ can depend on the
+complete ratio $W_k=\prod_jr_{k,j}$. The target remains the population gradient
+$g_k$. Thus any discrepancy from the complete-response importance-weighted
+gradient is included in the estimator bias. Define
 \begin{equation}
  b_k(u):=\E_Q[\psi_k(u;Z)]-g_k,
  \qquad
@@ -323,10 +365,23 @@ Independence gives the total gradient risk
  =\|b_k(u)\|_2^2+\frac{v_k(u)}{N}.
  \label{eq:clipping-risk-decomposition}
 \end{equation}
+We also write
+\begin{equation}
+ \mu_k(u):=\E[\widehat g_k(u)]=g_k+b_k(u),
+ \qquad
+ s_k(u):=\E\|\widehat g_k(u)\|_2^2
+ =\|\mu_k(u)\|_2^2+\frac{v_k(u)}{N}.
+ \label{eq:token-rule-mean-second-moment}
+\end{equation}
+The risk $m_k(u)$ measures estimation accuracy, whereas $s_k(u)$ records the
+second moment of the update itself. Both quantities enter fixed-step policy
+improvement.
 
 \begin{remark}[Token weight truncation and PPO masking]
 \label{rem:token-truncation-vs-clipping}
-A detached upper truncation uses $u_{\mathrm T}(r,A):=\min\{r,c\}$. Its coefficient remains nonzero when $r>c$, and
+A token-local detached upper truncation uses
+$u_{{\mathrm T},t}(\mathbf r,A):=\min\{r_t,c\}$. Its coefficient remains
+nonzero when $r_t>c$, and
 \begin{equation}
  \|\psi_k(u_{\mathrm T};Z)\|_2
  \le c|A_k|\sum_{t=1}^{T}\|s_{k,t}\|_2.
@@ -334,26 +389,33 @@ A detached upper truncation uses $u_{\mathrm T}(r,A):=\min\{r,c\}$. Its coeffici
 \end{equation}
 Hence token weight truncation gives a direct second-moment envelope whenever the score contribution on the right has a finite second moment.
 
-PPO defines a different rule. Away from the clipping boundary, its gradient is represented by $u_{\mathrm P}(r,A):=rM_\epsilon(r,A)$, where $M_\epsilon(r,A)=\mathbf 1\{A\ge0,\ r\le1+\epsilon\}+\mathbf 1\{A<0,\ r\ge1-\epsilon\}$. For $A\ge0$ and $c=1+\epsilon$,
+Token-local PPO defines a different rule. Away from the clipping boundary, its
+gradient is represented by
+$u_{{\mathrm P},t}(\mathbf r,A):=r_tM_\epsilon(r_t,A)$, where
+$M_\epsilon(r,A)=\mathbf 1\{A\ge0,\ r\le1+\epsilon\}+\mathbf 1\{A<0,\ r\ge1-\epsilon\}$.
+For $A\ge0$ and $c=1+\epsilon$,
 \begin{equation}
- 0\le r-u_{\mathrm T}(r,A)=(r-c)_+
- \le r\mathbf 1\{r>c\}=r-u_{\mathrm P}(r,A).
+ 0\le r-\min\{r,c\}=(r-c)_+
+ \le r\mathbf 1\{r>c\}=r-rM_\epsilon(r,A).
  \label{eq:truncation-mask-distortion}
 \end{equation}
-Thus truncation perturbs the positive-advantage upper branch less and preserves a bounded gradient after the cap, while PPO removes that gradient. On the negative-advantage lower branch, PPO masks small ratios whereas upper truncation does not. Neither rule therefore dominates on every sample. They are also distinct from truncating the sequence weight $W_k=\prod_t r_{k,t}$.
+Thus truncation perturbs the positive-advantage upper branch less and preserves
+a bounded gradient after the cap, while PPO removes that gradient. On the
+negative-advantage lower branch, PPO masks small ratios whereas upper
+truncation does not. Neither rule therefore dominates on every sample. A
+sequence-level mask is another member of the general class: it sets
+$u_t(\mathbf r,A)=W_kM_\epsilon(W_k,A)$ for every token. This rule is distinct
+from token-local PPO and from truncating $W_k$ at a nonzero cap. We identify
+which implementation is used in each experiment.
 \end{remark}
 
-For a common step size $0<\eta_k\le1/L_k$, the fixed-step smoothness argument gives
-\begin{equation}
- \E\left[J(\theta_k+\eta_k\widehat g_k(u))-J(\theta_k)\right]
- \ge\frac{\eta_k}{2}\left\{\|g_k\|_2^2-m_k(u)\right\}.
- \label{eq:token-rule-progress}
-\end{equation}
-A more reliable coefficient rule therefore gives a stronger expected-improvement certificate. Comparing two rules reduces the question to one bias and variance inequality.
+We first compare the rules only as gradient estimators.
 
-\begin{proposition}[Estimator reliability under coefficient control]
+\begin{proposition}[Estimator-risk crossover under coefficient control]
 \label{prop:clipping-crossover}
-For any two coefficient rules $u_1$ and $u_2$, the estimator $\widehat g_k(u_2)$ has lower total gradient risk than $\widehat g_k(u_1)$ if and only if
+For any two coefficient rules $u_1$ and $u_2$ with
+$v_k(u_1),v_k(u_2)<\infty$, the estimator $\widehat g_k(u_2)$ has lower total
+gradient risk than $\widehat g_k(u_1)$ if and only if
 \begin{equation}
  v_k(u_1)-v_k(u_2)
  >N\left\{\|b_k(u_2)\|_2^2-\|b_k(u_1)\|_2^2\right\}.
@@ -361,20 +423,282 @@ For any two coefficient rules $u_1$ and $u_2$, the estimator $\widehat g_k(u_2)$
 \end{equation}
 \end{proposition}
 
-Proposition~\ref{prop:clipping-crossover} states the estimator-level tradeoff directly. A stronger rule is preferable only when its additional variance reduction exceeds its additional squared bias. This comparison is more general than a distinction between clipped and unclipped objectives because it applies to any two token coefficient rules.
+Proposition~\ref{prop:clipping-crossover} states the estimator-level tradeoff
+directly. Rule $u_2$ has lower MSE only when its variance reduction exceeds its
+additional squared bias. This comparison does not yet determine which rule
+provides the stronger policy update.
 
-\begin{corollary}[When a stronger rule recovers reliability]
-\label{cor:clipping-needed}
-For a common step size $0<\eta_k\le1/L_k$, rule $u_2$ has a positive expected-improvement certificate while rule $u_1$ does not exactly when
+\begin{theorem}[Full fixed-step improvement certificate]
+\label{thm:fixed-step-certificate}
+Suppose that $J$ is $L_k$-smooth on every update segment generated by a
+coefficient rule $u$ almost surely, for a deterministic constant $L_k$, and
+that $s_k(u)<\infty$. For any step size $\eta_k>0$,
+\begin{align}
+ &\E\left[J(\theta_k+\eta_k\widehat g_k(u))-J(\theta_k)\right]
+ \ge B_k(u;\eta_k),
+ \label{eq:full-token-rule-progress}\\
+ B_k(u;\eta_k)
+ &:={\eta_k}g_k^\top\mu_k(u)
+ -\frac{L_k\eta_k^2}{2}s_k(u)
+ \nonumber\\
+ &=\frac{\eta_k}{2}\left\{\|g_k\|_2^2-m_k(u)\right\}
+ +\frac{\eta_k}{2}(1-L_k\eta_k)s_k(u).
+ \label{eq:full-certificate-polarized}
+\end{align}
+Consequently, when $0<\eta_k\le1/L_k$,
 \begin{equation}
- m_k(u_2)<\|g_k\|_2^2\le m_k(u_1).
+ B_k(u;\eta_k)
+ \ge
+ \frac{\eta_k}{2}\left\{\|g_k\|_2^2-m_k(u)\right\}.
+ \label{eq:token-rule-progress}
+\end{equation}
+\end{theorem}
+
+Equation~\eqref{eq:token-rule-progress} is a valid MSE-only certificate, but it
+drops the nonnegative second-moment term in
+Equation~\eqref{eq:full-certificate-polarized}. Lower MSE therefore strengthens
+this coarser certificate. It need not strengthen the full fixed-step
+certificate $B_k$ because coefficient control can also change the mean
+alignment and the update second moment.
+
+\begin{corollary}[Optimization-certificate crossover]
+\label{cor:certificate-crossover}
+For two rules $u_1$ and $u_2$, let the same deterministic $L_k$ be valid almost
+surely along both families of update segments. With a common step size
+$0<\eta_k\le1/L_k$,
+\begin{equation}
+ B_k(u_2;\eta_k)>B_k(u_1;\eta_k)
+ \quad\Longleftrightarrow\quad
+ m_k(u_2)-m_k(u_1)
+ <(1-L_k\eta_k)\{s_k(u_2)-s_k(u_1)\}.
+ \label{eq:certificate-crossover}
+\end{equation}
+Equivalently, the same comparison can be written as
+\begin{equation}
+ g_k^\top\{\mu_k(u_2)-\mu_k(u_1)\}
+ >
+ \frac{L_k\eta_k}{2}\{s_k(u_2)-s_k(u_1)\}.
+ \label{eq:certificate-crossover-alignment}
+\end{equation}
+In particular, if $s_k(u_2)<s_k(u_1)$, then rule $u_2$ must reduce MSE by more
+than $(1-L_k\eta_k)\{s_k(u_1)-s_k(u_2)\}$ to provide the stronger full
+certificate. At $\eta_k=1/L_k$, the comparison reduces exactly to MSE ordering.
+\end{corollary}
+
+The condition becomes especially transparent when comparing an unbiased
+complete-response estimator with a masked version. Let $u_{\mathrm R}$ set
+$u_{{\mathrm R},t}(\mathbf r,A)=W_k$ for every token, so that
+$\mu_k(u_{\mathrm R})=g_k$, and let $u_{\mathrm P}$ denote a rule with
+$s_k(u_{\mathrm P})<s_k(u_{\mathrm R})$. For a common
+$0<\eta_k\le1/L_k$, Corollary~\ref{cor:certificate-crossover} gives
+\begin{align}
+ B_k(u_{\mathrm P};\eta_k)>B_k(u_{\mathrm R};\eta_k)
+ \quad\Longleftrightarrow\quad
+ m_k(u_{\mathrm R})-m_k(u_{\mathrm P})
+ &>(1-L_k\eta_k)
+ \{s_k(u_{\mathrm R})-s_k(u_{\mathrm P})\}
+ \label{eq:raw-ppo-certificate-crossover}\\
+ \quad\Longleftrightarrow\quad
+ \|g_k\|_2^2-g_k^\top\mu_k(u_{\mathrm P})
+ &<\frac{L_k\eta_k}{2}
+ \{s_k(u_{\mathrm R})-s_k(u_{\mathrm P})\}.
+ \label{eq:raw-ppo-alignment-crossover}
+\end{align}
+The left side of Equation~\eqref{eq:raw-ppo-alignment-crossover} is a signed
+alignment loss; it is nonnegative when masking weakens alignment with the
+population gradient. Thus PPO can have lower MSE and nevertheless have a
+weaker full certificate: its MSE reduction must exceed the retained
+second-moment advantage of Raw in
+Equation~\eqref{eq:raw-ppo-certificate-crossover}, or
+equivalently its alignment loss must be smaller than the reduction in the
+quadratic smoothness penalty.
+
+Equation~\eqref{eq:certificate-crossover-alignment} makes the failure mode
+explicit. A masking rule can lower MSE yet have a weaker full certificate when
+its loss of population-gradient alignment exceeds the reduction in its
+smoothness penalty.
+
+\begin{corollary}[When coefficient control recovers a positive certificate]
+\label{cor:clipping-needed}
+For a common step size $0<\eta_k\le1/L_k$, rule $u_2$ has a positive full
+certificate while rule $u_1$ has a nonpositive full certificate exactly when
+\begin{equation}
+ \begin{split}
+ m_k(u_2)&<\|g_k\|_2^2+(1-L_k\eta_k)s_k(u_2),\\
+ m_k(u_1)&\ge\|g_k\|_2^2+(1-L_k\eta_k)s_k(u_1).
+ \end{split}
  \label{eq:clipping-needed}
 \end{equation}
 \end{corollary}
 
+These results define two distinct oracle comparisons. An estimator-risk oracle
+minimizes $m_k(u)$, whereas an optimization-certificate oracle maximizes
+$B_k(u;\eta_k)$. For the same candidate set and a common smoothness constant,
+the two choices coincide at $\eta_k=1/L_k$, but they can differ for smaller
+steps. Neither oracle optimizes cumulative return because its decision is local
+to the current policy state. If a null update is included with certificate
+zero, with ties resolved in favor of the null action, the certificate oracle
+applies a candidate rule only when $\max_u B_k(u;\eta_k)>0$; otherwise it
+abstains. This means that no positive lower bound is available, not that the
+candidate updates necessarily decrease the objective. Refreshing the data is
+one conservative next action. Without the null option,
+$\arg\max_u B_k(u;\eta_k)$ only identifies the less pessimistic lower bound when
+both candidate certificates are nonpositive. An exact oracle uses population
+moments $(g_k,\mu_k,s_k)$; replacing them by Monte Carlo estimates produces a
+plug-in certificate selector rather than an exact oracle.
+
+\paragraph{An exactly solvable Gaussian example.}
+The two oracle comparisons can be separated without simulation. Consider the
+scalar policy and rollout
+\begin{equation}
+ P_\theta=\mathcal N(\theta,1),
+ \qquad
+ Q_\delta=\mathcal N(\theta-\delta,1),
+ \qquad \delta\ge0,
+ \label{eq:gaussian-policy-pair}
+\end{equation}
+with reward $R(a)=-\tfrac12(a-a^\star)^2$. We hold the current policy fixed and
+vary only the rollout gap $\delta$. Writing $g:=a^\star-\theta>0$, the exact
+objective is
+\begin{equation}
+ J(\theta)=-\frac12\{(\theta-a^\star)^2+1\},
+ \qquad \nabla J(\theta)=g,
+ \qquad L=1.
+ \label{eq:gaussian-objective}
+\end{equation}
+For $z=a-\theta$ under the current policy, the likelihood ratio and normalized
+ESS are
+\begin{equation}
+ W_\delta(z)=\exp\{\delta z+\delta^2/2\},
+ \qquad
+ \rho(\delta)=\{\E_{Q_\delta}[W_\delta^2]\}^{-1}
+ =\exp(-\delta^2).
+ \label{eq:gaussian-ratio-ess}
+\end{equation}
+Thus policy mismatch is indexed exactly by one population quantity.
+
+Using the exact current-policy value baseline, the advantage and score product
+are
+\begin{equation}
+ A_g(z)=gz+\frac{1-z^2}{2},
+ \qquad
+ f_g(z):=zA_g(z)=gz^2+\frac{z-z^3}{2}.
+ \label{eq:gaussian-advantage-contribution}
+\end{equation}
+The Raw estimator uses $W_\delta f_g$. The PPO-style gradient mask uses
+$W_\delta f_gM_{\epsilon,\delta}$, where
+\begin{equation}
+ M_{\epsilon,\delta}(z)
+ :=\mathbf 1\{A_g(z)\ge0,\ W_\delta(z)\le1+\epsilon\}
+ +\mathbf 1\{A_g(z)<0,\ W_\delta(z)\ge1-\epsilon\}.
+ \label{eq:gaussian-ppo-mask}
+\end{equation}
+Let $M_{\mathrm R}\equiv1$ and $M_{\mathrm P}=M_{\epsilon,\delta}$. Change of
+measure gives the exact per-sample moments
+\begin{align}
+ \mu_u(\delta)
+ &=\E_{Z\sim\mathcal N(0,1)}[f_g(Z)M_u(Z)],
+ \nonumber\\
+ q_u(\delta)
+ &=e^{\delta^2}
+ \E_{Y\sim\mathcal N(\delta,1)}[f_g(Y)^2M_u(Y)],
+ \qquad u\in\{\mathrm R,\mathrm P\}.
+ \label{eq:gaussian-exact-moments}
+\end{align}
+In particular, $\mu_{\mathrm R}=g$. For an iid estimator with batch size $N$,
+\begin{equation}
+ m_u=(\mu_u-g)^2+\frac{q_u-\mu_u^2}{N},
+ \qquad
+ s_u=\mu_u^2+\frac{q_u-\mu_u^2}{N}.
+ \label{eq:gaussian-risk-second-moment}
+\end{equation}
+These quantities are closed form. The advantage changes sign at
+$g\pm\sqrt{g^2+1}$, while the two ratio boundaries are
+$(\log(1\pm\epsilon)-\delta^2/2)/\delta$. Hence
+Equation~\eqref{eq:gaussian-exact-moments} is a finite sum of truncated normal
+polynomial moments. With
+$I_j(a,b):=\int_a^bz^j\phi(z)\,dz$, those moments satisfy
+\begin{equation}
+ I_j(a,b)
+ =a^{j-1}\phi(a)-b^{j-1}\phi(b)+(j-1)I_{j-2}(a,b),
+ \qquad j\ge2,
+ \label{eq:truncated-normal-recursion}
+\end{equation}
+starting from $I_0=\Phi(b)-\Phi(a)$ and
+$I_1=\phi(a)-\phi(b)$, where $\phi$ and $\Phi$ are the standard normal density
+and distribution function and boundary terms vanish at infinity. Thus no
+sampled estimate is used in the comparison.
+
+The quadratic objective makes the full certificate exact rather than only a
+lower bound:
+\begin{equation}
+ \E[J(\theta+\eta\widehat g_u)-J(\theta)]
+ =\eta g\mu_u-\frac{\eta^2}{2}s_u
+ =B_u(\eta).
+ \label{eq:gaussian-exact-gain}
+\end{equation}
+For $g=2$, $N=32$, $\epsilon=0.2$, and $\eta=0.4$, we evaluate the controlled
+off-policy branch $0.2\le\delta\le\sqrt{-\log(0.005)}$. The closed-form moments
+give
+\begin{equation}
+ \rho_{\mathrm{MSE}}=0.122756,
+ \qquad
+ \rho_B=0.039230,
+ \qquad
+ \rho_0=0.010890.
+ \label{eq:gaussian-thresholds}
+\end{equation}
+On this branch, the MSE oracle selects Raw above $\rho_{\mathrm{MSE}}$ and PPO
+below it. The safe certificate oracle instead selects Raw for $\rho>\rho_B$,
+PPO for $\rho_0<\rho<\rho_B$, and no update for $\rho<\rho_0$. At each boundary
+the adjacent choices tie.
+
+Figure~\ref{fig:gaussian-one-step} shows why the thresholds differ. Throughout
+$0.039230<\rho<0.122756$, PPO has lower gradient MSE but Raw has the larger
+exact expected improvement. For example, at $\rho=0.0773$, the Raw and PPO
+MSEs are $6.468$ and $3.557$, whereas their exact expected gains are $0.763$
+and $0.098$. PPO becomes the stronger positive update only after the ESS falls
+below $0.039230$ and remains certified down to $\rho_0$. Because
+$\rho=e^{-\delta^2}$ is one-to-one on the displayed branch,
+the safe certificate oracle is exactly representable by the two ESS thresholds
+in Equation~\eqref{eq:gaussian-thresholds}. This exact reduction motivates an
+ESS gate, but the numerical thresholds remain specific to
+$(g,N,\epsilon,\eta)$.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/gaussian_quadratic_one_step.pdf}
+  \caption{Exactly solvable one-step comparison with $g=2$, $N=32$,
+  $\epsilon=0.2$, and $\eta=0.4$ on the branch
+  $0.2\le\delta\le\sqrt{-\log(0.005)}$. (a) PPO begins to lower MSE at
+  $\rho_{\mathrm{MSE}}=0.122756$. The shaded interval marks states in which the
+  MSE oracle selects PPO but Raw has the larger expected improvement. (b) The
+  quadratic objective makes the full certificate equal to the exact expected
+  one-step gain. The safe certificate oracle selects Raw above
+  $\rho_B=0.039230$, PPO between $\rho_0=0.010890$ and $\rho_B$, and no update
+  below $\rho_0$. The dotted and dashed lines mark the MSE and certificate
+  crossovers, respectively.}
+  \label{fig:gaussian-one-step}
+\end{figure}
+
 \begin{remark}[ESS and the strength of coefficient control]
 \label{rem:high-ess-clipping}
-The role of $\rho_k$ is to identify the reliability regime of the fixed rollout. When $\rho_k$ is high, Equation~\eqref{eq:rho-gradient-mse-bound} gives a small error bound for the unmodified sequence estimator. In this regime, a loose nonzero token cap provides bounded influence while retaining a bounded contribution from outbound tokens, so aggressive PPO-type masking can be unnecessarily restrictive. When $\rho_k$ is low, the sequence-level reliability certificate deteriorates. Stronger masking can then become preferable if its additional variance reduction satisfies Proposition~\ref{prop:clipping-crossover}. A low value of $\rho_k$ does not prove that masking is better, and a high value does not prove that truncation is optimal. ESS identifies when stronger control can become worth its bias, while the risk comparison determines whether a particular rule is reliable.
+The role of $\rho_k$ is to identify the reliability regime of the fixed
+rollout. When $\rho_k$ is high,
+Equation~\eqref{eq:rho-gradient-mse-bound} reduces the mismatch-dependent
+factor in the error bound for the unmodified sequence estimator. The full
+radius also depends on $N$ and the contribution scale, but high ESS removes the
+mismatch-driven reason to accept the bias of aggressive masking. A modified
+rule must still satisfy Proposition~\ref{prop:clipping-crossover} and
+Corollary~\ref{cor:certificate-crossover}. When $\rho_k$ is low, the sequence-level
+reliability certificate deteriorates. Stronger masking can then have lower
+estimator risk if its variance reduction satisfies
+Proposition~\ref{prop:clipping-crossover}, but it provides the stronger
+fixed-step certificate only when
+Equation~\eqref{eq:certificate-crossover} also holds. A low value of $\rho_k$
+does not prove that masking is better, and a high value does not prove that
+Raw is optimal. ESS diagnoses effective support, while estimator risk
+and the full certificate answer the two subsequent comparison questions.
 \end{remark}
 
 The theoretical quantity $\rho_k$ is a population object. During training, we use the standard normalized plug-in estimate
@@ -383,55 +707,24 @@ The theoretical quantity $\rho_k$ is a population object. During training, we us
  :=\frac{(\sum_{i=1}^N W_{k,i})^2}{N\sum_{i=1}^N W_{k,i}^2}.
  \label{eq:sample-ess}
 \end{equation}
-It is computed from the complete-response ratios before any token coefficient is modified. A finite batch can miss rare, large ratios and can therefore overstate population support, so $\widehat\rho_k$ is an observable diagnostic rather than an exact replacement for $\rho_k$ in the theorem. The numerical value $0.1$ used below is a prespecified operational threshold, not a universal constant derived from the theory.
-
-\section{Theoretical validation on Optdigits}
-\label{sec:simulation}
-
-Optdigits is used only as a finite-population test of the theoretical claims. The section compares the unmodified and PPO-masked gradient estimators as two estimators of the same population gradient.
-
-\paragraph{Categorical contextual bandit.}
-We convert Optdigits into a one-step contextual bandit \citep{alpaydin1998optdigits}. Each handwritten-digit image is a context, the action is a digit in $\{0,\ldots,9\}$, and the reward is one only for the correct class. The policy is a linear softmax classifier. At each policy iteration, we draw 320 contexts from the finite population and sample one action per context from a frozen rollout policy. Since the value of an image under the rollout policy is exactly its probability of the correct class, the advantage is $A=R-Q(y\mid x)$. The observations are divided into eight minibatches of 40 and used for one optimization epoch.
-
-\paragraph{Step-size condition.}
-The smoothness condition is checked rather than assumed numerically. Appendix~\ref{app:bandit} shows that the Optdigits objective is globally $\bar L$-smooth with $\bar L\le\tfrac12\lambda_{\max}(M^{-1}\sum_jx_jx_j^\top)$. In this population, $\lambda_{\max}=11.549$, giving $\bar L=5.775$ and $1/\bar L=0.173$. Every one-step evaluation in Figure~\ref{fig:optdigits-theory} and every learning update in Figure~\ref{fig:optdigits-learning} uses $\eta=0.17$, so the condition $\eta\le1/\bar L$ holds. A separate stress trajectory is used only to generate a broad collection of frozen policy pairs and is not used to evaluate the smoothness guarantee.
-
-\paragraph{Comparing the two estimators.}
-We freeze 30 policy pairs across the observed population-ESS range. At each pair, the finite context-action space gives the exact MSE of the unmodified and PPO estimators for a minibatch of 40. We also draw 80 independent minibatches and apply the first 20 sampled directions with the certified step size.
-
-Figure~\ref{fig:optdigits-theory} shows how PPO changes each link in the theory. In the lowest-support bin, the median ESS is $0.190$, the unmodified MSE is $1311421.7185$, and the PPO MSE is $1311421.1710$. PPO has lower exact MSE at 100.0\% of the states in this bin. In the highest-support bin, the corresponding MSEs are $0.0633$ and $0.0617$, and PPO has lower MSE at only 20.0\% of states. Thus masking reduces estimator risk when support is poor, but adds unnecessary distortion in much of the high-support regime.
-
-For the unmodified estimator, none of the 48 updates with realized squared error below the gradient signal is harmful, while 8.7\% of the 552 updates above that boundary decrease the population objective. The corresponding rates for PPO are 0.0\% among 97 updates below the boundary and 5.8\% among 503 updates above it. These comparisons show that the same error-to-signal boundary governs both estimators, while PPO changes how frequently each estimator enters the unreliable regime.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/optdigits_estimator_comparison.pdf}
-  \caption{Theoretical validation with the unmodified and PPO-masked estimators. (a) Exact gradient MSE across population normalized ESS. PPO lowers MSE in the low-support region, while the unmodified estimator is more reliable in much of the high-support region. (b) Harmful-update rate as realized squared gradient error crosses the population-gradient signal. (c) One-step population change under the certified step size. The population-gradient direction remains improving, while the two sampled estimators exhibit different bias and variance profiles.}
-  \label{fig:optdigits-theory}
-\end{figure}
-
-\paragraph{Learning across all minibatch updates.}
-Figure~\ref{fig:optdigits-learning} restores the full optimization trajectory rather than showing only policy-iteration endpoints. One minibatch update uses 40 images. Five policy iterations with eight minibatches each therefore produce 40 updates, and a fresh rollout is collected after updates 8, 16, 24, and 32. Across 100 paired replications, the final population value is $0.500\pm0.000$ for the unmodified estimator and $0.500\pm0.000$ for PPO, with paired difference $0.000\pm0.000$. Under the theorem-certified step size, the unmodified estimator retains a small advantage because the rollouts remain sufficiently well supported for PPO masking to remove more signal than variance over much of the trajectory.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.72\linewidth]{figures/optdigits_certified_learning.pdf}
-  \caption{Population value across all 40 minibatch updates. Curves show means and 95\% confidence intervals over 100 paired replications. Dotted vertical lines mark collection of a fresh rollout. Every update uses $\eta=0.17$, which satisfies the global smoothness condition derived in Appendix~\ref{app:bandit}.}
-  \label{fig:optdigits-learning}
-\end{figure}
-
-Together, the two figures validate the theoretical interpretation. ESS controls the reliability of the unmodified estimator, PPO changes the bias-variance tradeoff rather than uniformly improving it, and aggressive masking can be unnecessarily restrictive while effective support remains broad. No threshold-based update rule is considered in Optdigits.
+It is computed from the complete-response ratios before any token coefficient
+is modified. A finite batch can miss rare, large ratios and can therefore
+overstate population support, so $\widehat\rho_k$ is an observable diagnostic
+rather than an exact replacement for $\rho_k$ in the theorem. The numerical
+value $0.1$ used below is a prespecified operational threshold. It is neither a
+universal constant nor a threshold transferred from the Gaussian example.
 
 \section{Language-model evidence for delayed failure and recovery}
 \label{sec:llm-experiments}
 
-The contextual bandit isolates the mechanism with an exact oracle. We now ask
-whether the same delayed transition appears in language-model training, where
-the true gradient and population reward change are unavailable. The framework
-predicts that permissive learning should remain effective while normalized
-sequence ESS is high, become vulnerable after effective support deteriorates,
-and benefit from a selective safeguard only in the later regime. The following
-experiments test this trajectory-level prediction.
+The Gaussian example isolates the one-step mechanism with exact population
+quantities. We now ask whether the same delayed transition appears in
+language-model training, where the true gradient and population reward change
+are unavailable. The framework predicts that permissive learning should remain
+effective while normalized sequence ESS is high, become vulnerable after
+effective support deteriorates, and benefit from a selective safeguard only in
+the later regime. The following experiments test this trajectory-level
+prediction.
 
 \subsection{A minimal intervention}
 
@@ -539,27 +832,129 @@ finite-batch mean-squared error is bounded by the contribution scale divided by
 the effective sequence count $N\rho_k$. Smoothness then converts this
 reliability statement into a one-step population-improvement bound. The result
 explains why permissive optimization can remain reliable for an extended period
-and why the guarantee disappears only after effective support has sufficiently
-deteriorated.
+while its effective count dominates its uncertainty, and why the certificate
+becomes inconclusive as support deteriorates relative to the gradient signal.
 
 The same framework clarifies the role of clipping. A low $\rho_k$ diagnoses
 vulnerability of the permissive estimator, but it does not automatically make a
-clipped estimator preferable. Clipping recovers the positive certificate only
-when its variance reduction exceeds its induced bias and lowers total estimator
-risk below the gradient signal. If neither estimator meets this condition, the
-theory points to fresh data rather than stronger clipping.
+clipped estimator preferable. For the clipped estimator to have lower MSE, its
+variance reduction must first exceed the increase in squared bias relative to
+the permissive rule. A stronger full improvement certificate additionally
+requires that any loss of
+population-gradient alignment be smaller than the corresponding reduction in
+the quadratic smoothness penalty. If neither candidate has a positive full
+certificate, neither update is certified and refreshing the rollout is the
+conservative response.
 
-The categorical contextual bandit validates the theoretical links for both the unmodified and PPO-masked estimators. Lower normalized ESS coincides with larger gradient MSE, and harmful updates appear after the realized error reaches the population-gradient signal. PPO reduces MSE in the low-support regime but is more distorting in much of the high-support regime. A separate 40-update learning curve uses a globally certified step size and shows the corresponding loss of learning speed from static masking while support remains broad. No practical threshold-based algorithm is defined in Optdigits. The language-model runs show a related temporal ordering at scale: permissive learning succeeds while effective support is broad, and selective protection becomes useful only after support deteriorates.
-Future work should develop tighter online estimates of the contribution scale
-and test whether the resulting reliability boundary transfers across models,
-rollout sizes, and verifier tasks.
+The exactly solvable Gaussian bandit makes this distinction observable without
+Monte Carlo error. On the reported branch with $N=32$, the MSE oracle switches
+from Raw to PPO at $\rho=0.122756$, but the exact one-step oracle retains Raw
+until $\rho=0.039230$. Below that point PPO is preferable until neither update
+has a positive certificate. The auxiliary Optdigits study in
+Appendix~\ref{app:bandit} confirms related finite-population behavior, while
+the language-model runs show the corresponding temporal ordering at scale:
+permissive learning succeeds while effective support is broad, and selective
+protection becomes useful only after support deteriorates.
+
+The analytic thresholds depend on the gradient signal, batch size, clipping
+radius, and step size; they are not universal constants for language-model
+training. The large-model evidence also cannot recover the unavailable
+population certificate from one trajectory per configuration. Future work
+should estimate the alignment and second-moment terms online and test whether a
+plug-in certificate gate transfers across models, rollout sizes, and verifier
+tasks.
 
 \appendix
 
-\section{Categorical Optdigits protocol}
+\section{Additional categorical validation on Optdigits}
 \label{app:bandit}
 
-This appendix gives the full construction used in Section~\ref{sec:simulation}. The experiment is a one-step contextual bandit with ten categorical actions. It is designed only to validate the ESS-dependent reliability theorem and to compare the unmodified and PPO-masked estimators.
+This appendix records an auxiliary finite-population check of the theoretical
+mechanism. The experiment is a one-step contextual bandit with ten categorical
+actions. Unlike the Gaussian example in Section~\ref{sec:clipping-recovery},
+its moments are obtained by exact enumeration over a real dataset rather than
+closed-form integration. It is not needed to establish the two crossovers in
+the main text.
+
+\subsection{Auxiliary results}
+\label{app:optdigits-results}
+
+We convert Optdigits into a one-step contextual bandit
+\citep{alpaydin1998optdigits}. Each image is a context, the action is a digit,
+and the reward is one only for the correct class. The policy is a linear
+softmax classifier. Each policy iteration draws 320 contexts from a frozen
+rollout policy and uses the resulting observations in eight minibatches of 40.
+The construction and exact finite-population quantities are given below.
+
+We first freeze 30 policy pairs across the observed population-ESS range. At
+each pair, enumeration of the finite context--action space gives the exact MSE
+of the Raw and PPO estimators for a minibatch of 40. We also draw 80 independent
+minibatches and apply the first 20 sampled directions with the globally valid
+step size $\eta=0.17$. In the lowest-support bin, the median ESS is $0.190$ and
+the Raw and PPO MSEs are $1311421.7185$ and $1311421.1710$. PPO has lower MSE
+at every state in this bin. In the highest-support bin, the corresponding MSEs
+are $0.0633$ and $0.0617$, and PPO has lower MSE at only 20.0\% of states.
+
+The error-to-signal boundary also predicts harmful sampled updates. For Raw,
+none of the 48 updates with realized squared error below the gradient signal is
+harmful, whereas 8.7\% of the 552 updates above the boundary decrease the
+population objective. The corresponding PPO rates are 0.0\% among 97 updates
+below the boundary and 5.8\% among 503 updates above it.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/optdigits_estimator_comparison.pdf}
+  \caption{Auxiliary Optdigits comparison of Raw and PPO. (a) Exact gradient
+  MSE across population normalized ESS. (b) Harmful-update rate as realized
+  squared gradient error crosses the population-gradient signal. (c) One-step
+  population change under the globally valid step size.}
+  \label{fig:optdigits-theory}
+\end{figure}
+
+A second deterministic path compares the two statewise oracles directly. At
+$\rho=0.5577$, PPO has lower MSE, but its MSE reduction is smaller than the
+retained-update requirement in
+Equation~\eqref{eq:raw-ppo-certificate-crossover}. Raw therefore has the
+stronger positive certificate. At $\rho=0.5489$, the inequality reverses and
+the safe certificate oracle switches to PPO. PPO remains certified down to
+$\rho=0.5363$, after which both certificates are nonpositive. This path is a
+common-state diagnostic rather than a learning trajectory.
+
+On the displayed low-support branch, a pairwise ESS threshold at
+$\rho=0.54893$ matches all 490 interleaved evaluation states. Adding the null
+choice gives a Raw--PPO--no-update ESS rule that matches 489 of 490 states.
+The complete path contains a small disconnected PPO interval, so the same
+three-way rule has balanced accuracy $0.778$ and PPO recall $3/9$ over the full
+path. This limitation is why the analytic Gaussian construction, rather than
+Optdigits, carries the main-text oracle claim.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/optdigits_full_certificate.pdf}
+  \caption{Auxiliary exact common-state Optdigits comparison for an iid
+  minibatch of $N=320$. (a) MSE ordering changes before fixed-step ordering.
+  (b) The safe certificate oracle selects Raw, then PPO, and finally no update
+  on the displayed low-support branch. (c) PPO has the stronger full
+  certificate only when its MSE reduction exceeds the retained-update
+  requirement.}
+  \label{fig:optdigits-full-certificate}
+\end{figure}
+
+Finally, Figure~\ref{fig:optdigits-learning} reports a separate 40-update
+learning curve with a fresh rollout every eight updates. Across 100 paired
+replications, Raw retains a small early advantage because support remains broad
+enough for PPO masking to remove more useful signal than variance. Both methods
+finish at population value $0.500$ to the reported precision. No oracle or ESS
+gate is applied on this trajectory.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.72\linewidth]{figures/optdigits_certified_learning.pdf}
+  \caption{Auxiliary Optdigits population value across 40 minibatch updates.
+  Curves show means and 95\% confidence intervals over 100 paired replications.
+  Dotted vertical lines mark collection of a fresh rollout.}
+  \label{fig:optdigits-learning}
+\end{figure}
 
 \subsection{Finite population and policy}
 
@@ -584,6 +979,7 @@ The reward is $R(x_j,a)=\mathbf 1\{a=y_j\}$, so the exact population objective a
 Both quantities are evaluated by summing over all images. The policy is initialized by 400 full-population cross-entropy steps with step size $0.5$, after which the fitted weights are multiplied by $0.35$.
 
 \subsection{A global smoothness certificate}
+\label{app:optdigits-smoothness}
 
 Let $p=\operatorname{softmax}(z)$ and $q=p_y$. The Hessian of one correct-class probability with respect to the logits is
 \begin{equation}
@@ -666,6 +1062,51 @@ $1.000$ & $0.0633$ & $0.0617$ & $0.0$ & $0.0$ \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\subsection{Common-state full-certificate comparison}
+
+The full-certificate experiment is a separate deterministic construction. It
+uses only the official training split, containing $3{,}823$ contexts. A linear
+classifier $W_{\rm fit}$ is obtained with the same 400 full-population
+cross-entropy steps as above. The frozen rollout and common-state path are
+\begin{equation}
+ Q=\pi_{0.2W_{\rm fit}},
+ \qquad
+ \theta(\lambda)=0.2W_{\rm fit}
+ +\lambda(1.0-0.2)W_{\rm fit},
+ \qquad \lambda\in[0,2.5].
+ \label{eq:categorical-certificate-path}
+\end{equation}
+We evaluate 1,001 equally spaced values of $\lambda$. This path is chosen to
+provide common policy states across a broad support range; it is not generated
+by repeatedly applying either estimator.
+
+For every state, we enumerate all $3{,}823\times10$ context--action pairs. This
+gives the exact $g$, $\mu_u$, $s_u$, and $m_u$ for both Raw and the
+advantage-dependent PPO mask, with iid minibatch size $N=320$. We then compute
+\begin{equation}
+ B_u(\eta)=\eta g^\top\mu_u-\frac{L\eta^2}{2}s_u,
+ \qquad
+ L=\frac12\lambda_{\max}\left(
+ \frac1{3{,}823}\sum_jx_jx_j^\top
+ \right)=5.801469,
+ \label{eq:categorical-exact-full-certificate}
+\end{equation}
+using $\eta=0.17$ and PPO radius $0.2$. Thus $\eta L=0.986250<1$.
+The estimator-risk oracle minimizes $m_u$, the forced certificate oracle
+maximizes $B_u$, and the safe certificate oracle additionally includes a null
+update with certificate zero and resolves nonpositive choices in favor of the
+null update. All three are statewise definitions; none observes future values
+or optimizes cumulative return.
+
+For the path-specific ESS diagnostic, we restrict to $\lambda\ge0.05$, assign
+alternating grid points to calibration and evaluation, and fit monotone ESS
+cuts on the calibration points. This interleaved split checks interpolation
+between adjacent states on the same deterministic path. It is deliberately not
+described as validation on an independent trajectory. The complete path,
+including the small disconnected high-ESS PPO interval, is retained in the
+reported data artifact even though Figure~\ref{fig:optdigits-full-certificate}
+focuses on the main low-support branch.
 
 \subsection{Full certified learning curve}
 
@@ -863,7 +1304,7 @@ Lemma~\ref{lem:rho-gradient-reliability} shows that the event
 \end{equation}
 has probability at least $1-\delta$. On this event, apply Lemma~\ref{lem:gradient-error-progress} with $\theta=\theta_k$, $\widehat g=\widehat g_k$, $\varepsilon=\|f_k\|_\infty/\sqrt{\delta N\rho_k}$, and $L=L_k$. The resulting inequality is exactly Equation~\eqref{eq:permissive-reliability}.
 
-\subsection{Risk comparison for token coefficient rules}
+\subsection{Risk and certificate comparisons for token coefficient rules}
 
 For a coefficient rule $u$, let $\psi_{k,i}(u):=\psi_k(u;Z_i)$. Add and subtract its expectation:
 \begin{equation}
@@ -896,7 +1337,7 @@ where the cross term is zero and independence gives the factor $1/N$. Therefore,
 \end{align}
 which proves Proposition~\ref{prop:clipping-crossover}.
 
-It remains to connect total risk to the expected policy-improvement certificate. For any random estimate $\widehat g$ of $g_k$ and any $0<\eta_k\le1/L_k$, smoothness gives
+It remains to connect total risk to the expected policy-improvement certificate. For any random estimate $\widehat g$ of $g_k$, smoothness gives
 \begin{equation}
  J(\theta_k+\eta_k\widehat g)-J(\theta_k)
  \ge
@@ -904,25 +1345,59 @@ It remains to connect total risk to the expected policy-improvement certificate.
  -\frac{L_k\eta_k^2}{2}\|\widehat g\|_2^2.
  \label{eq:fixed-step-smoothness}
 \end{equation}
-The polarization identity gives
+Taking expectation in Equation~\eqref{eq:fixed-step-smoothness}, with
+$\mu=\E[\widehat g]$ and $s=\E\|\widehat g\|_2^2$, gives
 \begin{equation}
- 2g_k^\top\widehat g
- =\|g_k\|_2^2+\|\widehat g\|_2^2-\|\widehat g-g_k\|_2^2.
+ \E[J(\theta_k+\eta_k\widehat g)-J(\theta_k)]
+ \ge
+ \eta_k g_k^\top\mu-\frac{L_k\eta_k^2}{2}s.
+ \label{eq:fixed-step-expected}
+\end{equation}
+The polarization identity, followed by expectation, gives
+\begin{equation}
+ 2g_k^\top\mu
+ =\|g_k\|_2^2+s-\E\|\widehat g-g_k\|_2^2.
  \label{eq:polarization}
 \end{equation}
-Substituting this identity and using $\eta_k\le1/L_k$ yields
+Setting $\widehat g=\widehat g_k(u)$ in
+Equations~\eqref{eq:fixed-step-expected}--\eqref{eq:polarization} prove
+Equations~\eqref{eq:full-token-rule-progress} and
+\eqref{eq:full-certificate-polarized}. When $0<\eta_k\le1/L_k$, the second
+term in Equation~\eqref{eq:full-certificate-polarized} is nonnegative, so
+dropping it proves Equation~\eqref{eq:token-rule-progress}.
+
+For two rules, subtracting their full certificates gives
 \begin{align}
- J(\theta_k+\eta_k\widehat g)-J(\theta_k)
- &\ge
- \frac{\eta_k}{2}\left\{\|g_k\|_2^2-\|\widehat g-g_k\|_2^2\right\}
+ B_k(u_2;\eta_k)-B_k(u_1;\eta_k)
+ &=\frac{\eta_k}{2}\bigl[m_k(u_1)-m_k(u_2)\bigr]
  \nonumber\\
- &\quad+\frac{\eta_k}{2}(1-L_k\eta_k)\|\widehat g\|_2^2
- \nonumber\\
- &\ge
- \frac{\eta_k}{2}\left\{\|g_k\|_2^2-\|\widehat g-g_k\|_2^2\right\}.
- \label{eq:fixed-step-polarized}
+ &\quad+\frac{\eta_k}{2}(1-L_k\eta_k)
+ \bigl[s_k(u_2)-s_k(u_1)\bigr].
+ \label{eq:certificate-crossover-proof}
 \end{align}
-Taking expectation and setting $\widehat g=\widehat g_k(u)$ proves Equation~\eqref{eq:token-rule-progress}. The lower bound is positive exactly when $m_k(u)<\|g_k\|_2^2$. Applying this statement to $u_1$ and $u_2$ proves Corollary~\ref{cor:clipping-needed}.
+Since $\eta_k>0$, the right-hand side is positive exactly under
+Equation~\eqref{eq:certificate-crossover}, proving
+the first equivalence in Corollary~\ref{cor:certificate-crossover}. Subtracting
+the first expression for $B_k$ in Theorem~\ref{thm:fixed-step-certificate}
+instead gives
+\begin{align}
+ B_k(u_2;\eta_k)-B_k(u_1;\eta_k)
+ &=\eta_k g_k^\top\{\mu_k(u_2)-\mu_k(u_1)\}
+ \nonumber\\
+ &\quad-\frac{L_k\eta_k^2}{2}\{s_k(u_2)-s_k(u_1)\}.
+ \label{eq:certificate-alignment-proof}
+\end{align}
+Its positivity is equivalent to
+Equation~\eqref{eq:certificate-crossover-alignment}. Finally,
+Equation~\eqref{eq:full-certificate-polarized} implies
+\begin{equation}
+ B_k(u;\eta_k)>0
+ \quad\Longleftrightarrow\quad
+ m_k(u)<\|g_k\|_2^2+(1-L_k\eta_k)s_k(u).
+ \label{eq:positive-full-certificate-proof}
+\end{equation}
+Applying this equivalence to $u_2$ and $u_1$ proves
+Corollary~\ref{cor:clipping-needed}.
 
 \subsection{Intact prompt groups}
 

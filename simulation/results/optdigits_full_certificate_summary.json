@@ -1,0 +1,408 @@
+{
+  "protocol": {
+    "population": "official Optdigits training split only",
+    "population_size": 3823,
+    "path": "Q=rollout_scale*W_fit; theta(t)=Q+t*(target_scale*W_fit-Q)",
+    "classifier_steps": 400,
+    "classifier_learning_rate": 0.5,
+    "rollout_scale": 0.2,
+    "target_scale": 1.0,
+    "path_scale_min": 0.0,
+    "path_scale_max": 2.5,
+    "path_points": 1001,
+    "batch_size": 320,
+    "ppo_epsilon": 0.2,
+    "eta": 0.17,
+    "feature_covariance_lambda_max": 11.602938364921872,
+    "global_smoothness_L": 5.801469182460936,
+    "eta_max_1_over_L": 0.17237013048749975,
+    "eta_times_L": 0.9862497610183593,
+    "raw_ppo_tie_tolerance": 1e-12,
+    "raw_ppo_tie_break": "Raw is the deterministic stored label; explicit tie flags and strict-win counts are also reported",
+    "softmax_clip_guard": "abort if the inherited -50 shifted-logit clip is active",
+    "moments": "exact enumeration of all context-action pairs",
+    "random_seeds": "none; deterministic controlled-state path",
+    "interpretation": "statewise estimator and certificate comparison, not a cumulative-return oracle"
+  },
+  "all_path_counts": {
+    "states": 1001,
+    "mse_ties": 10,
+    "certificate_ties": 10,
+    "strict_mse_raw": 145,
+    "strict_mse_ppo": 846,
+    "strict_certificate_raw": 149,
+    "strict_certificate_ppo": 842,
+    "safe_raw": 159,
+    "safe_ppo": 17,
+    "safe_noop": 825,
+    "safe_raw_fraction": 0.15884115884115885,
+    "safe_ppo_fraction": 0.016983016983016984,
+    "safe_noop_fraction": 0.8241758241758241
+  },
+  "all_path_mse_oracle_runs": [
+    {
+      "label": "raw",
+      "points": 10,
+      "start_scale": 0.0,
+      "end_scale": 0.0225,
+      "start_rho": 1.0,
+      "end_rho": 0.9970899125564956
+    },
+    {
+      "label": "ppo",
+      "points": 10,
+      "start_scale": 0.025,
+      "end_scale": 0.0475,
+      "start_rho": 0.9964080495393397,
+      "end_rho": 0.9871095802747657
+    },
+    {
+      "label": "raw",
+      "points": 145,
+      "start_scale": 0.05,
+      "end_scale": 0.41000000000000003,
+      "start_rho": 0.9857328108338138,
+      "end_rho": 0.559985247179826
+    },
+    {
+      "label": "ppo",
+      "points": 836,
+      "start_scale": 0.41250000000000003,
+      "end_scale": 2.5,
+      "start_rho": 0.5577332669203758,
+      "end_rho": 0.2747403388805485
+    }
+  ],
+  "all_path_certificate_oracle_runs": [
+    {
+      "label": "raw",
+      "points": 10,
+      "start_scale": 0.0,
+      "end_scale": 0.0225,
+      "start_rho": 1.0,
+      "end_rho": 0.9970899125564956
+    },
+    {
+      "label": "ppo",
+      "points": 10,
+      "start_scale": 0.025,
+      "end_scale": 0.0475,
+      "start_rho": 0.9964080495393397,
+      "end_rho": 0.9871095802747657
+    },
+    {
+      "label": "raw",
+      "points": 149,
+      "start_scale": 0.05,
+      "end_scale": 0.42,
+      "start_rho": 0.9857328108338138,
+      "end_rho": 0.5510920875534251
+    },
+    {
+      "label": "ppo",
+      "points": 832,
+      "start_scale": 0.4225,
+      "end_scale": 2.5,
+      "start_rho": 0.5489162551432212,
+      "end_rho": 0.2747403388805485
+    }
+  ],
+  "all_path_safe_oracle_runs": [
+    {
+      "label": "raw",
+      "points": 10,
+      "start_scale": 0.0,
+      "end_scale": 0.0225,
+      "start_rho": 1.0,
+      "end_rho": 0.9970899125564956
+    },
+    {
+      "label": "ppo",
+      "points": 10,
+      "start_scale": 0.025,
+      "end_scale": 0.0475,
+      "start_rho": 0.9964080495393397,
+      "end_rho": 0.9871095802747657
+    },
+    {
+      "label": "raw",
+      "points": 149,
+      "start_scale": 0.05,
+      "end_scale": 0.42,
+      "start_rho": 0.9857328108338138,
+      "end_rho": 0.5510920875534251
+    },
+    {
+      "label": "ppo",
+      "points": 7,
+      "start_scale": 0.4225,
+      "end_scale": 0.4375,
+      "start_rho": 0.5489162551432212,
+      "end_rho": 0.5362512197575715
+    },
+    {
+      "label": "noop",
+      "points": 825,
+      "start_scale": 0.44,
+      "end_scale": 2.5,
+      "start_rho": 0.5342042739048762,
+      "end_rho": 0.2747403388805485
+    }
+  ],
+  "high_ess_ppo_blip": {
+    "definition": "certificate-oracle PPO states below focused-path minimum; gap is B_PPO minus B_Raw",
+    "states": 10,
+    "start": {
+      "path_scale": 0.025,
+      "population_rho": 0.9964080495393397,
+      "population_value": 0.2879010021164254,
+      "signal_sq": 0.01013884333260256,
+      "raw_alignment": 0.01013884333260256,
+      "ppo_alignment": 0.010138734542746396,
+      "raw_second_moment": 0.017198866414389915,
+      "ppo_second_moment": 0.01719862065863229,
+      "raw_mse": 0.007060023081787355,
+      "ppo_mse": 0.007059994905742054,
+      "mse_reduction": 2.8176045300740138e-08,
+      "mse_tie": 0.0,
+      "certificate_requirement": 3.3792003984721137e-09,
+      "raw_certificate": 0.00028180124580924246,
+      "ppo_certificate": 0.000281803353541059,
+      "certificate_gap_ppo_minus_raw": 2.107731816554728e-09,
+      "certificate_tie": 0.0,
+      "mse_oracle": "ppo",
+      "certificate_oracle": "ppo",
+      "safe_oracle": "ppo"
+    },
+    "end": {
+      "path_scale": 0.0475,
+      "population_rho": 0.9871095802747657,
+      "population_value": 0.3084026798489512,
+      "signal_sq": 0.010851631500915105,
+      "raw_alignment": 0.010851631500915105,
+      "ppo_alignment": 0.010475775465790493,
+      "raw_second_moment": 0.018137132985686054,
+      "ppo_second_moment": 0.017318833816393528,
+      "raw_mse": 0.007285501484770952,
+      "ppo_mse": 0.007218914385727648,
+      "mse_reduction": 6.65870990433047e-05,
+      "mse_tie": 0.0,
+      "certificate_requirement": 1.1251809136250324e-05,
+      "raw_certificate": 0.000324319193976827,
+      "ppo_certificate": 0.0003290226936189262,
+      "certificate_gap_ppo_minus_raw": 4.7034996420991775e-06,
+      "certificate_tie": 0.0,
+      "mse_oracle": "ppo",
+      "certificate_oracle": "ppo",
+      "safe_oracle": "ppo"
+    },
+    "certificate_gap_min": 2.107731816554728e-09,
+    "certificate_gap_max": 4.7034996420991775e-06
+  },
+  "focused_path_minimum_scale": 0.05,
+  "focused_path_counts": {
+    "states": 981,
+    "safe_raw": 149,
+    "safe_ppo": 7,
+    "safe_noop": 825,
+    "safe_raw_fraction": 0.15188583078491336,
+    "safe_ppo_fraction": 0.007135575942915392,
+    "safe_noop_fraction": 0.8409785932721713
+  },
+  "focused_path_mse_oracle_runs": [
+    {
+      "label": "raw",
+      "points": 145,
+      "start_scale": 0.05,
+      "end_scale": 0.41000000000000003,
+      "start_rho": 0.9857328108338138,
+      "end_rho": 0.559985247179826
+    },
+    {
+      "label": "ppo",
+      "points": 836,
+      "start_scale": 0.41250000000000003,
+      "end_scale": 2.5,
+      "start_rho": 0.5577332669203758,
+      "end_rho": 0.2747403388805485
+    }
+  ],
+  "focused_path_certificate_oracle_runs": [
+    {
+      "label": "raw",
+      "points": 149,
+      "start_scale": 0.05,
+      "end_scale": 0.42,
+      "start_rho": 0.9857328108338138,
+      "end_rho": 0.5510920875534251
+    },
+    {
+      "label": "ppo",
+      "points": 832,
+      "start_scale": 0.4225,
+      "end_scale": 2.5,
+      "start_rho": 0.5489162551432212,
+      "end_rho": 0.2747403388805485
+    }
+  ],
+  "focused_path_safe_oracle_runs": [
+    {
+      "label": "raw",
+      "points": 149,
+      "start_scale": 0.05,
+      "end_scale": 0.42,
+      "start_rho": 0.9857328108338138,
+      "end_rho": 0.5510920875534251
+    },
+    {
+      "label": "ppo",
+      "points": 7,
+      "start_scale": 0.4225,
+      "end_scale": 0.4375,
+      "start_rho": 0.5489162551432212,
+      "end_rho": 0.5362512197575715
+    },
+    {
+      "label": "noop",
+      "points": 825,
+      "start_scale": 0.44,
+      "end_scale": 2.5,
+      "start_rho": 0.5342042739048762,
+      "end_rho": 0.2747403388805485
+    }
+  ],
+  "ppo_lower_mse_raw_higher_certificate_runs": [
+    {
+      "points": 4,
+      "start_scale": 0.41250000000000003,
+      "end_scale": 0.42,
+      "start_rho": 0.5577332669203758,
+      "end_rho": 0.5510920875534251,
+      "min_raw_certificate": 7.285908574414376e-06,
+      "min_ppo_certificate": 4.206825680747115e-06
+    }
+  ],
+  "first_ppo_lower_mse_raw_higher_certificate": {
+    "path_scale": 0.41250000000000003,
+    "population_rho": 0.5577332669203758,
+    "population_value": 0.6326137852711524,
+    "signal_sq": 0.007029741168474704,
+    "raw_alignment": 0.007029741168474704,
+    "ppo_alignment": 0.0002295822612486486,
+    "raw_second_moment": 0.014014584509399231,
+    "ppo_second_moment": 0.0003941582998152743,
+    "raw_mse": 0.0069848433409245275,
+    "ppo_mse": 0.0069647349457926805,
+    "mse_reduction": 2.0108395131846965e-05,
+    "mse_tie": 0.0,
+    "certificate_requirement": 0.00018728411541358254,
+    "raw_certificate": 2.0196145671539387e-05,
+    "ppo_certificate": 5.986209447591811e-06,
+    "certificate_gap_ppo_minus_raw": -1.4209936223947576e-05,
+    "certificate_tie": 0.0,
+    "mse_oracle": "ppo",
+    "certificate_oracle": "raw",
+    "safe_oracle": "raw"
+  },
+  "focused_first_mse_ppo": {
+    "path_scale": 0.41250000000000003,
+    "population_rho": 0.5577332669203758,
+    "population_value": 0.6326137852711524,
+    "signal_sq": 0.007029741168474704,
+    "raw_alignment": 0.007029741168474704,
+    "ppo_alignment": 0.0002295822612486486,
+    "raw_second_moment": 0.014014584509399231,
+    "ppo_second_moment": 0.0003941582998152743,
+    "raw_mse": 0.0069848433409245275,
+    "ppo_mse": 0.0069647349457926805,
+    "mse_reduction": 2.0108395131846965e-05,
+    "mse_tie": 0.0,
+    "certificate_requirement": 0.00018728411541358254,
+    "raw_certificate": 2.0196145671539387e-05,
+    "ppo_certificate": 5.986209447591811e-06,
+    "certificate_gap_ppo_minus_raw": -1.4209936223947576e-05,
+    "certificate_tie": 0.0,
+    "mse_oracle": "ppo",
+    "certificate_oracle": "raw",
+    "safe_oracle": "raw"
+  },
+  "focused_first_certificate_ppo": {
+    "path_scale": 0.4225,
+    "population_rho": 0.5489162551432212,
+    "population_value": 0.6396462927669027,
+    "signal_sq": 0.0067451264433859345,
+    "raw_alignment": 0.0067451264433859345,
+    "ppo_alignment": 0.00020839199781876638,
+    "raw_second_moment": 0.013641940278343057,
+    "ppo_second_moment": 0.0003834838394220255,
+    "raw_mse": 0.006896813834957123,
+    "ppo_mse": 0.006711826287170428,
+    "mse_reduction": 0.00018498754778669552,
+    "mse_tie": 0.0,
+    "certificate_requirement": 0.0001823069445628376,
+    "raw_certificate": 3.0508665314905436e-06,
+    "ppo_certificate": 3.278717805518371e-06,
+    "certificate_gap_ppo_minus_raw": 2.278512740278276e-07,
+    "certificate_tie": 0.0,
+    "mse_oracle": "ppo",
+    "certificate_oracle": "ppo",
+    "safe_oracle": "ppo"
+  },
+  "focused_first_safe_ppo": {
+    "path_scale": 0.4225,
+    "population_rho": 0.5489162551432212,
+    "population_value": 0.6396462927669027,
+    "signal_sq": 0.0067451264433859345,
+    "raw_alignment": 0.0067451264433859345,
+    "ppo_alignment": 0.00020839199781876638,
+    "raw_second_moment": 0.013641940278343057,
+    "ppo_second_moment": 0.0003834838394220255,
+    "raw_mse": 0.006896813834957123,
+    "ppo_mse": 0.006711826287170428,
+    "mse_reduction": 0.00018498754778669552,
+    "mse_tie": 0.0,
+    "certificate_requirement": 0.0001823069445628376,
+    "raw_certificate": 3.0508665314905436e-06,
+    "ppo_certificate": 3.278717805518371e-06,
+    "certificate_gap_ppo_minus_raw": 2.278512740278276e-07,
+    "certificate_tie": 0.0,
+    "mse_oracle": "ppo",
+    "certificate_oracle": "ppo",
+    "safe_oracle": "ppo"
+  },
+  "focused_first_noop": {
+    "path_scale": 0.44,
+    "population_rho": 0.5342042739048762,
+    "population_value": 0.6516224770683071,
+    "signal_sq": 0.006261140982418671,
+    "raw_alignment": 0.00626114098241867,
+    "ppo_alignment": 0.0001832382840876645,
+    "raw_second_moment": 0.01300210298436329,
+    "ppo_second_moment": 0.0003735036111984178,
+    "raw_mse": 0.0067409620019446195,
+    "ppo_mse": 0.006268168025441758,
+    "mse_reduction": 0.0004727939765028612,
+    "mse_tie": 0.0,
+    "certificate_requirement": 0.00017364625938441543,
+    "raw_certificate": -2.5588314679299328e-05,
+    "ppo_certificate": -1.607587242313967e-07,
+    "certificate_gap_ppo_minus_raw": 2.542755595506793e-05,
+    "certificate_tie": 0.0,
+    "mse_oracle": "ppo",
+    "certificate_oracle": "ppo",
+    "safe_oracle": "noop"
+  },
+  "numerical_checks": {
+    "max_gradient_check_abs": 0.0,
+    "max_mse_identity_abs": 8.673617379884035e-18,
+    "max_certificate_identity_abs": 9.215718466126788e-19,
+    "max_raw_bias_sq": 2.8434473409837823e-34,
+    "finite_difference_scales": [
+      0.0,
+      1.25,
+      2.5
+    ],
+    "max_finite_difference_directional_error": 9.054996444497754e-12,
+    "minimum_shifted_logit": -34.83429099984908
+  }
+}

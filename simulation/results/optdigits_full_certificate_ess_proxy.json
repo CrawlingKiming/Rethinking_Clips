@@ -1,0 +1,191 @@
+{
+  "full_path": {
+    "scope": {
+      "name": "full_path",
+      "selection": "all controlled states, including the high-ESS PPO blip",
+      "states": 1001,
+      "path_scale_min": 0.0,
+      "path_scale_max": 2.5,
+      "split": "alternating states within this scope; even positions calibrate and odd positions evaluate",
+      "limitation": "path-specific held-out interpolation, not validation on an independent trajectory"
+    },
+    "forced_raw_ppo": {
+      "rule": "choose PPO when rho is below threshold; otherwise Raw",
+      "rho_threshold": 0.548925636140758,
+      "calibration": {
+        "states": 501,
+        "accuracy": 0.9900199600798403,
+        "balanced_accuracy": 0.994061757719715,
+        "recall": {
+          "raw": 1.0,
+          "ppo": 0.9881235154394299
+        },
+        "truth_counts": {
+          "raw": 80,
+          "ppo": 421
+        },
+        "prediction_counts": {
+          "raw": 85,
+          "ppo": 416
+        }
+      },
+      "evaluation": {
+        "states": 500,
+        "accuracy": 0.99,
+        "balanced_accuracy": 0.994061757719715,
+        "recall": {
+          "raw": 1.0,
+          "ppo": 0.9881235154394299
+        },
+        "truth_counts": {
+          "raw": 79,
+          "ppo": 421
+        },
+        "prediction_counts": {
+          "raw": 84,
+          "ppo": 416
+        }
+      }
+    },
+    "safe_three_action": {
+      "rule": "Raw at high rho, PPO at intermediate rho, and no-op at low rho",
+      "raw_if_rho_at_least": 0.548925636140758,
+      "noop_if_rho_below": 0.536260247353989,
+      "calibration": {
+        "states": 501,
+        "accuracy": 0.9900199600798403,
+        "balanced_accuracy": 0.7916666666666666,
+        "recall": {
+          "raw": 1.0,
+          "ppo": 0.375,
+          "noop": 1.0
+        },
+        "truth_counts": {
+          "raw": 80,
+          "ppo": 8,
+          "noop": 413
+        },
+        "prediction_counts": {
+          "raw": 85,
+          "ppo": 3,
+          "noop": 413
+        }
+      },
+      "evaluation": {
+        "states": 500,
+        "accuracy": 0.988,
+        "balanced_accuracy": 0.7777777777777777,
+        "recall": {
+          "raw": 1.0,
+          "ppo": 0.3333333333333333,
+          "noop": 1.0
+        },
+        "truth_counts": {
+          "raw": 79,
+          "ppo": 9,
+          "noop": 412
+        },
+        "prediction_counts": {
+          "raw": 84,
+          "ppo": 3,
+          "noop": 413
+        }
+      }
+    }
+  },
+  "focused_main_branch": {
+    "scope": {
+      "name": "focused_main_branch",
+      "selection": "controlled states with path_scale >= 0.05",
+      "states": 981,
+      "path_scale_min": 0.05,
+      "path_scale_max": 2.5,
+      "split": "alternating states within this scope; even positions calibrate and odd positions evaluate",
+      "limitation": "path-specific held-out interpolation, not validation on an independent trajectory"
+    },
+    "forced_raw_ppo": {
+      "rule": "choose PPO when rho is below threshold; otherwise Raw",
+      "rho_threshold": 0.548925636140758,
+      "calibration": {
+        "states": 491,
+        "accuracy": 1.0,
+        "balanced_accuracy": 1.0,
+        "recall": {
+          "raw": 1.0,
+          "ppo": 1.0
+        },
+        "truth_counts": {
+          "raw": 75,
+          "ppo": 416
+        },
+        "prediction_counts": {
+          "raw": 75,
+          "ppo": 416
+        }
+      },
+      "evaluation": {
+        "states": 490,
+        "accuracy": 1.0,
+        "balanced_accuracy": 1.0,
+        "recall": {
+          "raw": 1.0,
+          "ppo": 1.0
+        },
+        "truth_counts": {
+          "raw": 74,
+          "ppo": 416
+        },
+        "prediction_counts": {
+          "raw": 74,
+          "ppo": 416
+        }
+      }
+    },
+    "safe_three_action": {
+      "rule": "Raw at high rho, PPO at intermediate rho, and no-op at low rho",
+      "raw_if_rho_at_least": 0.548925636140758,
+      "noop_if_rho_below": 0.536260247353989,
+      "calibration": {
+        "states": 491,
+        "accuracy": 1.0,
+        "balanced_accuracy": 1.0,
+        "recall": {
+          "raw": 1.0,
+          "ppo": 1.0,
+          "noop": 1.0
+        },
+        "truth_counts": {
+          "raw": 75,
+          "ppo": 3,
+          "noop": 413
+        },
+        "prediction_counts": {
+          "raw": 75,
+          "ppo": 3,
+          "noop": 413
+        }
+      },
+      "evaluation": {
+        "states": 490,
+        "accuracy": 0.9979591836734694,
+        "balanced_accuracy": 0.9166666666666666,
+        "recall": {
+          "raw": 1.0,
+          "ppo": 0.75,
+          "noop": 1.0
+        },
+        "truth_counts": {
+          "raw": 74,
+          "ppo": 4,
+          "noop": 412
+        },
+        "prediction_counts": {
+          "raw": 74,
+          "ppo": 3,
+          "noop": 413
+        }
+      }
+    }
+  },
+  "comparison_note": "The two audits expose sensitivity to excluding the small high-ESS mask-boundary branch. Neither establishes transfer to an independent optimization trajectory."
+}
