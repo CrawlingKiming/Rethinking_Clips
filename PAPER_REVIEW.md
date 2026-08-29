@@ -2,9 +2,9 @@
 
 ## Core argument
 
-1. A fixed rollout remains useful only while it retains effective support for
-   the current policy.
-2. Normalized sequence ESS isolates the likelihood-ratio contribution to the
+1. A rollout batch remains useful within an optimization phase only while it
+   retains effective support for the current policy.
+2. Normalized ESS isolates the explicit likelihood-ratio contribution to the
    finite-sample error of the Raw policy-gradient estimator.
 3. Gradient accuracy controls whether the next population update can be
    certified through a smoothness argument.
@@ -21,16 +21,15 @@
 
 | Order | Role | Reader takeaway |
 |---|---|---|
-| Introduction | Delayed failure and thesis | Effective support, rather than update count alone, determines whether a fixed rollout remains useful. |
+| Introduction | Delayed failure and thesis | Effective support, rather than update count alone, determines when rollout data continue to support a reliable update. |
 | Section 2 | Related work | Finite-sample reliability complements policy-deviation guarantees. |
-| Section 3 | Preliminaries | Sequence likelihood ratios define normalized population ESS. |
-| Section 4.1 | ESS to gradient error | The mismatch-driven error radius scales as `(N rho)^(-1/2)`. |
-| Section 4.2 | Gradient error to improvement | A reliable sampled direction yields a positive population-improvement certificate. |
-| Section 4.3 | Permissive reliability | Raw updates remain certifiable while signal exceeds the ESS-dependent uncertainty radius. |
-| Section 4.4 | Two estimator crossovers | The MSE oracle and full-certificate oracle can disagree because masking removes useful alignment. |
-| Gaussian example | Exact one-step mechanism | With `N=32`, PPO lowers MSE before it becomes the better update; the safe oracle has explicit ESS regimes on the displayed branch. |
-| Section 5 | Large-model evidence | Permissive learning succeeds at high ESS and selective protection activates after ESS deteriorates. |
-| Appendix A | Auxiliary Optdigits validation | Exact finite-population enumeration corroborates the mechanism without carrying the main oracle claim. |
+| Section 3 | Preliminaries | Factor ratios, scores, advantages, Raw, PPO, and normalized population ESS are defined before the theory uses them. |
+| Section 4.1 | Raw reliability | ESS enters the Raw error radius through `(N rho)^(-1/2)`, and smoothness turns that radius into a realized one-step guarantee. |
+| Section 4.2 | Estimator and update selection | MSE ranks estimators; the full certificate ranks their fixed-step updates by accounting for alignment and update scale. |
+| Section 5 | Exact one-step mechanism | With `N=32`, PPO lowers MSE before it becomes the better update; the safe oracle has explicit ESS regimes on the evaluated branch. |
+| Section 6 | Large-model evidence | Permissive learning succeeds at high ESS and selective protection activates after ESS deteriorates. |
+| Appendix A--B | Exact details | Gaussian moment calculations and estimator-specific coefficient rules are removed from the main argument. |
+| Appendix C | Auxiliary Optdigits validation | Exact finite-population enumeration corroborates the mechanism without carrying the main oracle claim. |
 | Remaining appendices | Diagnostics and proofs | Reproduce the empirical details and prove every theoretical result. |
 
 The causal chain is:
@@ -49,6 +48,20 @@ The causal chain is:
 | Optdigits exhibits related finite-population behavior. | Exact context--action enumeration and auxiliary appendix figures. | Supported computationally |
 | Selective safeguards improve late-stage large-model behavior. | Reported Qwen3-30B-A3B runs with prespecified sample-ESS threshold `0.1`. | Supported for the reported configurations |
 | One universal ESS threshold applies across settings. | Thresholds differ across the Gaussian and language-model settings. | Explicitly rejected |
+
+## Writing standard used in the revision
+
+- Each section answers one reader question before introducing algebra.
+- Every theorem is preceded by its purpose and followed by its operational
+  meaning.
+- Definitions appear in the preliminaries when more than one later result uses
+  them.
+- The main text carries the argument; derivations and implementation-specific
+  coefficient rules sit in the appendix.
+- Scope is stated once at the relevant boundary instead of repeated as
+  defensive caveats.
+- Paragraphs follow claim, evidence, and implication, with one primary claim
+  per paragraph.
 
 ## Self-review
 
