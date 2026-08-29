@@ -31,8 +31,7 @@
 \newcommand{\Cov}{\operatorname{Cov}}
 \newcommand{\Var}{\operatorname{Var}}
 
-\title{\bf When Does Permissive Policy Optimization Fail?\\
-Effective Sample Size and Gradient Reliability in RLVR}
+\title{\bf Rethinking the role of clipping in RLVR}
 \author{Dongkyu Derek Cho, Thomas Voice}
 \date{}
 
@@ -199,20 +198,15 @@ population gradient under the rollout distribution:
  =A(Z)\nabla_\theta\log P_\theta(Y\mid X).
  \label{eq:true-gradient}
 \end{equation}
-Here $\E_Q$ averages over $X\sim\nu$ and $Y\sim Q(\cdot\mid X)$.
-
-Trust-region arguments motivate safeguards such as TRPO and PPO-style clipping
-\citep{schulman2015trpo,schulman2017ppo}. These arguments are typically made
+While trust-region arguments motivate safeguards such as TRPO and PPO-style clipping \citep{schulman2015trpo,schulman2017ppo}, these arguments are typically made
 at the population level. Practical algorithms, however, do not observe
 $g(\theta)$ and must rely on its finite-sample counterpart. Given i.i.d.
 rollout samples $Z_i\sim\nu(dx)Q(dy\mid x)$, $i=1,\ldots,N$, the ordinary
-full-trajectory importance-sampling policy-gradient estimator is
+full-trajectory importance-sampling policy-gradient estimator (IS) is
 \[
  \widehat g_N(\theta)
  :=\frac1N\sum_{i=1}^N W_{\theta,i}f_{\theta,i},
 \]
-Throughout, we use Raw as a short label for this estimator.
-
 The importance-weighted nature of this estimator can produce poor agreement
 between the finite-sample update and the population gradient
 \citep{metelli2018pois,metelli2020is}. This exposes an important but often
@@ -233,7 +227,7 @@ $u_t:\mathbb R_+^T\times\mathbb R\to\mathbb R$. Define
 \end{equation}
 
 Existing ratio-based policy-gradient estimators can be represented by
-particular choices of $u$. The Raw estimator sets
+particular choices of $u$. The typical IS estimator sets
 $u_{{\rm R},t}=W_\theta$ for every factor. One popular alternative is PPO/GRPO
 ratio clipping, whose clipped surrogate induces the following gradient-masking
 rule with radius $0<\epsilon<1$
@@ -252,7 +246,7 @@ aggressive clipping can reduce sampling variation, but it can also increase
 bias by removing gradient terms. This raises the natural question: what governs
 the reliability of a gradient estimator, and when is clipping worth the signal
 it removes? We answer the first part by introducing R\'enyi divergence and
-effective sample size.
+effective sample size (ESS).
 
 \subsection{Gradient estimators and R\'enyi divergence}
 
@@ -284,82 +278,28 @@ normalized effective sample size \citep{metelli2018pois,metelli2020is}:
  =\exp\{-D_2(P_\theta\|Q)\}.
  \label{eq:population-ess}
 \end{equation}
-When $\E_Q[W_\theta^2]<\infty$, $\rho_\theta\in(0,1]$ and $N\rho_\theta$ is
-the corresponding effective sample count. Intuitively, as the second moment of
+Intuitively, as the second moment of
 the likelihood ratio grows, $\rho_\theta$ decreases and this count contracts.
 Since $\E_Q[W_\theta]=1$, the identity
 $\E_Q[(W_\theta-1)^2]=\rho_\theta^{-1}-1$ shows that $\rho_\theta$ is exactly
 the inverse second-moment measure of ratio dispersion.
 
 Importance-sampling theory makes this quantity operational. If
-$\|f_\theta\|_\infty:=\sup_z\|f_\theta(z)\|_2<\infty$, the MSE of Raw is at
+$\|f_\theta\|_\infty:=\sup_z\|f_\theta(z)\|_2<\infty$, the MSE of IS estimator is at
 most $\|f_\theta\|_\infty^2/(N\rho_\theta)$. Normalized ESS therefore captures
 the policy-mismatch component of Raw reliability. The next section
 determines when that reliability is sufficient for improvement and then asks
 whether coefficient control offers a better update.
 
-\section{Theoretical analysis}
+\section{Theoretical Analysis}
 \label{sec:theory}
 
-The analysis answers two questions in order. First, when does a rollout batch
-still support a reliable Raw update? Second, when does coefficient control
-provide a better update than Raw? Normalized ESS enters the first answer as the
-policy-mismatch term; batch size, contribution scale, confidence level, and
-the realized gradient signal also matter. The second question requires a
-direct comparison of candidate estimators at a common policy state and step
-size.
+This section answers the preceding seciton in a row. we first .. and then couple this with..
 
-At update $k$, write $W_k:=W_{\theta_k}$, $f_k:=f_{\theta_k}$,
-$g_k:=g(\theta_k)$, $\widehat g_k:=\widehat g_N(\theta_k)$, and
-$\rho_k:=\rho_{\theta_k}$.
+\subsection{Gradient Estimators and Policy Improvements}
 
-Conditioning on preceding updates fixes the current policy, and the $N$ unused
-sampling units are independent draws from $Q$. We assume
-$\|f_k\|_\infty:=\sup_{z\in\mathcal Z}\|f_k(z)\|_2<\infty$. This bounds the
-scale of one contribution, while $\rho_k$ isolates the explicit loss of
-reliability due to likelihood-ratio dispersion.
-
-\subsection{When is the Raw update reliable?}
-\label{sec:raw}
-
-We first quantify how normalized ESS contributes to the credibility of the
-sampled Raw direction. Because Raw is unbiased, its exact mean-squared error is
-\begin{equation}
- \E\|\widehat g_k-g_k\|_2^2
- =\frac1N\left\{\E_Q[W_k^2\|f_k\|_2^2]-\|g_k\|_2^2\right\}.
- \label{eq:rho-gradient-mse}
-\end{equation}
-Using $\|f_k(z)\|_2\le\|f_k\|_\infty$ and
-$\rho_k^{-1}=\E_Q[W_k^2]$ gives the interpretable upper bound
-\begin{equation}
- \E\|\widehat g_k-g_k\|_2^2
- \le
- \frac{\|f_k\|_\infty^2}{N\rho_k}.
- \label{eq:rho-gradient-mse-bound}
-\end{equation}
-The explicit likelihood-ratio dispersion term appears through the effective count
-$N\rho_k$. Equation~\eqref{eq:rho-gradient-mse-bound} controls average error,
-whereas an actual update uses one realized minibatch. The next lemma converts
-the second-moment statement into a high-probability error radius.
-
-\begin{lemma}[Normalized ESS controls the gradient-error radius]
-\label{lem:rho-gradient-reliability}
-Under the preceding setup, suppose
-$d_2(P_{\theta_k}\|Q)<\infty$ and $\|f_k\|_\infty<\infty$. Then, for any
-$0<\delta\le1$, with probability at least $1-\delta$,
-\begin{equation}
- \|\widehat g_k-g_k\|_2
- \le
- \frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}.
- \label{eq:rho-gradient-concentration}
-\end{equation}
-\end{lemma}
-
-For fixed $N$ and $\|f_k\|_\infty$, the radius grows as
-$\rho_k^{-1/2}$. This is the precise sense in which policy mismatch replaces
-the nominal batch size $N$ by the effective count $N\rho_k$. Accuracy alone,
-however, is not the final objective. We next translate this radius into policy
-improvement.
+The preceding section acknowledges the difference from the finite-sample gradient analysis and the population counterpart. Here, we connect the gradient estimator reliablity with the policy improvement lower bounds. Consider the update step $k$, and for notation brevity we suppress the dependency on the $\theta$(i.e., write
+$g_k:=g(\theta_k)$, $\widehat g_k:=\widehat g_N(\theta_k)$). The following Lemma then formalizes the role of the gradient estimator:
 
 \begin{lemma}[A reliable gradient estimate yields policy improvement]
 \label{lem:gradient-error-progress}
@@ -377,11 +317,46 @@ $\widehat g=0$. Then
 \end{equation}
 \end{lemma}
 
-This deterministic lemma is the same smoothness mechanism used in safe
-policy-gradient analyses \citep{pirotta2013adaptive,papini2022smoothing}.
-Combining it with the ESS-dependent radius gives the Raw reliability result.
+This deterministic lemma is the same smoothness mechanism used in policy gradient analyses \citep{pirotta2013adaptive,papini2022smoothing}. Hence, the relibablity of the gradient estimators.. remain .. the radius is important.. This view provides the theoretical perspective of the reliablity of the neglected aspects, if the gradient estimator have low error bounds, one can expect the policy improvements. 
 
-\begin{theorem}[ESS-dependent improvement for Raw]
+\paragraph{ESS and the IS updates}
+However, the population gradient is unknown. How can one couple such credibility? Here, the ESS gives the bridge.. 
+
+As the IS estimator is unbiased, the exact mean-squared error admits the following decomposition:
+\begin{equation}
+ \E\|\widehat g_k-g_k\|_2^2
+ =\frac1N\left\{\E_Q[W_k^2\|f_k\|_2^2]-\|g_k\|_2^2\right\}.
+ \label{eq:rho-gradient-mse}
+\end{equation}
+Using $\|f_k(z)\|_2\le\|f_k\|_\infty$ and
+$\rho_k^{-1}=\E_Q[W_k^2]$ gives the interpretable upper bound
+\begin{equation}
+ \E\|\widehat g_k-g_k\|_2^2
+ \le
+ \frac{\|f_k\|_\infty^2}{N\rho_k}.
+ \label{eq:rho-gradient-mse-bound}
+\end{equation}
+The explicit likelihood-ratio dispersion term appears through the effective count $N\rho_k$. Utilitzing the the probability error radius, we have the..
+
+
+
+\begin{lemma}[Normalized ESS controls the gradient-error radius]
+\label{lem:rho-gradient-reliability}
+Under the preceding setup, suppose
+$d_2(P_{\theta_k}\|Q)<\infty$ and $\|f_k\|_\infty<\infty$. Then, for any
+$0<\delta\le1$, with probability at least $1-\delta$,
+\begin{equation}
+ \|\widehat g_k-g_k\|_2
+ \le
+ \frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}.
+ \label{eq:rho-gradient-concentration}
+\end{equation}
+\end{lemma}
+The radius grows as $\rho_k^{-1/2}$. Hence, the low ESS indicates the vacuous bounds on the gradient estimates, which aligns with our motivating example in the introductions. We next translate this radius into policy
+improvement by coupling with the Lemma1..
+
+
+\begin{theorem}[ESS-dependent improvement for IS estimator]
 \label{thm:permissive-reliability}
 Under the conditions of Lemma~\ref{lem:rho-gradient-reliability}, suppose that
 $J$ is $L_k$-smooth along the update segment for $L_k>0$. For any
@@ -407,38 +382,21 @@ $1-\delta$,
 \end{equation}
 \end{theorem}
 
-Theorem~\ref{thm:permissive-reliability} concerns one realized Raw estimate and
-an ESS-calibrated step. Its lower bound is positive exactly when the observed
-gradient norm exceeds the uncertainty radius $\varepsilon_k(\delta)$. The same
-rollout can therefore support useful updates while $N\rho_k$ remains large,
-and the guarantee becomes inconclusive only after effective support has
-deteriorated relative to the observed signal.
+Theorem~\ref{thm:permissive-reliability} highlights the role of the ESS. As the ESS is vlaue is controlled, one expects the probablistic lower bound on the policy improvements. Further, the result complements policy-deviation guarantees characterized by population-level consequences of changing the policy. 
 
-The result complements policy-deviation guarantees. Those guarantees
-characterize population-level consequences of changing the policy; the present
-result characterizes the accuracy of a finite-rollout gradient. The two
-mechanisms answer different questions.
-
-The theorem diagnoses Raw reliability; estimator selection is a separate
-question. Candidate estimators must be compared at the same policy state and
-common fixed step.
-
-\subsection{When can coefficient control improve the update?}
+\subsection{Gradient Estimators and Clippings }
 \label{sec:clipping-recovery}
 
-A weak Raw certificate motivates coefficient control. The preferred rule is
-the one whose reduction in sampling variation compensates for the
-population-gradient signal it removes. We therefore compare all candidates at
-the same current policy and rollout.
+The preceding arguments provide the useful tool of the role of the gradient estimator. The natural extension is to consider the other estimates. Intutively, a better estimator is the one that gives good gradient estimates and could lead to better policy improvement lower obund 
 
-At update $k$, let $\psi_k(u;Z):=\psi_{\theta_k}(u;Z)$ and
-$\widehat g_k(u):=N^{-1}\sum_{i=1}^N\psi_k(u;Z_i)$. Define
+To formalize, define
 \begin{equation}
  \mu_k(u):=\E[\widehat g_k(u)],
  \qquad
- v_k(u):=\E_Q\|\psi_k(u;Z)-\mu_k(u)\|_2^2.
+ v_k(u):=\E_Q\|\psi_k(u;Z)-\mu_k(u)\|_2^2,
  \label{eq:coefficient-mean-variance}
 \end{equation}
+which are first and second momementum of the estimator... ..Hence, the role of the 
 Estimator MSE and expected update quality depend on the following two moments:
 \begin{align}
  m_k(u)&:=\E\|\widehat g_k(u)-g_k\|_2^2
@@ -449,8 +407,7 @@ Estimator MSE and expected update quality depend on the following two moments:
  \label{eq:coefficient-second-moment}
 \end{align}
 Here $m_k(u)$ is gradient-estimation MSE, while $s_k(u)$ is the second
-moment of the update itself. Detailed examples of coefficient truncation and
-PPO masking are deferred to Appendix~\ref{app:coefficient-rules}.
+moment of the update itself. 
 
 We first compare the rules as gradient estimators.
 
