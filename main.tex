@@ -161,13 +161,13 @@ and then ask when an intervention can recover reliability.
 \section{Preliminaries}
 \label{sec:setting}
 
-In this section, we provide the background and the notation that will be employed in the following sections.
-
 \subsection{Policy-gradient estimators from a fixed rollout}
 
-\paragraph{Problem Formulations}
-Let $X\sim\nu$ denote a context, and $Q(\cdot\mid X)$ be the rollout policy with being $P_\theta(\cdot\mid X)$ be the current policy. A complete sample is
-$Z=(X,Y)$, where $Y=(Y_1,\ldots,Y_T)$ and $R(Z)$ is its reward. For each factor, define the likelihood ratio and score
+\paragraph{Problem formulation.}
+Let $X\sim\nu$ denote a context, $Q(\cdot\mid X)$ the rollout policy, and
+$P_\theta(\cdot\mid X)$ the current policy. A complete sample is $Z=(X,Y)$,
+where $Y=(Y_1,\ldots,Y_T)$ and $R(Z)$ is its reward. For each factor $t$,
+define the likelihood ratio and score
 \begin{equation}
  r_{\theta,t}(Z)
  :=\frac{P_\theta(Y_t\mid X,Y_{<t})}{Q(Y_t\mid X,Y_{<t})},
@@ -175,31 +175,50 @@ $Z=(X,Y)$, where $Y=(Y_1,\ldots,Y_T)$ and $R(Z)$ is its reward. For each factor,
  \ell_{\theta,t}(Z):=\nabla_\theta\log P_\theta(Y_t\mid X,Y_{<t}).
  \label{eq:factor-ratio-score}
 \end{equation}
-where the the complete-sample likelihood ratio is the factored over the trajectories where $r_{\theta,t}(Z)$ denoting the policy ratio at the .. t...:
+Here $t$ indexes a policy factor, such as a token or decision step. Because
+both policies factorize along the trajectory, the complete-sample likelihood
+ratio is
 \begin{equation}
  W_\theta(Z):=\frac{P_\theta(Y\mid X)}{Q(Y\mid X)}
  =\prod_{t=1}^T r_{\theta,t}(Z).
  \label{eq:sequence-ratio}
 \end{equation}
 
-Here, the goal of the policy learning is to maximize the expected reward under the current policy,  $J(\theta):=\E_{P_\theta}[R]$. Under the absolute continuity of the measures $P_\theta(\cdot\mid X)\ll Q(\cdot\mid X)$, such policy can be learned by the gradient ascent using the policy gradients:
+The learning objective is to maximize the expected reward
+$J(\theta):=\E_{P_\theta}[R]$. Let $A(Z):=R(Z)-b(X)$ be a baseline-centered
+reward, where $b(X)$ does not depend on $Y$. Under
+$P_\theta(\cdot\mid X)\ll Q(\cdot\mid X)$, change of measure expresses the
+population gradient under the rollout distribution:
 \begin{equation}
  g(\theta):=\nabla J(\theta)=\E_Q[W_\theta f_\theta],
  \qquad
  f_\theta(Z):=A(Z)\sum_{t=1}^T \ell_{\theta,t}(Z)
- =A(Z)\nabla_\theta\log P_\theta(Y\mid X),
+ =A(Z)\nabla_\theta\log P_\theta(Y\mid X).
  \label{eq:true-gradient}
 \end{equation}
-where $A(Z):=R(Z)-b(X)$ is advantage funciton with $b(X)$ is a baseline. 
+Here $\E_Q$ averages over $X\sim\nu$ and $Y\sim Q(\cdot\mid X)$.
 
-Existing policy gradient couples such method with different strategies in the view of the trust region guarantees. However, most methods make arguments on the population gradients, while  due to the computational limitation practical algorithms relies on the sample counterpart, denoted as $ \widehat g_N(\theta):=\frac1N\sum_{i=1}^N W_{\theta,i}f_{\theta,i}$.
+Policy-deviation arguments motivate trust-region safeguards and PPO-style
+clipping \citep{schulman2015trpo,schulman2017ppo}. Practical algorithms,
+however, do not observe $g(\theta)$. Given i.i.d. rollout samples
+$Z_i\sim\nu(dx)Q(dy\mid x)$, $i=1,\ldots,N$, they update the policy using
+\[
+ \widehat g_N(\theta)
+ :=\frac1N\sum_{i=1}^N W_{\theta,i}f_{\theta,i},
+\]
+which we call the Raw estimator.
 
-The importance weighted estimating nature makes the finitie-sample and the population agreement makes it poor and unstable [citation citation]. Under this view, the existing methods expose an important bout overlooked perspective: the finitie sample guarantees. 
+Although Raw is unbiased, importance weighting can concentrate its mass on
+only a few samples \citep{metelli2018pois,metelli2020is}. The population
+identity can therefore be exact while the realized update direction is
+inaccurate. This finite-sample gap is the reliability problem studied in this
+paper.
 
-\paragraph{The choice of the gradient estimators}
-To formalize, consider the function .. where..
-$\mathbf r_\theta=(r_{\theta,1},\ldots,r_{\theta,T})$, let
-$u=(u_1,\ldots,u_T)$ be a collection of coefficient rules and define
+\paragraph{Choice of gradient estimator.}
+To compare Raw with controlled alternatives, write
+$\mathbf r_\theta=(r_{\theta,1},\ldots,r_{\theta,T})$ and let
+$u=(u_1,\ldots,u_T)$ be a collection of coefficient rules, with
+$u_t:\mathbb R_+^T\times\mathbb R\to\mathbb R$. Define
 \begin{equation}
  \psi_\theta(u;Z)
  :=A(Z)\sum_{t=1}^T
@@ -209,7 +228,12 @@ $u=(u_1,\ldots,u_T)$ be a collection of coefficient rules and define
  \label{eq:coefficient-rule-estimator}
 \end{equation}
 
-Existing policy gradient method can be seen as the specific choice of the such function. One popular choice, is the GRPO ratio clipping  with radius $0<\epsilon<1$ that uses the following masking rule:
+Many ratio-based policy-gradient estimators correspond to different choices of
+$u$.
+Raw sets $u_{{\rm R},t}=W_\theta$ for every factor. A common alternative is
+PPO/GRPO-style ratio clipping, whose clipped surrogate induces the following
+gradient-masking rule with radius $0<\epsilon<1$
+\citep{schulman2017ppo,shao2024deepseekmath}:
 \begin{equation}
  u_{{\rm P},t}(\mathbf r,A)
  :=r_t\left[
@@ -219,15 +243,21 @@ Existing policy gradient method can be seen as the specific choice of the such f
  \label{eq:ppo-coefficient-rule}
 \end{equation}
 
-Such clipping rules can be understood as coventional bias-variance tradeoffs. As the clipping gets more aggressive, the bias gets severe but the estimator variance upper bounds gets lower.. This raises the natural question.. what governs the relibablity of the gradient estimator, and what is the exact role of .. we answer this qeustion by introducting an important theroetical quantitiy.
+Relative to Raw, this rule changes the coefficient and masks clipped factors.
+It can reduce sampling variation, but every masked term also removes gradient
+signal. The relevant question is therefore not simply whether clipping lowers
+variance, but when Raw has become unreliable enough to justify that loss. We
+answer the first part of this question through R\'enyi divergence and effective
+sample size.
 
-\subsection{Gradient Estimators and R\'enyi divergence}
-The magnitude of the importance weights
-provides an indication of how much the probability measures P and Q are dissimilar. This
-notion can be formalized by the Rényi divergence (Rényi, 1961; Van Erven and Harremos,
-2014), an information–theoretic dissimilarity index between probability measures, and later research have shown the important theroetical aspects in the importance weighted mean.
+\subsection{Gradient estimators and R\'enyi divergence}
 
-R\'enyi divergence is a family of measures indexed by a moment order $\alpha>1$. For the current and rollout policies, define
+Large likelihood ratios indicate that $P_\theta$ assigns mass where $Q$
+provides little support. R\'enyi divergence formalizes this mismatch and links
+it to the moments of importance-weighted estimators
+\citep{renyi1961entropy,vanerven2014renyi}.
+
+For a moment order $\alpha>1$, define
 \begin{equation}
  D_\alpha(P_\theta\|Q)
  :=\frac{1}{\alpha-1}\log\E_Q[W_\theta^\alpha],
@@ -235,9 +265,11 @@ R\'enyi divergence is a family of measures indexed by a moment order $\alpha>1$.
  d_\alpha(P_\theta\|Q):=\exp\{D_\alpha(P_\theta\|Q)\}.
  \label{eq:renyi-divergence}
 \end{equation}
-Larger values of $\alpha$ place progressively more emphasis on rare, large likelihood ratios. One of the most essentail value is is the alpha=2 as the mean-squared error of an importance-weighted mean is governed by the second moment of its weight. Interesting enough, it has..
-importance-sampling analyses
-\citep{metelli2018pois,metelli2020is} reveals the reciprocal relationship with the ...called.. ESS
+Larger values of $\alpha$ place more emphasis on rare, large likelihood
+ratios. The order-two case is central because $\E_Q[W_\theta^2]$ controls
+standard MSE bounds for bounded importance-weighted contributions. Since
+$d_2(P_\theta\|Q)=\E_Q[W_\theta^2]$, its reciprocal defines normalized
+effective sample size \citep{metelli2018pois,metelli2020is}:
 \begin{equation}
  \rho_\theta
  :=\frac{1}{d_2(P_\theta\|Q)}
@@ -245,18 +277,18 @@ importance-sampling analyses
  =\exp\{-D_2(P_\theta\|Q)\}.
  \label{eq:population-ess}
 \end{equation}
-Inutively, as the second moment of the likelihood ratio
-grows, $\rho_\theta$ decreases and the effective count contracts. Since
+When $\E_Q[W_\theta^2]<\infty$, $\rho_\theta\in(0,1]$ and $N\rho_\theta$ is
+the corresponding effective sample count. As the second moment of the
+likelihood ratio grows, $\rho_\theta$ decreases and this count contracts. Since
 $\E_Q[W_\theta]=1$, the identity
 $\E_Q[(W_\theta-1)^2]=\rho_\theta^{-1}-1$ shows that $\rho_\theta$ is exactly
 the inverse second-moment measure of ratio dispersion.
 
-Importance-sampling theory makes this quantity operational. For a bounded
-integrand, the estimation error scales with $d_2(P_\theta\|Q)/N$, or
-equivalently with $1/(N\rho_\theta)$. Normalized ESS therefore measures the
-part of Raw estimator reliability lost through policy mismatch. The next
-section determines when that reliability is sufficient for improvement and
-then asks whether coefficient control offers a better update.
+If $\|f_\theta\|_\infty:=\sup_z\|f_\theta(z)\|_2<\infty$, the Raw MSE is at
+most $\|f_\theta\|_\infty^2/(N\rho_\theta)$. Normalized ESS therefore isolates
+the policy-mismatch factor in this worst-case Raw-MSE bound. The next section
+turns this relation into a one-step improvement guarantee and then asks when
+clipping compensates for the signal it removes.
 
 \section{Theoretical analysis}
 \label{sec:theory}
