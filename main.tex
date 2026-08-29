@@ -161,17 +161,13 @@ and then ask when an intervention can recover reliability.
 \section{Preliminaries}
 \label{sec:setting}
 
-We study one optimization phase in which data from a fixed rollout policy are
-used to update a current policy. The notation below applies to any factorized
-policy. Its factors are tokens in an autoregressive language model, time steps
-in a sequential-control policy, and a single action in a contextual bandit.
+In this section, we provide the background and the notation that will be employed in the following sections.
 
 \subsection{Policy-gradient estimators from a fixed rollout}
 
-Let $X\sim\nu$ denote a context, let $Q(\cdot\mid X)$ be the rollout policy,
-and let $P_\theta(\cdot\mid X)$ be the current policy. A complete sample is
-$Z=(X,Y)$, where $Y=(Y_1,\ldots,Y_T)$ and $R(Z)$ is its reward. For each
-factor, define the likelihood ratio and score
+\paragraph{Problem Formulations}
+Let $X\sim\nu$ denote a context, and $Q(\cdot\mid X)$ be the rollout policy with being $P_\theta(\cdot\mid X)$ be the current policy. A complete sample is
+$Z=(X,Y)$, where $Y=(Y_1,\ldots,Y_T)$ and $R(Z)$ is its reward. For each factor, define the likelihood ratio and score
 \begin{equation}
  r_{\theta,t}(Z)
  :=\frac{P_\theta(Y_t\mid X,Y_{<t})}{Q(Y_t\mid X,Y_{<t})},
@@ -179,32 +175,29 @@ factor, define the likelihood ratio and score
  \ell_{\theta,t}(Z):=\nabla_\theta\log P_\theta(Y_t\mid X,Y_{<t}).
  \label{eq:factor-ratio-score}
 \end{equation}
-The complete-sample likelihood ratio is
+where the the complete-sample likelihood ratio is the factored over the trajectories where $r_{\theta,t}(Z)$ denoting the policy ratio at the .. t...:
 \begin{equation}
  W_\theta(Z):=\frac{P_\theta(Y\mid X)}{Q(Y\mid X)}
  =\prod_{t=1}^T r_{\theta,t}(Z).
  \label{eq:sequence-ratio}
 \end{equation}
 
-Let $A(Z):=R(Z)-b(X)$, where $b(X)$ is a baseline, and write
-\begin{equation}
- f_\theta(Z):=A(Z)\sum_{t=1}^T \ell_{\theta,t}(Z)
- =A(Z)\nabla_\theta\log P_\theta(Y\mid X).
- \label{eq:gradient-contribution}
-\end{equation}
-For $P_\theta(\cdot\mid X)\ll Q(\cdot\mid X)$, change of measure gives
+Here, the goal of the policy learning is to maximize the expected reward under the current policy,  $J(\theta):=\E_{P_\theta}[R]$. Under the absolute continuity of the measures $P_\theta(\cdot\mid X)\ll Q(\cdot\mid X)$, such policy can be learned by the gradient ascent using the policy gradients:
 \begin{equation}
  g(\theta):=\nabla J(\theta)=\E_Q[W_\theta f_\theta],
  \qquad
- \widehat g_N(\theta):=\frac1N\sum_{i=1}^N W_{\theta,i}f_{\theta,i},
+ f_\theta(Z):=A(Z)\sum_{t=1}^T \ell_{\theta,t}(Z)
+ =A(Z)\nabla_\theta\log P_\theta(Y\mid X),
  \label{eq:true-gradient}
 \end{equation}
-where $J(\theta):=\E_{P_\theta}[R]$. We call
-$\widehat g_N(\theta)$ the Raw estimator. It is unbiased, but its
-finite-sample accuracy depends on how unevenly $W_\theta$ distributes mass
-across the rollout.
+where $A(Z):=R(Z)-b(X)$ is advantage funciton with $b(X)$ is a baseline. 
 
-Coefficient control modifies this estimator. For
+Existing policy gradient couples such method with different strategies in the view of the trust region guarantees. However, most methods make arguments on the population gradients, while  due to the computational limitation practical algorithms relies on the sample counterpart, denoted as $ \widehat g_N(\theta):=\frac1N\sum_{i=1}^N W_{\theta,i}f_{\theta,i}$.
+
+The importance weighted estimating nature makes the finitie-sample and the population agreement makes it poor and unstable [citation citation]. Under this view, the existing methods expose an important bout overlooked perspective: the finitie sample guarantees. 
+
+\paragraph{The choice of the gradient estimators}
+To formalize, consider the function .. where..
 $\mathbf r_\theta=(r_{\theta,1},\ldots,r_{\theta,T})$, let
 $u=(u_1,\ldots,u_T)$ be a collection of coefficient rules and define
 \begin{equation}
@@ -215,8 +208,8 @@ $u=(u_1,\ldots,u_T)$ be a collection of coefficient rules and define
  \widehat g_N(u;\theta):=\frac1N\sum_{i=1}^N\psi_\theta(u;Z_i).
  \label{eq:coefficient-rule-estimator}
 \end{equation}
-Raw sets $u_{{\rm R},t}=W_\theta$ for every factor. Standard factorwise PPO
-with radius $0<\epsilon<1$ instead uses
+
+Existing policy gradient method can be seen as the specific choice of the such function. One popular choice, is the GRPO ratio clipping  with radius $0<\epsilon<1$ that uses the following masking rule:
 \begin{equation}
  u_{{\rm P},t}(\mathbf r,A)
  :=r_t\left[
@@ -225,17 +218,14 @@ with radius $0<\epsilon<1$ instead uses
  \right].
  \label{eq:ppo-coefficient-rule}
 \end{equation}
-These rules target the same population gradient only when their induced bias is
-zero. Their relative quality must therefore account for both variance reduction
-and signal removed by coefficient control.
 
-We condition on all preceding updates. The current policy is then fixed, and
-the $N$ unused sampling units are independent draws from $Q$. When responses
-share a prompt or a group-relative baseline, the intact prompt group is one
-independent sampling unit; Appendix~\ref{app:proofs} gives the corresponding
-extension.
+Such clipping rules can be understood as coventional bias-variance tradeoffs. As the clipping gets more aggressive, the bias gets severe but the estimator variance upper bounds gets lower.. This raises the natural question.. what governs the relibablity of the gradient estimator, and what is the exact role of .. we answer this qeustion by introducting an important theroetical quantitiy.
 
-\subsection{R\'enyi divergence and normalized ESS}
+\subsection{Gradient Estimators and R\'enyi divergence}
+The magnitude of the importance weights
+provides an indication of how much the probability measures P and Q are dissimilar. This
+notion can be formalized by the Rényi divergence (Rényi, 1961; Van Erven and Harremos,
+2014), an information–theoretic dissimilarity index between probability measures, and later research have shown the important theroetical aspects in the importance weighted mean.
 
 R\'enyi divergence is a family of measures indexed by a moment order $\alpha>1$. For the current and rollout policies, define
 \begin{equation}
@@ -245,12 +235,9 @@ R\'enyi divergence is a family of measures indexed by a moment order $\alpha>1$.
  d_\alpha(P_\theta\|Q):=\exp\{D_\alpha(P_\theta\|Q)\}.
  \label{eq:renyi-divergence}
 \end{equation}
-Larger values of $\alpha$ place progressively more emphasis on rare, large likelihood ratios. The order-two case is especially relevant here because the mean-squared error of an importance-weighted mean is governed by the second moment of its weight.
-
-At $\alpha=2$, $d_2(P_\theta\|Q)=\E_Q[W_\theta^2]$. Following
-importance-sampling analyses for policy optimization
-\citep{metelli2018pois,metelli2020is}, we define normalized effective sample
-size by
+Larger values of $\alpha$ place progressively more emphasis on rare, large likelihood ratios. One of the most essentail value is is the alpha=2 as the mean-squared error of an importance-weighted mean is governed by the second moment of its weight. Interesting enough, it has..
+importance-sampling analyses
+\citep{metelli2018pois,metelli2020is} reveals the reciprocal relationship with the ...called.. ESS
 \begin{equation}
  \rho_\theta
  :=\frac{1}{d_2(P_\theta\|Q)}
@@ -258,9 +245,7 @@ size by
  =\exp\{-D_2(P_\theta\|Q)\}.
  \label{eq:population-ess}
 \end{equation}
-The quantity $\rho_\theta$ lies in $(0,1]$, and $N\rho_\theta$ is the
-corresponding effective sample count. When $P_\theta=Q$, every sample is fully
-effective and $\rho_\theta=1$. As the second moment of the likelihood ratio
+Inutively, as the second moment of the likelihood ratio
 grows, $\rho_\theta$ decreases and the effective count contracts. Since
 $\E_Q[W_\theta]=1$, the identity
 $\E_Q[(W_\theta-1)^2]=\rho_\theta^{-1}-1$ shows that $\rho_\theta$ is exactly
@@ -568,7 +553,7 @@ independent data fixes the chosen rule relative to the update minibatch, so the
 certificate applies conditionally; oracle agreement then depends on estimation
 accuracy.
 
-\section{Exact one-step separation in a Gaussian bandit}
+\section{Experiment: Gaussian bandit}
 \label{sec:gaussian-example}
 
 To exhibit the separation between the MSE and certificate oracles in a concrete
