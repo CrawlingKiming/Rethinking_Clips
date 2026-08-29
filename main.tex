@@ -238,9 +238,12 @@ fixed-step certificate rather than MSE alone.
 
 At update $k$, write $W_k:=W_{\theta_k}$, $f_k:=f_{\theta_k}$, $g_k:=g(\theta_k)$, $\widehat g_k:=\widehat g_N(\theta_k)$, and $\rho_k:=\rho_{\theta_k}$. As stated above, the current policy is fixed after conditioning on the preceding updates, and the $N$ unused sampling units are independent draws from $Q$. We use the standard bounded-integrand condition $\|f_k\|_\infty:=\sup_{z\in\mathcal Z}\|f_k(z)\|_2<\infty$. This condition fixes the scale of one response contribution, while $\rho_k$ records the additional loss of reliability caused by policy mismatch.
 
-\subsection{From ESS to a gradient-error radius}
+\subsection{Estimated Policy gradient and improvement}
+
+\paragraph{Policy gradient estimator}
 \label{sec:raw}
 
+\textcolor{blue}{bad writing. it is the bad flow, abrupt}
 Change of measure gives $\E[\widehat g_k]=g_k$. A standard sample-mean calculation then gives $\E\|\widehat g_k-g_k\|_2^2=N^{-1}\{\E_Q[W_k^2\|f_k\|_2^2]-\|g_k\|_2^2\}$. Using $\|f_k(z)\|_2\le\|f_k\|_\infty$ and $\rho_k^{-1}=\E_Q[W_k^2]$ yields
 \begin{equation}
  \E\|\widehat g_k-g_k\|_2^2
@@ -263,7 +266,7 @@ Let $P_{\theta_k}$ and $Q$ be probability measures on $\mathcal Z$ such that $P_
 
 Lemma~\ref{lem:rho-gradient-reliability} turns normalized ESS into a directly interpretable uncertainty radius. For fixed $N$ and $\|f_k\|_\infty$, the radius grows as $\rho_k^{-1/2}$. Equivalently, policy mismatch replaces the nominal batch size $N$ by the effective sequence count $N\rho_k$.
 
-\subsection{From gradient accuracy to policy improvement}
+\paragraph{Policy improvement}
 \label{sec:mse-improvement}
 
 The first lemma tells us when the sampled gradient is close to the population gradient. To determine whether that accuracy is sufficient, we must translate an error radius into a change in the population objective. The next lemma performs this step using smoothness.
@@ -282,11 +285,11 @@ Let $\widehat g$ be an estimate of $g=\nabla J(\theta)$ satisfying $\|\widehat g
 
 The lower bound increases as the error radius decreases. Estimator reliability therefore determines both whether a nonzero step can be certified and how large the certificate can be. This is the same smoothness mechanism used in safe policy-gradient analyses \citep{pirotta2013adaptive,papini2022smoothing}.
 
-\subsection{When does a permissive update remain reliable?}
+\paragraph{Probablistic policy improvement bounds}
 
 Lemma~\ref{lem:rho-gradient-reliability} supplies an ESS-dependent error radius for the current minibatch. Lemma~\ref{lem:gradient-error-progress} converts any valid radius into population improvement. Applying the second lemma on the event supplied by the first gives the central result.
 
-\begin{theorem}[When a permissive update remains reliable]
+\begin{theorem}[Policy improvement bounds]
 \label{thm:permissive-reliability}
 Under the conditions of Lemma~\ref{lem:rho-gradient-reliability}, suppose that $J$ is $L_k$-smooth along the update segment. For any $0<\delta\le1$, define $\alpha_k=L_k^{-1}\{1-\|f_k\|_\infty/(\|\widehat g_k\|_2\sqrt{\delta N\rho_k})\}_+$, with $\alpha_k=0$ when $\widehat g_k=0$. Then, with probability at least $1-\delta$, it holds that
 \begin{equation}
@@ -303,14 +306,6 @@ Under the conditions of Lemma~\ref{lem:rho-gradient-reliability}, suppose that $
 
 The certificate is positive exactly when the observed gradient norm exceeds its ESS-dependent uncertainty radius. This comparison explains why failure can be delayed. The same rollout can support many useful updates while $N\rho_k$ remains large, and the certificate becomes inconclusive only after effective support has sufficiently deteriorated.
 
-\begin{remark}[Interpretation of the reliability boundary]
-\label{rem:rho-interpretation}
-Theorem~\ref{thm:permissive-reliability} implies that a zero lower bound means
-the rollout no longer certifies the sampled direction at the chosen confidence
-level. The confidence level enters through $\delta$, the observed signal
-through $\|\widehat g_k\|_2$, and policy-mismatch degradation through $\rho_k$.
-\end{remark}
-
 The result complements policy-deviation guarantees. Those guarantees study population-level consequences of changing the policy. The present result studies whether a fixed finite rollout still estimates the current policy gradient accurately enough. Both effects may matter, but they answer different questions.
 
 The theorem diagnoses when the unmodified estimator loses a useful guarantee,
@@ -320,25 +315,17 @@ and it has a stronger fixed-step certificate only if it also retains sufficient
 gradient alignment. We now separate these comparisons without committing to
 one particular clipping implementation.
 
-\subsection{Two crossovers: estimator risk and fixed-step progress}
+\subsection{When is clipping necessary?}
 \label{sec:clipping-recovery}
 
-The preceding theorem evaluates the unmodified sequence-level estimator. It
-does not determine how a coefficient rule should be chosen. Classical
-truncated importance sampling replaces the complete weight by a bounded weight
-and studies the resulting bias and variance as functions of the truncation
-level and $d_2$ \citep{metelli2020is}. Our large-model setting instead modifies
-token coefficients, while controlled implementations can also mask the
-complete-response ratio. The one-sided
-concentration results for nonnegative scalar estimands therefore do not
-transfer directly to every update considered here. The useful principle is to
-compare the gradient estimators induced by all such rules on common policy
-states.
+The preceding theorem induces a natural question: when does clipping is necessary? To answer the question, we first acknowledge that clipping can be seen as the specific type of the gradient estimator. The useful principle is to
+compare the gradient estimators induced by all such rules on common policy states.
 
-Let $r_{k,t}$ denote the token likelihood ratio, write
+\textcolor{blue}{the term token is not very true, while our purpose is at LLM, we are not limitied to LLM. also, the definition of ratio, score, advantage can be shown first in the preliminaries..}
+
+To formulate, let $r_{k,t}$ denote the token likelihood ratio, write
 $\mathbf r_k=(r_{k,1},\ldots,r_{k,T})$, let
-$s_{k,t}:=\nabla_\theta\log P_{\theta_k}(Y_t\mid X,Y_{<t})$ denote the
-token score, and let $A_k:=R-b(X)$. A response-level coefficient rule is a
+$s_{k,t}:=\nabla_\theta\log P_{\theta_k}(Y_t\mid X,Y_{<t})$ denote the score, and with $A_k:=R-b(X)$ being the advantage. A response-level coefficient rule is a
 collection $u=(u_1,\ldots,u_T)$ with
 $u_t:\mathbb R_+^T\times\mathbb R\to\mathbb R$. Define its response
 contribution and estimator by
@@ -348,11 +335,7 @@ contribution and estimator by
  \widehat g_k(u):=\frac1N\sum_{i=1}^N\psi_k(u;Z_i).
  \label{eq:token-rule-estimator}
 \end{equation}
-This class includes token-local rules, for which $u_t$ depends only on
-$r_{k,t}$, and sequence-level rules, for which every $u_t$ can depend on the
-complete ratio $W_k=\prod_jr_{k,j}$. The target remains the population gradient
-$g_k$. Thus any discrepancy from the complete-response importance-weighted
-gradient is included in the estimator bias. Define
+We further define the bias and variance induced by the estimator:
 \begin{equation}
  b_k(u):=\E_Q[\psi_k(u;Z)]-g_k,
  \qquad
@@ -377,6 +360,8 @@ The risk $m_k(u)$ measures estimation accuracy, whereas $s_k(u)$ records the
 second moment of the update itself. Both quantities enter fixed-step policy
 improvement.
 
+\textcolor{blue}{token truncation is abrupt, we do not need this in the main text conclusion, move it to appendix this is not our "voice"}
+
 \begin{remark}[Token weight truncation and PPO masking]
 \label{rem:token-truncation-vs-clipping}
 A token-local detached upper truncation uses
@@ -388,6 +373,8 @@ nonzero when $r_t>c$, and
  \label{eq:token-truncation-envelope}
 \end{equation}
 Hence token weight truncation gives a direct second-moment envelope whenever the score contribution on the right has a finite second moment.
+
+
 
 Token-local PPO defines a different rule. Away from the clipping boundary, its
 gradient is represented by
@@ -428,38 +415,35 @@ directly. Rule $u_2$ has lower MSE only when its variance reduction exceeds its
 additional squared bias. This comparison does not yet determine which rule
 provides the stronger policy update.
 
-\begin{theorem}[Full fixed-step improvement certificate]
+
+\textcolor{blue}{this theorem and the previous policy imrpovement bounds, is telling different things? what's the issue? what is more improtant? if it is "an improvement" it should be stated here, if not why are we having theorem 3?}
+\begin{theorem}[Fixed-step improvement certificate]
 \label{thm:fixed-step-certificate}
 Suppose that $J$ is $L_k$-smooth on every update segment generated by a
 coefficient rule $u$ almost surely, for a deterministic constant $L_k$, and
 that $s_k(u)<\infty$. For any step size $\eta_k>0$,
 \begin{align}
  &\E\left[J(\theta_k+\eta_k\widehat g_k(u))-J(\theta_k)\right]
- \ge B_k(u;\eta_k),
- \label{eq:full-token-rule-progress}\\
- B_k(u;\eta_k)
- &:={\eta_k}g_k^\top\mu_k(u)
- -\frac{L_k\eta_k^2}{2}s_k(u)
- \nonumber\\
- &=\frac{\eta_k}{2}\left\{\|g_k\|_2^2-m_k(u)\right\}
- +\frac{\eta_k}{2}(1-L_k\eta_k)s_k(u).
- \label{eq:full-certificate-polarized}
+ \ge {\eta_k}g_k^\top\mu_k(u)
+ -\frac{L_k\eta_k^2}{2}s_k(u),
+ \label{eq:full-token-rule-progress}
 \end{align}
-Consequently, when $0<\eta_k\le1/L_k$,
-\begin{equation}
- B_k(u;\eta_k)
- \ge
- \frac{\eta_k}{2}\left\{\|g_k\|_2^2-m_k(u)\right\}.
- \label{eq:token-rule-progress}
-\end{equation}
+
 \end{theorem}
 
-Equation~\eqref{eq:token-rule-progress} is a valid MSE-only certificate, but it
-drops the nonnegative second-moment term in
-Equation~\eqref{eq:full-certificate-polarized}. Lower MSE therefore strengthens
-this coarser certificate. It need not strengthen the full fixed-step
-certificate $B_k$ because coefficient control can also change the mean
-alignment and the update second moment.
+\textcolor{blue}{the flow is bad.. some crude example flow:}
+The preceding theorem shows when the improvement certificate can be made, when the RHS is positive, we have the policy improvement garantee ... we hearby define it as $B_k$
+
+\begin{align}
+   B_k(u;\eta_k)
+ &:={\eta_k}g_k^\top\mu_k(u)
+ -\frac{L_k\eta_k^2}{2}s_k(u)
+ &=\frac{\eta_k}{2}\left\{\|g_k\|_2^2-m_k(u)\right\}
+ +\frac{\eta_k}{2}(1-L_k\eta_k)s_k(u).
+ \label{eq:full-certificate-polarized}  
+\end{align}
+
+Consequently, when $0<\eta_k\le1/L_k$, the B is positive. Hence, the certifcate benefit can be seen as the .. inequality we have.. by the following collrary..
 
 \begin{corollary}[Optimization-certificate crossover]
 \label{cor:certificate-crossover}
@@ -480,9 +464,6 @@ Equivalently, the same comparison can be written as
  \frac{L_k\eta_k}{2}\{s_k(u_2)-s_k(u_1)\}.
  \label{eq:certificate-crossover-alignment}
 \end{equation}
-In particular, if $s_k(u_2)<s_k(u_1)$, then rule $u_2$ must reduce MSE by more
-than $(1-L_k\eta_k)\{s_k(u_1)-s_k(u_2)\}$ to provide the stronger full
-certificate. At $\eta_k=1/L_k$, the comparison reduces exactly to MSE ordering.
 \end{corollary}
 
 The condition becomes especially transparent when comparing an unbiased
@@ -547,7 +528,9 @@ both candidate certificates are nonpositive. An exact oracle uses population
 moments $(g_k,\mu_k,s_k)$; replacing them by Monte Carlo estimates produces a
 plug-in certificate selector rather than an exact oracle.
 
-\paragraph{An exactly solvable Gaussian example.}
+\section{Case Study: Linear-Quadratic regulator}
+
+\textcolor{blue}{move miscellaneous computation to the appendix. what you should right here is, what's the purpose of this seciton, what are you going to show us.. what's the reason for this choice? is this LQR commonly used as the testbed for theory? if so cite.}
 The two oracle comparisons can be separated without simulation. Consider the
 scalar policy and rollout
 \begin{equation}
