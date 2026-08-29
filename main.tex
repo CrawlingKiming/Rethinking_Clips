@@ -297,15 +297,17 @@ whether coefficient control offers a better update.
 \section{Theoretical Analysis}
 \label{sec:theory}
 
-This section answers two questions in order. First, when does normalized ESS
-support a reliable IS update? Second, when does clipping improve the update
-after accounting for both estimation error and removed gradient signal?
+This section answers the preceding questions in order. We first connect
+gradient-estimator reliability to policy improvement, then use normalized ESS
+to control the reliability of the IS estimator, and finally ask when clipping
+provides the stronger update.
 
 \subsection{Gradient-estimator reliability and policy improvement}
 
-Policy improvement depends on how closely the estimated update direction tracks
-the population gradient. We first state this connection for an arbitrary
-gradient estimator.
+The preceding section distinguishes the finite-sample IS estimate from the
+population gradient it targets. Here, we connect estimator reliability to a
+lower bound on policy improvement. The following lemma formalizes this
+connection for an arbitrary gradient estimator.
 
 \begin{lemma}[A reliable gradient estimate yields policy improvement]
 \label{lem:gradient-error-progress}
@@ -323,16 +325,19 @@ $\widehat g=0$. Then
 \end{equation}
 \end{lemma}
 
-The bound is positive exactly when the observed gradient norm exceeds the
-error radius. A more reliable estimator therefore permits both a larger step
-and a stronger improvement guarantee. This is the same smoothness mechanism
-used in policy-gradient step-size analyses
-\citep{pirotta2013adaptive,papini2022smoothing}.
+This deterministic lemma uses the same smoothness mechanism as existing
+policy-gradient analyses
+\citep{pirotta2013adaptive,papini2022smoothing}. Its implication is direct:
+the error radius measures how far the finite-sample direction can lie from the
+population gradient. When this radius is smaller than
+$\|\widehat g\|_2$, the estimator yields a positive lower bound on policy
+improvement.
 
 \paragraph{ESS and the IS update.}
-The error condition above cannot be checked directly because the population
-gradient is unknown. For the IS estimator, normalized ESS connects this error
-to likelihood-ratio dispersion.
+However, the population gradient is unknown, so this reliability cannot be
+evaluated directly. Normalized ESS provides the bridge: for the IS estimator,
+it converts likelihood-ratio dispersion into a bound on gradient-estimation
+error.
 At update $k$, condition on the preceding updates and write
 $W_k:=W_{\theta_k}$, $f_k:=f_{\theta_k}$,
 $g_k:=g(\theta_k)$, $\widehat g_k:=\widehat g_N(\theta_k)$, and
@@ -354,9 +359,10 @@ $\rho_k^{-1}=\E_Q[W_k^2]$ gives the interpretable upper bound
  \frac{\|f_k\|_\infty^2}{N\rho_k}.
  \label{eq:rho-gradient-mse-bound}
 \end{equation}
-Thus $\rho_k$ isolates the effect of policy mismatch: the nominal sample size
-$N$ is replaced by the effective count $N\rho_k$. The MSE controls average
-error; the next lemma converts it into a high-probability radius for the
+Likelihood-ratio dispersion therefore enters through the effective count
+$N\rho_k$, replacing the nominal sample size $N$.
+Equation~\eqref{eq:rho-gradient-mse-bound} controls the mean-squared error; the
+next lemma converts this result into a high-probability error radius for the
 realized update.
 
 \begin{lemma}[Normalized ESS controls the gradient-error radius]
@@ -371,11 +377,11 @@ $0<\delta\le1$, with probability at least $1-\delta$,
  \label{eq:rho-gradient-concentration}
 \end{equation}
 \end{lemma}
-The uncertainty radius scales as $(N\rho_k)^{-1/2}$. Holding the batch size and
-contribution scale fixed, higher ESS tightens the bound, whereas declining ESS
-weakens what can be certified from the same nominal batch size. Combining this
-radius with Lemma~\ref{lem:gradient-error-progress} yields the desired
-improvement guarantee.
+The radius grows as $(N\rho_k)^{-1/2}$. Thus, low ESS weakens the reliability
+guarantee for the IS gradient, consistent with the motivating example in the
+introduction. We now combine this radius with
+Lemma~\ref{lem:gradient-error-progress} to obtain an ESS-dependent improvement
+guarantee.
 
 \begin{theorem}[ESS-dependent improvement for the IS estimator]
 \label{thm:permissive-reliability}
@@ -403,27 +409,30 @@ $1-\delta$,
 \end{equation}
 \end{theorem}
 
-The theorem gives a direct signal-to-uncertainty condition. The certified
-improvement is positive when
+Theorem~\ref{thm:permissive-reliability} makes the role of ESS explicit. Its
+lower bound is positive when
 \[
  \|\widehat g_k\|_2
  >
  \frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}.
 \]
-Thus the theorem certifies an IS update precisely when the ESS-controlled
-uncertainty lies below the observed gradient signal. Holding the other terms
-fixed, falling ESS shrinks both the admissible step and the certified
-improvement. This complements population policy-deviation guarantees by
-controlling the finite-rollout direction actually used for optimization. The
-remaining question is whether clipping recovers a better update once this IS
-guarantee weakens.
+Thus, the IS update remains certifiably useful while effective support is
+sufficiently large relative to the observed gradient signal. Holding the other
+terms fixed, both the admissible step and the certified improvement shrink as
+ESS falls. This complements population policy-deviation guarantees, which
+characterize the consequences of changing the policy, by controlling the
+finite-rollout direction used to make that change. Having established when the
+IS update is reliable, we next ask when clipping provides the stronger one-step
+certificate.
 
 \subsection{Gradient estimators and clipping}
 \label{sec:clipping-recovery}
 
-The preceding result tells us when the IS direction is reliable, but not when
-clipping is preferable. We now compare coefficient rules at a common policy
-state, first as gradient estimators and then as fixed-step updates. Write
+The preceding result connects the reliability of the IS estimator to policy
+improvement. The natural next question is whether PPO's clipped estimator gives
+a better update when this guarantee weakens. We answer this in two steps: first
+as a question of gradient estimation, and then as a question of policy
+improvement at a common fixed step. Write
 $\widehat g_k(u):=\widehat g_N(u;\theta_k)$. For a rule $u$, adding and
 subtracting the estimator mean gives the MSE decomposition
 \begin{equation}
@@ -439,10 +448,14 @@ is unbiased, PPO has lower MSE exactly when its reduction in sampling variation
 exceeds the squared bias introduced by masking. This is the estimator-level
 bias--variance crossover.
 
-Lower MSE, however, does not by itself imply a better policy update. MSE ranks
-estimators by proximity to $g_k$; a fixed update also depends on how much useful
-gradient alignment the estimator retains. The fixed-step certificate below
-retains both.
+MSE ranks gradient estimators, not the policy updates they generate. To rank
+updates, we use a common fixed step and retain the full smoothness bound.
+
+The fixed-step comparison is distinct from
+Theorem~\ref{thm:permissive-reliability}. That theorem gives a
+high-probability guarantee for one realized IS direction with an
+ESS-calibrated step. The next theorem gives the expected-improvement
+certificate used to compare candidate estimators at a common fixed step.
 
 \begin{theorem}[Fixed-step improvement certificate]
 \label{thm:fixed-step-certificate}
@@ -482,6 +495,8 @@ At $\eta_k=1/L_k$, the second term vanishes and MSE completely orders the
 certificate. At smaller steps it remains positive, so MSE alone is
 insufficient: masking may lower MSE while discarding enough gradient-aligned
 signal to weaken the certificate.
+
+We can therefore state the IS--PPO certificate crossover directly.
 
 \begin{corollary}[IS--PPO certificate crossover]
 \label{cor:certificate-crossover}
@@ -531,16 +546,18 @@ For $0<\eta_k\le1/L_k$, a rule $u$ has a positive certificate exactly when
 Thus clipping recovers a certified update only if it crosses this positivity
 boundary while the IS rule does not.
 
+The estimator and update comparisons above induce distinct statewise oracles.
 Fix a candidate set $\mathcal U$ of non-null estimators. The MSE oracle
 minimizes $m_k(u)$ over $u\in\mathcal U$, whereas the certificate oracle
 maximizes $B_k(u;\eta_k)$ over the same set. They coincide at
 $\eta_k=1/L_k$ for a common smoothness constant, but can differ at smaller
 steps.
 
-Adding a null update with certificate zero gives the safe certificate oracle.
-It selects the best positive certificate and abstains when every candidate
-certificate is nonpositive. Abstention means only that no positive lower bound
-is available.
+Choosing only among non-null estimators is insufficient when no candidate
+update is certified. Adding a null update with certificate zero gives the safe
+certificate oracle. It selects the best positive certificate and abstains when
+every candidate certificate is nonpositive. Abstention means only that no
+positive lower bound is available.
 
 All three are statewise one-step selectors. Exact selection uses the population
 gradient and the first two moments of each candidate update. Estimated moments
