@@ -1,8 +1,8 @@
-"""Exact Raw/PPO full-certificate comparison on categorical Optdigits.
+"""Exact IS/PPO full-certificate comparison on categorical Optdigits.
 
 The experiment follows a deterministic path of common frozen policy states.
 At every state it exactly enumerates all official-train context-action pairs to
-obtain the mean, second moment, and MSE of iid minibatch Raw and PPO gradient
+obtain the mean, second moment, and MSE of iid minibatch IS and PPO gradient
 estimators.  It then compares the MSE oracle, the fixed-step full-certificate
 oracle, and a safe oracle that can choose a null update.
 
@@ -121,7 +121,7 @@ def exact_estimator_moments(
     batch_size: int,
     epsilon: float,
 ) -> tuple[np.ndarray, dict[str, dict[str, float | np.ndarray]]]:
-    """Enumerate exact iid-minibatch moments for Raw and PPO estimators."""
+    """Enumerate exact iid-minibatch moments for IS and PPO estimators."""
     current = base.softmax(features @ weights.T)
     rollout = base.softmax(features @ rollout_weights.T)
     population_size, classes = current.shape
@@ -550,7 +550,7 @@ def ess_proxy_audit(
             ),
         },
         "forced_raw_ppo": {
-            "rule": "choose PPO when rho is below threshold; otherwise Raw",
+            "rule": "choose PPO when rho is below threshold; otherwise IS",
             "rho_threshold": binary_threshold,
             "calibration": classification_metrics(
                 calibration,
@@ -567,7 +567,7 @@ def ess_proxy_audit(
         },
         "safe_three_action": {
             "rule": (
-                "Raw at high rho, PPO at intermediate rho, and no-op at low rho"
+                "IS at high rho, PPO at intermediate rho, and no-op at low rho"
             ),
             "raw_if_rho_at_least": raw_threshold,
             "noop_if_rho_below": noop_threshold,
@@ -663,7 +663,7 @@ def make_figure(
         axis.set_xlabel(r"Population normalized ESS $\rho$")
         axis.set_xlim(float(np.min(rho)), float(np.max(rho)))
 
-    axes[0].plot(rho, raw_mse, color=RAW_COLOR, linewidth=2.0, label="Raw")
+    axes[0].plot(rho, raw_mse, color=RAW_COLOR, linewidth=2.0, label="IS")
     axes[0].plot(rho, ppo_mse, color=PPO_COLOR, linewidth=2.0, label="PPO")
     axes[0].set_yscale("log")
     axes[0].set_ylabel("Exact estimator MSE")
@@ -675,7 +675,7 @@ def make_figure(
         raw_certificate,
         color=RAW_COLOR,
         linewidth=2.0,
-        label=r"$B_{\mathrm{Raw}}$",
+        label=r"$B_{\mathrm{IS}}$",
     )
     axes[1].plot(
         rho,
@@ -695,7 +695,7 @@ def make_figure(
         mse_reduction,
         color=MSE_REDUCTION_COLOR,
         linewidth=2.0,
-        label=r"MSE reduction $m_R-m_P$",
+        label=r"MSE reduction $m_{\mathrm{IS}}-m_{\mathrm{PPO}}$",
     )
     axes[2].plot(
         rho,
@@ -703,7 +703,7 @@ def make_figure(
         color=REQUIREMENT_COLOR,
         linestyle="--",
         linewidth=2.0,
-        label=r"Required $(1-L\eta)(s_R-s_P)$",
+        label="Discounted second-moment reduction",
     )
     axes[2].axhline(0.0, color=NEUTRAL_COLOR, linewidth=1.0)
     axes[2].set_yscale("symlog", linthresh=1e-6)
@@ -713,7 +713,7 @@ def make_figure(
 
     figure.legend(
         handles=[
-            Patch(facecolor=REGION_COLORS["raw"], label="Safe Raw"),
+            Patch(facecolor=REGION_COLORS["raw"], label="Safe IS"),
             Patch(facecolor=REGION_COLORS["ppo"], label="Safe PPO"),
             Patch(facecolor=REGION_COLORS["noop"], label="No certified update"),
         ],
@@ -901,7 +901,7 @@ def main() -> None:
             "eta_times_L": args.eta * smoothness,
             "raw_ppo_tie_tolerance": ORACLE_TIE_TOLERANCE,
             "raw_ppo_tie_break": (
-                "Raw is the deterministic stored label; explicit tie flags "
+                "IS is the deterministic stored label; explicit tie flags "
                 "and strict-win counts are also reported"
             ),
             "softmax_clip_guard": (
@@ -965,7 +965,7 @@ def main() -> None:
         "high_ess_ppo_blip": {
             "definition": (
                 "certificate-oracle PPO states below focused-path minimum; "
-                "gap is B_PPO minus B_Raw"
+                "gap is B_PPO minus B_IS"
             ),
             "states": len(high_ess_blip),
             "start": compact_state(high_ess_blip[0] if high_ess_blip else None),

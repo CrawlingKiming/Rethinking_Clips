@@ -1,7 +1,7 @@
 """Optdigits experiments used only for theoretical validation.
 
 The task is a one-step contextual bandit with ten categorical actions. The
-script compares the unmodified and PPO-masked gradient estimators at the same
+script compares the IS and PPO-masked gradient estimators at the same
 frozen policy states. It validates the relation from normalized ESS to gradient
 MSE and from gradient error to one-step population change. It also reports a
 40-update learning curve using a step size certified by a global smoothness
@@ -265,7 +265,7 @@ def make_estimator_figure(
 
     ax = axes[0]
     for estimator, label, color, marker in (
-        ("raw", "Unmodified", RAW_COLOR, "o"),
+        ("raw", "IS", RAW_COLOR, "o"),
         ("ppo", "PPO masking", PPO_COLOR, "s"),
     ):
         values = np.asarray(
@@ -310,7 +310,7 @@ def make_estimator_figure(
         width=width,
         color=RAW_COLOR,
         alpha=0.9,
-        label="Unmodified",
+        label="IS",
     )
     ax.bar(
         positions + width / 2,
@@ -329,7 +329,7 @@ def make_estimator_figure(
 
     ax = axes[2]
     for estimator, label, color, marker in (
-        ("raw", "Unmodified", RAW_COLOR, "o"),
+        ("raw", "IS", RAW_COLOR, "o"),
         ("ppo", "PPO masking", PPO_COLOR, "s"),
     ):
         values = np.asarray(
@@ -389,7 +389,7 @@ def make_learning_curve(
     output.parent.mkdir(parents=True, exist_ok=True)
     figure, ax = plt.subplots(figsize=(7.2, 4.15))
     for method, label, color, marker in (
-        ("raw", "Unmodified", RAW_COLOR, "o"),
+        ("raw", "IS", RAW_COLOR, "o"),
         ("ppo", "PPO masking", PPO_COLOR, "s"),
     ):
         updates, means, errors = curve_statistics(path_rows, method)

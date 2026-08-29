@@ -145,7 +145,7 @@ def make_figure(
 
     ax = axes[0]
     for estimator, label, color, marker in (
-        ("raw", "Unmodified", RAW_COLOR, "o"),
+        ("raw", "IS", RAW_COLOR, "o"),
         ("ppo", "PPO masking", PPO_COLOR, "s"),
     ):
         median = np.asarray([row[f"{estimator}_mse_median"] for row in rows])
@@ -199,13 +199,13 @@ def make_figure(
     ax.axhline(1.0, color=NEUTRAL_COLOR, linestyle=":", linewidth=1.2)
     ax.set_xscale("log")
     ax.set_xlabel("Population normalized ESS")
-    ax.set_ylabel(r"PPO MSE / unmodified MSE")
+    ax.set_ylabel(r"PPO MSE / IS MSE")
     ax.set_title("Masking helps only when variance reduction wins")
     ax.legend(frameon=False)
 
     ax = axes[2]
     for key, label, color, marker in (
-        ("raw", "Unmodified", RAW_COLOR, "o"),
+        ("raw", "IS", RAW_COLOR, "o"),
         ("ppo", "PPO masking", PPO_COLOR, "s"),
         ("population", "Population gradient", POPULATION_COLOR, "D"),
     ):

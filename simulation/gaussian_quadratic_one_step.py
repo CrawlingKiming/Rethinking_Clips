@@ -1,4 +1,4 @@
-"""Exactly solvable one-step Raw/PPO comparison for a Gaussian bandit.
+"""Exactly solvable one-step IS/PPO comparison for a Gaussian bandit.
 
 The rollout and current policies are unit-variance Gaussians separated by
 ``delta``.  All estimator moments are evaluated from truncated Gaussian
@@ -342,7 +342,7 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
         alpha=0.11,
         linewidth=0.0,
     )
-    risk_axis.plot(rho, raw_mse, color=RAW_COLOR, linewidth=1.8, label="Raw")
+    risk_axis.plot(rho, raw_mse, color=RAW_COLOR, linewidth=1.8, label="IS")
     risk_axis.plot(rho, ppo_mse, color=PPO_COLOR, linewidth=1.8, label="PPO")
     risk_axis.axvline(rho_mse, color=NEUTRAL_COLOR, linestyle=":", linewidth=1.0)
     risk_axis.axvline(
@@ -363,7 +363,7 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
     risk_axis.text(
         math.sqrt(rho_certificate * rho_mse),
         0.28,
-        "PPO lower MSE,\nRaw larger gain",
+        "PPO lower MSE,\nIS larger gain",
         color=DIFFERENCE_COLOR,
         ha="center",
         va="bottom",
@@ -373,7 +373,7 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
     gain_axis.axvspan(MINIMUM_RHO, rho_stop, color=NEUTRAL_COLOR, alpha=0.09, linewidth=0.0)
     gain_axis.axvspan(rho_stop, rho_certificate, color=PPO_COLOR, alpha=0.09, linewidth=0.0)
     gain_axis.axvspan(rho_certificate, maximum_rho, color=RAW_COLOR, alpha=0.06, linewidth=0.0)
-    gain_axis.plot(rho, raw_gain, color=RAW_COLOR, linewidth=1.8, label="Raw")
+    gain_axis.plot(rho, raw_gain, color=RAW_COLOR, linewidth=1.8, label="IS")
     gain_axis.plot(rho, ppo_gain, color=PPO_COLOR, linewidth=1.8, label="PPO")
     gain_axis.axhline(0.0, color=NEUTRAL_COLOR, linewidth=0.8)
     gain_axis.axvline(rho_mse, color=NEUTRAL_COLOR, linestyle=":", linewidth=1.0)
@@ -391,7 +391,7 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
     gain_axis.set_title("(b) Exact one-step improvement")
     gain_axis.grid(True, which="major", color=GRID_COLOR, linewidth=0.6)
     gain_axis.legend(frameon=False, loc="lower right")
-    gain_axis.text(0.23, 1.18, "Raw", color=RAW_COLOR, ha="center", fontsize=7)
+    gain_axis.text(0.23, 1.18, "IS", color=RAW_COLOR, ha="center", fontsize=7)
     gain_axis.text(0.021, 1.18, "PPO", color=PPO_COLOR, ha="center", fontsize=7)
     gain_axis.text(0.0073, 1.18, "No update", color=NEUTRAL_COLOR, ha="center", fontsize=7)
 

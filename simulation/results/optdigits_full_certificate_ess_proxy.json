@@ -10,7 +10,7 @@
       "limitation": "path-specific held-out interpolation, not validation on an independent trajectory"
     },
     "forced_raw_ppo": {
-      "rule": "choose PPO when rho is below threshold; otherwise Raw",
+      "rule": "choose PPO when rho is below threshold; otherwise IS",
       "rho_threshold": 0.548925636140758,
       "calibration": {
         "states": 501,
@@ -48,7 +48,7 @@
       }
     },
     "safe_three_action": {
-      "rule": "Raw at high rho, PPO at intermediate rho, and no-op at low rho",
+      "rule": "IS at high rho, PPO at intermediate rho, and no-op at low rho",
       "raw_if_rho_at_least": 0.548925636140758,
       "noop_if_rho_below": 0.536260247353989,
       "calibration": {
@@ -104,7 +104,7 @@
       "limitation": "path-specific held-out interpolation, not validation on an independent trajectory"
     },
     "forced_raw_ppo": {
-      "rule": "choose PPO when rho is below threshold; otherwise Raw",
+      "rule": "choose PPO when rho is below threshold; otherwise IS",
       "rho_threshold": 0.548925636140758,
       "calibration": {
         "states": 491,
@@ -142,7 +142,7 @@
       }
     },
     "safe_three_action": {
-      "rule": "Raw at high rho, PPO at intermediate rho, and no-op at low rho",
+      "rule": "IS at high rho, PPO at intermediate rho, and no-op at low rho",
       "raw_if_rho_at_least": 0.548925636140758,
       "noop_if_rho_below": 0.536260247353989,
       "calibration": {

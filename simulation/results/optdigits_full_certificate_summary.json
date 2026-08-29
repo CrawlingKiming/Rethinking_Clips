@@ -18,7 +18,7 @@
     "eta_max_1_over_L": 0.17237013048749975,
     "eta_times_L": 0.9862497610183593,
     "raw_ppo_tie_tolerance": 1e-12,
-    "raw_ppo_tie_break": "Raw is the deterministic stored label; explicit tie flags and strict-win counts are also reported",
+    "raw_ppo_tie_break": "IS is the deterministic stored label; explicit tie flags and strict-win counts are also reported",
     "softmax_clip_guard": "abort if the inherited -50 shifted-logit clip is active",
     "moments": "exact enumeration of all context-action pairs",
     "random_seeds": "none; deterministic controlled-state path",
@@ -150,7 +150,7 @@
     }
   ],
   "high_ess_ppo_blip": {
-    "definition": "certificate-oracle PPO states below focused-path minimum; gap is B_PPO minus B_Raw",
+    "definition": "certificate-oracle PPO states below focused-path minimum; gap is B_PPO minus B_IS",
     "states": 10,
     "start": {
       "path_scale": 0.025,
