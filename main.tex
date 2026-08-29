@@ -44,11 +44,11 @@ Permissive policy optimization can learn rapidly from rollout data and then
 fail abruptly after many successful updates. Policy-deviation bounds explain
 why a large change can be unsafe, but they do not say when a finite rollout
 stops supporting an accurate update for the current policy. We study this
-transition through two ordered questions. First, when is the unmodified policy
-gradient, which we call Raw, still reliable? We show that normalized effective
-sample size (ESS) controls the policy-mismatch component of its finite-sample
-error and, through smoothness, yields a high-probability one-step improvement
-guarantee. Second, when does coefficient
+transition through two ordered questions. First, when is the ordinary
+full-trajectory importance-sampling estimator (Raw) still reliable? We show
+that normalized effective sample size (ESS) controls the policy-mismatch
+component of its finite-sample error and, through smoothness, yields a
+high-probability one-step improvement guarantee. Second, when does coefficient
 control provide a better update? Lower gradient-estimation MSE is not enough:
 the controlled estimator must also retain sufficient alignment with the
 population gradient. We capture this requirement with a full fixed-step
@@ -161,6 +161,9 @@ and then ask when an intervention can recover reliability.
 \section{Preliminaries}
 \label{sec:setting}
 
+This section provides the background and notation used in the following
+analysis.
+
 \subsection{Policy-gradient estimators from a fixed rollout}
 
 \paragraph{Problem formulation.}
@@ -198,24 +201,25 @@ population gradient under the rollout distribution:
 \end{equation}
 Here $\E_Q$ averages over $X\sim\nu$ and $Y\sim Q(\cdot\mid X)$.
 
-Policy-deviation arguments motivate trust-region safeguards and PPO-style
-clipping \citep{schulman2015trpo,schulman2017ppo}. Practical algorithms,
-however, do not observe $g(\theta)$. Given i.i.d. rollout samples
-$Z_i\sim\nu(dx)Q(dy\mid x)$, $i=1,\ldots,N$, they update the policy using
+Trust-region arguments motivate safeguards such as TRPO and PPO-style clipping
+\citep{schulman2015trpo,schulman2017ppo}. These arguments are typically made
+at the population level. Practical algorithms, however, do not observe
+$g(\theta)$ and must rely on its finite-sample counterpart. Given i.i.d.
+rollout samples $Z_i\sim\nu(dx)Q(dy\mid x)$, $i=1,\ldots,N$, the ordinary
+full-trajectory importance-sampling policy-gradient estimator is
 \[
  \widehat g_N(\theta)
  :=\frac1N\sum_{i=1}^N W_{\theta,i}f_{\theta,i},
 \]
-which we call the Raw estimator.
+Throughout, we use Raw as a short label for this estimator.
 
-Although Raw is unbiased, importance weighting can concentrate its mass on
-only a few samples \citep{metelli2018pois,metelli2020is}. The population
-identity can therefore be exact while the realized update direction is
-inaccurate. This finite-sample gap is the reliability problem studied in this
-paper.
+The importance-weighted nature of this estimator can produce poor agreement
+between the finite-sample update and the population gradient
+\citep{metelli2018pois,metelli2020is}. This exposes an important but often
+overlooked question: when is the finite-sample gradient reliable?
 
 \paragraph{Choice of gradient estimator.}
-To compare Raw with controlled alternatives, write
+To formalize this comparison, write
 $\mathbf r_\theta=(r_{\theta,1},\ldots,r_{\theta,T})$ and let
 $u=(u_1,\ldots,u_T)$ be a collection of coefficient rules, with
 $u_t:\mathbb R_+^T\times\mathbb R\to\mathbb R$. Define
@@ -228,11 +232,11 @@ $u_t:\mathbb R_+^T\times\mathbb R\to\mathbb R$. Define
  \label{eq:coefficient-rule-estimator}
 \end{equation}
 
-Many ratio-based policy-gradient estimators correspond to different choices of
-$u$.
-Raw sets $u_{{\rm R},t}=W_\theta$ for every factor. A common alternative is
-PPO/GRPO-style ratio clipping, whose clipped surrogate induces the following
-gradient-masking rule with radius $0<\epsilon<1$
+Existing ratio-based policy-gradient estimators can be represented by
+particular choices of $u$. The Raw estimator sets
+$u_{{\rm R},t}=W_\theta$ for every factor. One popular alternative is PPO/GRPO
+ratio clipping, whose clipped surrogate induces the following gradient-masking
+rule with radius $0<\epsilon<1$
 \citep{schulman2017ppo,shao2024deepseekmath}:
 \begin{equation}
  u_{{\rm P},t}(\mathbf r,A)
@@ -243,21 +247,24 @@ gradient-masking rule with radius $0<\epsilon<1$
  \label{eq:ppo-coefficient-rule}
 \end{equation}
 
-Relative to Raw, this rule changes the coefficient and masks clipped factors.
-It can reduce sampling variation, but every masked term also removes gradient
-signal. The relevant question is therefore not simply whether clipping lowers
-variance, but when Raw has become unreliable enough to justify that loss. We
-answer the first part of this question through R\'enyi divergence and effective
-sample size.
+Such clipping rules create a conventional bias--variance tradeoff. More
+aggressive clipping can reduce sampling variation, but it can also increase
+bias by removing gradient terms. This raises the natural question: what governs
+the reliability of a gradient estimator, and when is clipping worth the signal
+it removes? We answer the first part by introducing R\'enyi divergence and
+effective sample size.
 
 \subsection{Gradient estimators and R\'enyi divergence}
 
-Large likelihood ratios indicate that $P_\theta$ assigns mass where $Q$
-provides little support. R\'enyi divergence formalizes this mismatch and links
-it to the moments of importance-weighted estimators
-\citep{renyi1961entropy,vanerven2014renyi}.
+The dispersion of the importance weights indicates how dissimilar $P_\theta$
+and $Q$ are. R\'enyi divergence formalizes this notion as an
+information-theoretic dissimilarity between probability measures
+\citep{renyi1961entropy,vanerven2014renyi}, while importance-sampling analyses
+connect it to the finite-sample behavior of importance-weighted means
+\citep{metelli2018pois,metelli2020is}.
 
-For a moment order $\alpha>1$, define
+R\'enyi divergence is a family of measures indexed by a moment order
+$\alpha>1$. For the current and rollout policies, define
 \begin{equation}
  D_\alpha(P_\theta\|Q)
  :=\frac{1}{\alpha-1}\log\E_Q[W_\theta^\alpha],
@@ -265,11 +272,11 @@ For a moment order $\alpha>1$, define
  d_\alpha(P_\theta\|Q):=\exp\{D_\alpha(P_\theta\|Q)\}.
  \label{eq:renyi-divergence}
 \end{equation}
-Larger values of $\alpha$ place more emphasis on rare, large likelihood
-ratios. The order-two case is central because $\E_Q[W_\theta^2]$ controls
-standard MSE bounds for bounded importance-weighted contributions. Since
-$d_2(P_\theta\|Q)=\E_Q[W_\theta^2]$, its reciprocal defines normalized
-effective sample size \citep{metelli2018pois,metelli2020is}:
+Larger values of $\alpha$ place progressively more emphasis on rare, large
+likelihood ratios. The order-two case is central because
+$\E_Q[W_\theta^2]$ controls standard MSE bounds for bounded
+importance-weighted contributions. Importantly, its reciprocal is the
+normalized effective sample size \citep{metelli2018pois,metelli2020is}:
 \begin{equation}
  \rho_\theta
  :=\frac{1}{d_2(P_\theta\|Q)}
@@ -278,17 +285,18 @@ effective sample size \citep{metelli2018pois,metelli2020is}:
  \label{eq:population-ess}
 \end{equation}
 When $\E_Q[W_\theta^2]<\infty$, $\rho_\theta\in(0,1]$ and $N\rho_\theta$ is
-the corresponding effective sample count. As the second moment of the
-likelihood ratio grows, $\rho_\theta$ decreases and this count contracts. Since
-$\E_Q[W_\theta]=1$, the identity
+the corresponding effective sample count. Intuitively, as the second moment of
+the likelihood ratio grows, $\rho_\theta$ decreases and this count contracts.
+Since $\E_Q[W_\theta]=1$, the identity
 $\E_Q[(W_\theta-1)^2]=\rho_\theta^{-1}-1$ shows that $\rho_\theta$ is exactly
 the inverse second-moment measure of ratio dispersion.
 
-If $\|f_\theta\|_\infty:=\sup_z\|f_\theta(z)\|_2<\infty$, the Raw MSE is at
-most $\|f_\theta\|_\infty^2/(N\rho_\theta)$. Normalized ESS therefore isolates
-the policy-mismatch factor in this worst-case Raw-MSE bound. The next section
-turns this relation into a one-step improvement guarantee and then asks when
-clipping compensates for the signal it removes.
+Importance-sampling theory makes this quantity operational. If
+$\|f_\theta\|_\infty:=\sup_z\|f_\theta(z)\|_2<\infty$, the MSE of Raw is at
+most $\|f_\theta\|_\infty^2/(N\rho_\theta)$. Normalized ESS therefore captures
+the policy-mismatch component of Raw reliability. The next section
+determines when that reliability is sufficient for improvement and then asks
+whether coefficient control offers a better update.
 
 \section{Theoretical analysis}
 \label{sec:theory}
