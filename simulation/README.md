@@ -3,7 +3,7 @@
 ## Exactly solvable Gaussian one-step example
 
 `gaussian_quadratic_one_step.py` generates the main-text theoretical
-IS/TIS/PPO example.
+IS/PPO example.
 The current policy is `Normal(theta, 1)`, the rollout policy is
 `Normal(theta - delta, 1)`, and the reward is quadratic. The script evaluates
 the IS and PPO-style masked estimators from closed-form truncated Gaussian
@@ -13,7 +13,7 @@ The reported setting is `N=32`, PPO radius `0.20`, gradient signal `g=2`, and
 step size `eta=0.40`. It distinguishes the persistent estimator-risk crossover
 from the exact one-step improvement crossover and records the point below which
 neither update has a positive certificate. The displayed branch uses
-`delta >= 0.20`, corresponding to normalized population ESS at most `0.9608`.
+`delta >= 0.20`, corresponding to normalized population ESS at most `0.961`.
 
 Run from the repository root:
 

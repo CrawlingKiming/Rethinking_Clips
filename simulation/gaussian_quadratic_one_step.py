@@ -1,4 +1,4 @@
-"""Exactly solvable one-step IS/TIS/PPO comparison for a Gaussian bandit.
+"""Exactly solvable one-step IS/PPO comparison for a Gaussian bandit.
 
 The rollout and current policies are unit-variance Gaussians separated by
 ``delta``.  All estimator moments are evaluated from truncated Gaussian
@@ -27,14 +27,12 @@ from paperstyle import FAM, FULL, format_sig, use_paper_style
 G = 2.0
 N = 32
 EPSILON = 0.2
-TIS_CAP = 3.0
 ETA = 0.4
 SMOOTHNESS = 1.0
 MINIMUM_DELTA = 0.2
 MINIMUM_RHO = 0.005
 
 IS_COLOR = FAM[0]
-TIS_COLOR = FAM[2]
 PPO_COLOR = FAM[1]
 NEUTRAL_COLOR = "#59636E"
 
@@ -168,42 +166,11 @@ def estimator_moments(delta: float) -> dict[str, float]:
         polynomial_normal_integral(F_COEFFICIENTS, lower, upper)
         for lower, upper in intervals
     )
-    tis_boundary = (
-        (math.log(TIS_CAP) - 0.5 * delta * delta) / delta
-        if delta > 0.0
-        else math.inf
-    )
-    tis_mean = polynomial_normal_integral(
-        F_COEFFICIENTS,
-        -math.inf,
-        tis_boundary,
-    ) + TIS_CAP * polynomial_normal_integral(
-        F_COEFFICIENTS,
-        tis_boundary,
-        math.inf,
-        mean=-delta,
-    )
     raw_single_second = math.exp(delta * delta) * polynomial_normal_integral(
         F_SQUARED_COEFFICIENTS,
         -math.inf,
         math.inf,
         mean=delta,
-    )
-    tis_single_second = (
-        math.exp(delta * delta)
-        * polynomial_normal_integral(
-            F_SQUARED_COEFFICIENTS,
-            -math.inf,
-            tis_boundary,
-            mean=delta,
-        )
-        + TIS_CAP * TIS_CAP
-        * polynomial_normal_integral(
-            F_SQUARED_COEFFICIENTS,
-            tis_boundary,
-            math.inf,
-            mean=-delta,
-        )
     )
     ppo_single_second = math.exp(delta * delta) * sum(
         polynomial_normal_integral(
@@ -219,13 +186,11 @@ def estimator_moments(delta: float) -> dict[str, float]:
         "delta": delta,
         "rho": math.exp(-delta * delta),
         "raw_mean": G,
-        "tis_mean": tis_mean,
         "ppo_mean": ppo_mean,
         "raw_single_second_moment": raw_single_second,
-        "tis_single_second_moment": tis_single_second,
         "ppo_single_second_moment": ppo_single_second,
     }
-    for rule in ("raw", "tis", "ppo"):
+    for rule in ("raw", "ppo"):
         mean = row[f"{rule}_mean"]
         single_second = row[f"{rule}_single_second_moment"]
         variance = max(single_second - mean * mean, 0.0) / N
@@ -280,14 +245,6 @@ def crossover_summary() -> dict[str, float]:
         1.6,
         2.0,
     )
-    tis_certificate_delta = bisect_root(
-        lambda delta: (
-            estimator_moments(delta)["tis_certificate"]
-            - estimator_moments(delta)["raw_certificate"]
-        ),
-        1.3,
-        1.7,
-    )
     raw_zero_delta = bisect_root(
         lambda delta: estimator_moments(delta)["raw_certificate"],
         1.6,
@@ -305,10 +262,6 @@ def crossover_summary() -> dict[str, float]:
         "certificate_crossover_rho": math.exp(
             -certificate_delta * certificate_delta
         ),
-        "tis_certificate_crossover_delta": tis_certificate_delta,
-        "tis_certificate_crossover_rho": math.exp(
-            -tis_certificate_delta * tis_certificate_delta
-        ),
         "raw_zero_delta": raw_zero_delta,
         "raw_zero_rho": math.exp(-raw_zero_delta * raw_zero_delta),
         "ppo_zero_delta": ppo_zero_delta,
@@ -322,9 +275,6 @@ def validate_crossovers(summary: dict[str, float]) -> None:
         summary["certificate_crossover_delta"]
     )
     stop_state = estimator_moments(summary["ppo_zero_delta"])
-    tis_state = estimator_moments(
-        summary["tis_certificate_crossover_delta"]
-    )
     residuals = {
         "MSE crossover": abs(mse_state["raw_mse"] - mse_state["ppo_mse"]),
         "certificate crossover": abs(
@@ -332,9 +282,6 @@ def validate_crossovers(summary: dict[str, float]) -> None:
             - certificate_state["ppo_certificate"]
         ),
         "PPO zero certificate": abs(stop_state["ppo_certificate"]),
-        "IS-TIS certificate crossover": abs(
-            tis_state["raw_certificate"] - tis_state["tis_certificate"]
-        ),
     }
     for name, residual in residuals.items():
         if residual > 1e-10:
@@ -360,18 +307,14 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
     ordered = sorted(rows, key=lambda item: item["rho"])
     rho = np.asarray([row["rho"] for row in ordered])
     raw_mse = np.asarray([row["raw_mse"] for row in ordered])
-    tis_mse = np.asarray([row["tis_mse"] for row in ordered])
     ppo_mse = np.asarray([row["ppo_mse"] for row in ordered])
     raw_alignment = np.asarray([row["raw_mean"] / G for row in ordered])
-    tis_alignment = np.asarray([row["tis_mean"] / G for row in ordered])
     ppo_alignment = np.asarray([row["ppo_mean"] / G for row in ordered])
     raw_gain = np.asarray([row["raw_expected_gain"] for row in ordered])
-    tis_gain = np.asarray([row["tis_expected_gain"] for row in ordered])
     ppo_gain = np.asarray([row["ppo_expected_gain"] for row in ordered])
 
     rho_mse = summary["mse_crossover_rho"]
     rho_certificate = summary["certificate_crossover_rho"]
-    rho_tis = summary["tis_certificate_crossover_rho"]
     rho_stop = summary["ppo_zero_rho"]
     maximum_rho = math.exp(-MINIMUM_DELTA * MINIMUM_DELTA)
 
@@ -384,7 +327,6 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
 
     lines = [
         ("IS", IS_COLOR, raw_mse, raw_alignment, raw_gain),
-        (rf"TIS ($c={TIS_CAP:g}$)", TIS_COLOR, tis_mse, tis_alignment, tis_gain),
         ("PPO", PPO_COLOR, ppo_mse, ppo_alignment, ppo_gain),
     ]
     for label, color, risk, alignment, gain in lines:
@@ -438,14 +380,6 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
     gain_axis.set_xlabel(r"normalized ESS $\rho$")
     gain_axis.set_ylabel(r"Exact gain $B_u(\eta)$")
     gain_axis.set_title("(c) One-step improvement", loc="left")
-    tis_state = estimator_moments(summary["tis_certificate_crossover_delta"])
-    gain_axis.scatter(
-        [rho_tis],
-        [tis_state["tis_certificate"]],
-        s=14,
-        color=TIS_COLOR,
-        zorder=5,
-    )
     gain_axis.annotate(
         rf"$\rho_B={format_sig(rho_certificate)}$",
         xy=(rho_certificate, 0.97),
@@ -476,7 +410,7 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
         handles,
         labels,
         loc="outside lower center",
-        ncol=3,
+        ncol=2,
         frameon=False,
     )
 
@@ -495,17 +429,6 @@ def main() -> None:
         estimator_moments(float(delta))
         for delta in np.linspace(MINIMUM_DELTA, maximum_delta, 801)
     ]
-    if not all(
-        row["tis_mse"] <= min(row["raw_mse"], row["ppo_mse"])
-        for row in rows
-    ):
-        raise AssertionError("TIS does not have the lowest displayed MSE")
-    if not all(
-        row["tis_certificate"] >= row["ppo_certificate"]
-        for row in rows
-    ):
-        raise AssertionError("TIS does not dominate the displayed PPO certificate")
-
     representative_rhos = (0.9607894392, 0.0773047404, 0.0121551783)
     representative = [
         estimator_moments(math.sqrt(-math.log(rho)))
@@ -529,7 +452,6 @@ def main() -> None:
             "gradient": G,
             "batch_size": N,
             "ppo_epsilon": EPSILON,
-            "tis_cap": TIS_CAP,
             "step_size": ETA,
             "smoothness": SMOOTHNESS,
         },

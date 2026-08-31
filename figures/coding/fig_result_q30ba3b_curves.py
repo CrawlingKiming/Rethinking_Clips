@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """Core Qwen3-30B-A3B trajectories for Section 6.
 
-The four panels report the requested GRPO, Clip-Higher, DPPO, and TIS-3
-comparisons. The first two are band-matched complete-recipe comparisons; the
-last two directly compare static and ESS-conditioned versions.
+All conditional curves use TIS 3 while ESS is high and activate the named
+clipping safeguard when ESS is low. The first three panels compare this
+template with an always-on safeguard; the fourth compares it directly with
+ungated TIS 3, exposing the collapse that conditioning prevents.
 
 Output:
   figures_mains/result/q30ba3b/curves/overall.pdf
@@ -67,9 +68,10 @@ def draw(ax, static_run, conditional_run, offsets):
 
 handles = [
     Line2D([0], [0], color=STATIC, linestyle="--", linewidth=1.2,
-           marker="o", markersize=2.7, label="static rule"),
+           marker="o", markersize=2.7, label="static comparison"),
     Line2D([0], [0], color=CONDITIONAL, linestyle="-", linewidth=1.6,
-           marker="o", markersize=2.7, label="ESS-conditioned recipe"),
+           marker="o", markersize=2.7,
+           label=r"TIS 3 $\rightarrow$ low-ESS safeguard"),
 ]
 
 use_paper_style()

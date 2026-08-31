@@ -555,9 +555,7 @@ Carlo error; Appendix~\ref{app:gaussian} gives the setup and calculations.
 At each point on this path, the MSE oracle selects between IS and PPO by
 gradient-estimation MSE, whereas the certificate oracle selects the candidate
 with larger $B_k(u;\eta_k)$. The safe certificate oracle additionally includes
-a null update with certificate zero. To show how the alternative choices in
-Section~\ref{sec:clipping-recovery} act, we also report upper-truncated IS with
-cap $c=3$. We use $N=32$, PPO radius
+a null update with certificate zero. We use $N=32$, PPO radius
 $\epsilon=0.2$, gradient $g=2$, and step size $\eta=0.4$, and vary $\rho$
 along one monotone ESS path.
 
@@ -570,29 +568,26 @@ pairwise IS--PPO MSE crossover occurs at
 $\rho_{\mathrm{MSE}}=0.123$, while their certificate crossover occurs later
 at $\rho_B=0.0392$.
 
-The two controlled estimators explain the gap. TIS caps the upper tail while
-retaining substantially more population-gradient alignment. At the
-highest-support edge, TIS and IS are indistinguishable on the plotted scale;
-the substantive low-support crossover occurs at $\rho=0.105$, below which TIS
-remains positive throughout the displayed path. PPO masking removes more of
-the update. It overtakes IS only below
-$\rho_B$ and reaches zero certificate at
-$\rho_{\mathrm{stop}}=0.0109$, marked by the low-support reference line in
-Figure~\ref{fig:gaussian-one-step}. These values are specific to
-$(g,N,\epsilon,\eta,c)$, but the ordering is the point: ESS locates the
-support regime, while MSE reduction and retained alignment jointly determine
-the better update.
+The gap between the two crossovers shows why MSE alone does not determine the
+better update. PPO has lower MSE below $\rho_{\mathrm{MSE}}$, but masking also
+removes population-gradient alignment. Its certificate therefore overtakes
+IS only below $\rho_B$, where the reduction in update variability finally
+compensates for the discarded signal. At still lower support, PPO reaches
+zero certificate at $\rho_{\mathrm{stop}}=0.0109$ and the safe oracle
+abstains. These values are specific to $(g,N,\epsilon,\eta)$, but the ordering
+is the point: ESS locates the support regime, while MSE reduction and retained
+alignment jointly determine the better update.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/gaussian_quadratic_one_step.pdf}
   \caption{Exact Gaussian-bandit comparison with $g=2$, $N=32$,
-  $\epsilon=0.2$, $c=3$, and $\eta=0.4$. (a) Gradient MSE as effective
+  $\epsilon=0.2$, and $\eta=0.4$. (a) Gradient MSE as effective
   support contracts. (b) Population-gradient alignment retained by each
   estimator. (c) Exact expected one-step improvement, equal here to
-  $B_u(\eta)$. The substantive IS--TIS crossover is $\rho=0.105$; the
-  dashed line marks the IS--PPO crossover at $\rho_B=0.0392$, and the
-  dash-dotted line marks PPO's zero certificate at
+  $B_u(\eta)$. The dotted line in panel (a) marks
+  $\rho_{\mathrm{MSE}}=0.123$; in panel (c), the dashed line marks
+  $\rho_B=0.0392$ and the dash-dotted line marks PPO's zero certificate at
   $\rho_{\mathrm{stop}}=0.0109$.}
   \label{fig:gaussian-one-step}
 \end{figure}
@@ -608,26 +603,33 @@ Figure~\ref{fig:llm-motivation}, which use TIS caps 3 and 5, beside a third
 trajectory trained with GRPO without clipping. Each run is trained for up to
 200 policy updates and evaluated on AIME-2024 using mean@16.
 
-The two TIS trajectories establish the temporal ordering that motivates an
-ESS diagnostic. Their sample ESS first falls below $0.01$ at steps 77 and 68,
-respectively, after both performance curves peak at step 60 and before their
-subsequent collapse. The unclipped trajectory supplies the necessary
-counterexample: its first sub-$0.01$ observation at step 57 is isolated, ESS
-recovers at the next updates, and AIME performance continues from $28.1\%$ at
-step 60 to a $44.4\%$ peak at step 140. Low ESS therefore identifies weak
-effective support without itself certifying immediate failure or determining
-which controlled estimator gives the better update.
+Persistent support loss accompanies the loss of further policy improvement in
+both TIS trajectories. After both trajectories peak at step 60, TIS 3 and TIS
+5 begin runs of at least five consecutive sub-$0.01$ ESS observations at steps
+80 and 68, respectively, and both later collapse. The
+unclipped trajectory
+clarifies why persistence matters: its sub-$0.01$ observation at step 57 is
+isolated, ESS rebounds immediately, and AIME performance continues from
+$28.1\%$ at step 60 to a $44.4\%$ peak at step 140. Thus, in these
+trajectories, sustained near-zero ESS is associated with the loss of further
+policy improvement, whereas one noisy crossing is not. ESS supplies the
+warning signal; the controlled estimator determines the low-support action.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/ungated_governs/ess_governs_update.pdf}
   \caption{Effective support along three permissive Qwen3-30B-A3B
   trajectories. Panels (a) and (b) reproduce the TIS-3 and TIS-5 motivation
-  runs, whose first crossings below the $0.01$ ESS reference precede collapse.
-  Panel (c) shows GRPO without clipping: its crossing at step 57 is transient,
-  and performance continues improving to step 140. The black curves report
-  AIME-2024 mean@16 and the red curves report per-step normalized sequence
-  ESS. Vertical dotted lines mark the first sub-$0.01$ observation.}
+  runs. Their sustained low-ESS episodes, defined descriptively as five
+  consecutive observations below $0.01$, begin at steps 80 and 68 and are
+  followed by continued deterioration. Panel (c) shows GRPO without clipping: its
+  crossing at step 57 is isolated, ESS rebounds, and performance continues
+  improving to step 140. Black curves report AIME-2024 mean@16 and red curves
+  report normalized sequence ESS. The horizontal dotted line marks $0.01$;
+  vertical dotted lines mark the sustained onset in panels (a)--(b) and the
+  isolated dip in panel (c). Shading extends to the first post-peak evaluation
+  below initial performance, where each TIS ESS trace is stopped because
+  post-collapse ESS no longer diagnoses the failed update path.}
   \label{fig:llm-no-clip-ess}
 \end{figure}
 \FloatBarrier
@@ -635,8 +637,8 @@ which controlled estimator gives the better update.
 The two examples give ESS a precise empirical role. In the Gaussian bandit,
 ESS indexes the support regime, while the full certificate determines the
 preferred update. In the language-model trajectories, sample ESS reveals
-support loss before failure becomes visible, but does not itself constitute
-a failure certificate. The operational question is therefore whether
+persistent support loss before failure becomes visible. The operational
+question is therefore whether
 conditioning a safeguard on ESS improves low-support updates without
 sacrificing permissive learning when support is high. We test this rule next.
 
@@ -680,20 +682,23 @@ training trajectory; no across-seed uncertainty is available.
 \subsection{Main results}
 \label{sec:llm-experiments}
 
-Figure~\ref{fig:llm-main} compares four 30B constructions that pair a
-permissive high-support update with a prespecified low-support safeguard.
-Panels (a) and (b) are complete-recipe comparisons matched on the safeguard's
-clip band; panels (c) and (d) directly compare static and ESS-conditioned
-versions of the named estimator.
+Figure~\ref{fig:llm-main} tests one conditional template: use TIS 3 while
+effective support is high, then activate a prespecified clipping rule when ESS
+falls below $0.1$. Panels (a)--(c) vary the low-support safeguard and compare
+the conditional construction with its always-on counterpart. Panel (d)
+directly exposes the targeted failure: TIS 3 alone learns quickly and then
+collapses, whereas ESS-conditioned clipping preserves the gain. The first
+three panels are complete-recipe comparisons matched on the low-support
+safeguard.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/curves/overall.pdf}
   \caption{ESS-conditioned policy optimization on Qwen3-30B-A3B. (a) Static
-  GRPO versus TIS 3 with an ESS-conditioned GRPO safeguard. (b) Static
-  Clip-Higher versus TIS 3 with an ESS-conditioned Clip-Higher safeguard.
-  (c) Static versus ESS-conditioned DPPO. (d) Static TIS 3 versus the same
-  TIS-3/Clip-Higher trajectory shown in panel (b). Direct labels give the last
+  GRPO versus TIS 3 at high ESS and GRPO clipping at low ESS. (b) Static
+  Clip-Higher versus TIS 3 at high ESS and Clip-Higher at low ESS. (c) Static
+  DPPO versus TIS 3 at high ESS and DPPO at low ESS. (d) Static TIS 3 versus
+  the TIS-3/Clip-Higher trajectory from panel (b). Direct labels give the last
   reported AIME-2024 mean@16; static TIS 3 ends at step 170 after collapse,
   while the other trajectories end at step 200.}
   \label{fig:llm-main}
@@ -702,50 +707,47 @@ versions of the named estimator.
 \paragraph{GRPO.}
 Static GRPO peaks at $29.6\%$ and finishes at $26.2\%$. The conditional recipe,
 which uses TIS 3 while ESS is high and the standard $0.2/0.2$ GRPO band when
-ESS is low, peaks at $40.8\%$ and finishes at $38.5\%$. Because the
-high-support branches differ, this is a band-matched comparison of complete
-recipes rather than a gate-only ablation.
+ESS is low, peaks at $40.8\%$ and finishes at $38.5\%$. Selective clipping
+therefore retains the permissive high-support phase while improving both the
+peak and the final evaluation over always-on GRPO.
 
 \paragraph{Clip-Higher.}
 Always applying the $0.2/0.28$ Clip-Higher band reaches and finishes at
-$37.9\%$. Using TIS 3 in the high-support regime and activating the same band
-only in the low-support regime instead peaks at $47.3\%$ and finishes at
-$44.8\%$. This is likewise a complete-recipe comparison, now holding the
-low-support safeguard fixed.
+$37.9\%$. Using TIS 3 at high ESS and activating the same band only at low ESS
+instead peaks at $47.3\%$ and finishes at $44.8\%$. Delaying the safeguard
+until support contracts again improves the entire observed trajectory.
 
 \paragraph{DPPO.}
-Static DPPO peaks at $37.5\%$ but recedes to $30.4\%$, whereas its
-ESS-conditioned counterpart peaks at $40.2\%$ and finishes at $39.2\%$.
-Conditioning therefore preserves the late trajectory without sacrificing its
-best observed performance.
+Static DPPO peaks at $37.5\%$ but recedes to $30.4\%$, whereas the
+TIS-3/DPPO conditional construction peaks at $40.2\%$ and finishes at
+$39.2\%$. The same high-ESS TIS-3 and low-ESS safeguard pattern therefore
+preserves late performance under a third clipping rule.
 
 \paragraph{TIS 3.}
-Without an ESS gate, TIS 3 reaches $31.7\%$ at step 60 and then collapses to
-$0.417\%$ at its last recorded evaluation, step 170. The conditional
-TIS-3/Clip-Higher construction instead reaches $47.3\%$ and finishes at
-$44.8\%$. Its trajectory exhibits the intended ordering: permissive learning
-first, followed by increasingly controlled updates as effective support
-contracts.
+The direct TIS-3 comparison makes the failure-prevention effect explicit.
+Without ESS conditioning, TIS 3 reaches $31.7\%$ at step 60 and then collapses
+to $0.417\%$ at its last recorded evaluation, step 170. Switching to
+Clip-Higher only in the low-ESS regime instead reaches $47.3\%$ and finishes
+at $44.8\%$. ESS conditioning prevents the observed permissive-estimator
+collapse while retaining its high-support learning phase.
 
 \paragraph{Unclipped update.}
 
-The unclipped comparison isolates the intervention rule more directly. All
-three runs in Figure~\ref{fig:llm-noclip-gate} use the same unclipped
-coefficient update. The reference has no ESS-conditioned action; the other two
-runs either clip or skip when raw ESS is below $0.1$. The reference attains the
-highest early peak, $44.4\%$, but finishes at $34.6\%$. Conditional clipping
-retains nearly the same peak, $43.3\%$, and improves the endpoint to $38.1\%$.
-Skipping the low-support updates finishes at $35.6\%$, but reaches that level
-more slowly. Thus, in this controlled family, clipping preserves most of the
-permissive learning while providing the strongest late retention.
+The unclipped comparison tests whether the same timing principle extends
+beyond TIS. Both runs in Figure~\ref{fig:llm-noclip-gate} use an unclipped
+high-support update, but one activates conventional clipping when raw ESS is
+below $0.1$. The unconditioned trajectory peaks at $44.4\%$ and finishes at
+$34.6\%$; conditional clipping retains a $43.3\%$ peak and improves the
+endpoint to $38.1\%$. Low-ESS clipping therefore preserves most of the
+permissive early gain while improving late retention.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.72\linewidth]{figures_mains/result/q30ba3b/noclip/overall.pdf}
-  \caption{Gate-action ablation with an unclipped Qwen3-30B-A3B update. The
-  reference run has no ESS-conditioned action; its nominal fraction trigger
-  produces only three small interventions. The other runs either clip or skip
-  a minibatch update when raw normalized ESS is below $0.1$. Direct labels give
+  \caption{ESS-conditioned clipping with an unclipped Qwen3-30B-A3B update.
+  The comparison activates conventional clipping only when raw normalized ESS
+  is below $0.1$. The reference has no ESS-conditioned action; its nominal
+  fraction trigger produces only three small interventions. Direct labels give
   the step-200 AIME-2024 mean@16.}
   \label{fig:llm-noclip-gate}
 \end{figure}
@@ -758,22 +760,28 @@ $0.153$ to $0.668$. Figure~\ref{fig:llm-gate-action} reports the corresponding
 patterns for all three safeguards. Protection is therefore present but limited
 early, and intensifies as effective support contracts.
 
-\paragraph{TIS 5.}
-The TIS-5 pair isolates the gate more directly because both trajectories use
-the same permissive update and differ only in the ESS-conditioned skip. Static
-TIS 5 peaks at $28.3\%$ at step 60 and then collapses to $0.00\%$, whereas the
-conditioned trajectory reaches and finishes at $39.4\%$. This replication
-therefore shows that the late rescue is not specific to the TIS-3 cap or to
-clipping as the low-support action.
+\paragraph{Other ESS-conditioned optimization variants.}
+A hard update veto provides a simpler low-support action.
+Figure~\ref{fig:skip-variants} groups this alternative across two permissive
+updates. With an unclipped high-support update, ESS-conditioned skipping
+finishes at $35.6\%$, compared with $34.6\%$ without an ESS action and $38.1\%$
+under conditional clipping. The matched TIS-5 pair gives the sharper
+failure-prevention result: static TIS 5 peaks at $28.3\%$ and collapses to
+$0.00\%$, whereas the trajectory that
+skips low-ESS updates reaches and finishes at $39.4\%$. The same observed
+collapse is therefore prevented at a second TIS cap and with a simpler ESS
+action, although skipping need not be the best action when the permissive run
+remains viable.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/tis5/overall.pdf}
-  \caption{Gate-only replication with TIS cap 5. Panel (a) compares the
-  AIME-2024 mean@16 trajectories; panel (b) reports normalized shaped ESS.
-  The static trajectory collapses to $0.00\%$, whereas the fixed-$0.1$
-  ESS-conditioned skip reaches $39.4\%$.}
-  \label{fig:tis5-replication}
+  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/skip_gate/overall.pdf}
+  \caption{ESS-conditioned skipping as an alternative low-support action.
+  Panel (a) applies the veto to an otherwise unclipped update. Panel (b) gives
+  the matched TIS-5 comparison: static TIS 5 collapses, whereas skipping
+  low-support updates finishes at $39.4\%$. All curves report AIME-2024
+  mean@16.}
+  \label{fig:skip-variants}
 \end{figure}
 \FloatBarrier
 
@@ -858,11 +866,11 @@ Section~\ref{sec:gaussian-example}.
 
 
 
-We compare IS, upper-truncated IS with $c=3$, and the PPO-style rule
+We compare IS and the PPO-style rule
 in Equation~\eqref{eq:ppo-coefficient-rule}, using the exact current-policy
 value baseline.
 
-Because the score contribution is polynomial and each truncation or mask
+Because the score contribution is polynomial and each mask
 boundary is linear in $z$, the means, MSEs, and update second moments are finite
 sums of truncated Gaussian moments.
 
@@ -909,7 +917,7 @@ fixed-step certificate is exact:
  =B_u(\eta).
  \label{eq:gaussian-exact-gain}
 \end{equation}
-We use $N=32$, the standard PPO radius $\epsilon=0.2$, TIS cap $c=3$, and
+We use $N=32$, the standard PPO radius $\epsilon=0.2$, and
 choose $g=2$ and $\eta=0.4$ so that the MSE, improvement, and abstention
 regimes are all visible on one monotone ESS path.
 
@@ -947,21 +955,6 @@ per-sample moments
  \qquad u\in\{\mathrm{IS},\mathrm{P}\}.
  \label{eq:gaussian-exact-moments}
 \end{align}
-For TIS, which in this one-factor bandit uses
-$\min\{W_\Delta,c\}f_g$, let
-$b_c(\Delta):=\{\log c-\Delta^2/2\}/\Delta$. Since
-$\min\{W_\Delta,c\}=W_\Delta$ below $b_c(\Delta)$ and equals $c$ above it,
-\begin{align}
- \mu_{\mathrm{T}}(\Delta)
- &=\int_{-\infty}^{b_c(\Delta)}f_g(z)\phi(z)\,dz
- +c\int_{b_c(\Delta)}^\infty f_g(z)\phi(z+\Delta)\,dz,
- \nonumber\\
- h_{\mathrm{T}}(\Delta)
- &=e^{\Delta^2}\int_{-\infty}^{b_c(\Delta)}
- f_g(z)^2\phi(z-\Delta)\,dz
- +c^2\int_{b_c(\Delta)}^\infty f_g(z)^2\phi(z+\Delta)\,dz.
- \label{eq:gaussian-tis-moments}
-\end{align}
 In particular, $\mu_{\mathrm{IS}}=g$. For an iid estimator with batch size $N$,
 \begin{equation}
  m_u=(\mu_u-g)^2+\frac{h_u-\mu_u^2}{N},
@@ -988,10 +981,9 @@ in Equation~\eqref{eq:gaussian-exact-gain} gives the reported boundaries.
 \paragraph{Results}
 We evaluate
 $0.2\le\Delta\le\sqrt{-\log(0.005)}$. Numerical evaluation of the closed-form
-moments gives four substantive boundaries on this branch:
+moments gives three substantive boundaries on this branch:
 \begin{equation}
  \rho_{\mathrm{MSE}}=0.123,
- \qquad \rho_{\mathrm{T}}=0.105,
  \qquad
  \rho_B=0.0392,
  \qquad
@@ -1002,15 +994,7 @@ The MSE oracle over $\mathcal U=\{u_{\mathrm{IS}},u_{\mathrm{P}}\}$ selects IS
 above $\rho_{\mathrm{MSE}}$ and PPO below it. The safe certificate oracle adds
 the null update and instead selects IS for $\rho>\rho_B$, PPO for
 $\rho_{\mathrm{stop}}<\rho<\rho_B$, and no update for
-$\rho<\rho_{\mathrm{stop}}$. Adjacent choices tie at each boundary. The TIS
-overlay has lower MSE than both pairwise candidates on the displayed branch;
-its certificate overtakes IS at $\rho_{\mathrm{T}}$ and remains above the PPO
-certificate thereafter.
-Because the cap barely changes the upper tail at the highest-support edge, IS
-and TIS also cross at $\rho=0.922$ with a maximum certificate difference of
-only $2.64\times10^{-6}$ over $0.922<\rho\le0.961$. They are visually
-indistinguishable there; $\rho_{\mathrm T}=0.105$ denotes the substantive
-low-support crossover discussed in the main text.
+$\rho<\rho_{\mathrm{stop}}$. Adjacent choices tie at each boundary.
 
 \section{Additional coefficient-rule details}
 \label{app:coefficient-rules}

@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """Gate-action ablation for the unclipped Qwen3-30B-A3B update.
 
-All three runs use the same unclipped coefficient update and differ in how a
-low-ESS minibatch is handled. The main-text figure shows policy performance
-only; ESS has already been established as the support diagnostic in Section 5.
+Both runs use the same unclipped high-support update. One leaves it unchanged;
+the other activates conventional clipping on a low-ESS minibatch. The skip
+variant is reported later with the other alternative ESS actions.
 
 Output:
   figures_mains/result/q30ba3b/noclip/overall.pdf
@@ -23,7 +23,6 @@ paperstyle.FIGDIR = os.path.join(ROOT, "figures_mains")
 VARIANTS = [
     ("noclip_ungated", "no ESS action", "#4d4d4d", "--", 1.2, -8),
     ("noclip_ess_clip", r"ESS $\rightarrow$ clip", C["ours"], "-", 1.6, 7),
-    ("noclip_ess_skip", r"ESS $\rightarrow$ skip", C["gated"], "-.", 1.4, 8),
 ]
 
 
@@ -62,5 +61,5 @@ ax.set_ylim(10, 48)
 ax.set_xlabel("training step")
 ax.set_ylabel("AIME-2024 mean@16 (%)")
 ax.set_title("Qwen3-30B-A3B, unclipped update", loc="left")
-fig.legend(loc="outside lower center", ncol=3, frameon=False)
+fig.legend(loc="outside lower center", ncol=2, frameon=False)
 save(fig, "result/q30ba3b/noclip/overall")

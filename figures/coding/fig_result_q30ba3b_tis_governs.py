@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """Three support trajectories used in Section 5.
 
-The first two panels reproduce the TIS failures from the motivation figure.
+The first two panels reproduce the TIS failures from the motivation figure
+and retain enough of each ESS trace to show a sustained low-support episode.
 The third supplies the complementary unclipped-GRPO trajectory, where an
-isolated low-ESS observation does not trigger immediate failure. All panels
+isolated low-ESS observation is followed by immediate recovery. All panels
 use the same 0.01 ESS reference and omit gradient-norm diagnostics.
 """
 import os
@@ -13,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import matplotlib.pyplot as plt
 import paperstyle
 from paperstyle import C, FULL, save, use_paper_style
-from runlog import ess_cut, series
+from runlog import series
 
 
 paperstyle.FIGDIR = os.path.abspath(
@@ -26,12 +27,22 @@ paperstyle.FIGDIR = os.path.abspath(
 )
 
 PANELS = [
-    ("cispo3_nogate", "TIS 3, no gate", True),
-    ("cispo5_nogate", "TIS 5, no gate", True),
-    ("noclip_ungated", "GRPO, no clipping", False),
+    ("cispo3_nogate", "TIS 3, no gate", 100),
+    ("cispo5_nogate", "TIS 5, no gate", 110),
+    ("noclip_ungated", "GRPO, no clipping", None),
 ]
 ESS_REFERENCE = 0.01
+PERSISTENCE_LENGTH = 5
 X_LIMIT = 203
+
+
+def sustained_onset(steps, values):
+    """First of five consecutive observations below the ESS reference."""
+    for index in range(len(values) - PERSISTENCE_LENGTH + 1):
+        window = values[index:index + PERSISTENCE_LENGTH]
+        if all(value < ESS_REFERENCE for value in window):
+            return steps[index]
+    return None
 
 
 use_paper_style()
@@ -46,17 +57,17 @@ fig, validation_axes = plt.subplots(
 
 legend_handles = None
 legend_labels = None
-for index, (run, title, truncate_after_collapse) in enumerate(PANELS):
+for index, (run, title, failure_step) in enumerate(PANELS):
     validation_axis = validation_axes[index]
     eval_steps, eval_values = series(run, "eval")
-    cut = ess_cut(run, ESS_REFERENCE) if truncate_after_collapse else None
-    ess_steps, ess_values = series(run, "ess", cut=cut)
     full_ess_steps, full_ess_values = series(run, "ess")
+    ess_steps, ess_values = series(run, "ess", cut=failure_step)
     first_crossing = next(
         step
         for step, value in zip(full_ess_steps, full_ess_values)
         if value < ESS_REFERENCE
     )
+    onset = sustained_onset(full_ess_steps, full_ess_values)
 
     validation_line = validation_axis.plot(
         eval_steps,
@@ -88,17 +99,22 @@ for index, (run, title, truncate_after_collapse) in enumerate(PANELS):
         linewidth=0.9,
         label="ESS reference 0.01",
     )
-    ess_axis.axvline(
-        first_crossing,
-        color=C["ours"],
-        linestyle=":",
-        linewidth=0.9,
-    )
-    if cut is not None:
-        ess_axis.axvspan(cut, X_LIMIT, color=C["ours"], alpha=0.05, linewidth=0)
+    marker_step = onset if onset is not None else first_crossing
+    ess_axis.axvline(marker_step, color=C["ours"], linestyle=":", linewidth=0.9)
+    if onset is not None and failure_step is not None:
+        ess_axis.axvspan(
+            onset,
+            failure_step,
+            color=C["ours"],
+            alpha=0.07,
+            linewidth=0,
+        )
+        annotation = f"sustained low ESS: step {onset}"
+    else:
+        annotation = f"isolated dip: step {first_crossing}"
     ess_axis.annotate(
-        f"ESS $<$ 0.01: step {first_crossing}",
-        xy=(first_crossing + 3, 0.665),
+        annotation,
+        xy=(marker_step + 3, 0.665),
         fontsize=6.0,
         color=C["ours"],
         va="top",
