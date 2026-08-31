@@ -727,6 +727,26 @@ $44.8\%$. Its trajectory exhibits the intended ordering: permissive learning
 first, followed by increasingly controlled updates as effective support
 contracts.
 
+
+\paragraph{TIS 5.}
+The TIS-5 pair isolates the gate more directly because both trajectories use
+the same permissive update and differ only in the ESS-conditioned skip. Static
+TIS 5 peaks at $28.3\%$ at step 60 and then collapses to $0.00\%$, whereas the
+conditioned trajectory reaches and finishes at $39.4\%$. This replication
+therefore shows that the late rescue is not specific to the TIS-3 cap or to
+clipping as the low-support action.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/tis5/overall.pdf}
+  \caption{Gate-only replication with TIS cap 5. Panel (a) compares the
+  AIME-2024 mean@16 trajectories; panel (b) reports normalized shaped ESS.
+  The static trajectory collapses to $0.00\%$, whereas the fixed-$0.1$
+  ESS-conditioned skip reaches $39.4\%$.}
+  \label{fig:tis5-replication}
+\end{figure}
+\FloatBarrier
+
 \paragraph{Unclipped update.}
 
 The unclipped comparison isolates the intervention rule more directly. All
@@ -758,24 +778,6 @@ $0.153$ to $0.668$. Figure~\ref{fig:llm-gate-action} reports the corresponding
 patterns for all three safeguards. Protection is therefore present but limited
 early, and intensifies as effective support contracts.
 
-\paragraph{TIS 5.}
-The TIS-5 pair isolates the gate more directly because both trajectories use
-the same permissive update and differ only in the ESS-conditioned skip. Static
-TIS 5 peaks at $28.3\%$ at step 60 and then collapses to $0.00\%$, whereas the
-conditioned trajectory reaches and finishes at $39.4\%$. This replication
-therefore shows that the late rescue is not specific to the TIS-3 cap or to
-clipping as the low-support action.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/tis5/overall.pdf}
-  \caption{Gate-only replication with TIS cap 5. Panel (a) compares the
-  AIME-2024 mean@16 trajectories; panel (b) reports normalized shaped ESS.
-  The static trajectory collapses to $0.00\%$, whereas the fixed-$0.1$
-  ESS-conditioned skip reaches $39.4\%$.}
-  \label{fig:tis5-replication}
-\end{figure}
-\FloatBarrier
 
 \subsection{Transfer across models and objectives}
 
