@@ -26,16 +26,21 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import matplotlib.pyplot as plt
+import paperstyle
 from paperstyle import COL, FULL, C, use_paper_style, save
 from runlog import series, ess_cut
 
 FLOOR = 0.01
+ESS_REFERENCE = 0.01
 XMAX = 203
 # (run, panel title, output slug)
 PANELS = [
     ("cispo3_nogate", "TIS 3, no gate", "tis3_nogate"),
     ("cispo5_nogate", "TIS 5, no gate", "tis5_nogate"),
 ]
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+paperstyle.FIGDIR = os.path.join(ROOT, "figures_mains")
 
 
 def draw(a, run, show_right_label=True):
@@ -51,7 +56,13 @@ def draw(a, run, show_right_label=True):
     ex_, ey = series(run, "ess", cut=cut)
     a2 = a.twinx()
     a2.plot(ex_, ey, color=C["ours"], lw=1.1, label="ESS (right)")
-    a2.axhline(0.1, color=C["ours"], ls=(0, (1, 2)), lw=0.9, label="gate threshold 0.1")
+    a2.axhline(
+        ESS_REFERENCE,
+        color=C["ours"],
+        ls=(0, (1, 2)),
+        lw=0.9,
+        label="ESS reference 0.01",
+    )
     a2.set_ylim(0, 0.68)
     a2.grid(False)
     a2.spines["right"].set_visible(True)
@@ -60,6 +71,7 @@ def draw(a, run, show_right_label=True):
     if show_right_label:
         a2.set_ylabel("ESS (normalized)", color=C["ours"])
     if cut is not None:
+        a2.axvline(cut, color=C["ours"], ls=":", lw=0.9)
         a2.axvspan(cut, XMAX, color=C["ours"], alpha=0.06, lw=0)
         a2.annotate(f"ESS $<$ {FLOOR:g} after step {cut}", xy=(cut + 4, 0.665),
                     fontsize=6.5, color=C["ours"], va="top")

@@ -557,25 +557,27 @@ gradient-estimation MSE, whereas the certificate oracle selects the candidate
 with larger $B_k(u;\eta_k)$. The safe certificate oracle additionally includes
 a null update with certificate zero. To show how the alternative choices in
 Section~\ref{sec:clipping-recovery} act, we also report upper-truncated IS with
-the matched cap $c=1+\epsilon=1.2$. We use $N=32$, PPO radius
+cap $c=3$. We use $N=32$, PPO radius
 $\epsilon=0.2$, gradient $g=2$, and step size $\eta=0.4$, and vary $\rho$
 along one monotone ESS path.
 
 Figure~\ref{fig:gaussian-one-step} first shows why MSE matters. As effective
 support contracts from $\rho=0.961$ to $0.0109$, the IS MSE rises from $0.228$
-to $62.2$ and its exact expected improvement falls from $1.262$ to $-3.695$.
+to $62.3$ and its exact expected improvement falls from $1.26$ to $-3.70$.
 The same ESS path therefore reveals the reliability loss before choosing a
 particular intervention. It is a regime diagnostic, not the oracle: the
 pairwise IS--PPO MSE crossover occurs at
-$\rho_{\mathrm{MSE}}=0.122756$, while their certificate crossover occurs later
-at $\rho_B=0.039230$.
+$\rho_{\mathrm{MSE}}=0.123$, while their certificate crossover occurs later
+at $\rho_B=0.0392$.
 
 The two controlled estimators explain the gap. TIS caps the upper tail while
-retaining substantially more population-gradient alignment; it overtakes the
-IS certificate at $\rho=0.093716$ and remains positive throughout the displayed
-path. PPO masking removes more of the update. It overtakes IS only below
+retaining substantially more population-gradient alignment. At the
+highest-support edge, TIS and IS are indistinguishable on the plotted scale;
+the substantive low-support crossover occurs at $\rho=0.105$, below which TIS
+remains positive throughout the displayed path. PPO masking removes more of
+the update. It overtakes IS only below
 $\rho_B$ and reaches zero certificate at
-$\rho_{\mathrm{stop}}=0.010890$, marked by the low-support reference line in
+$\rho_{\mathrm{stop}}=0.0109$, marked by the low-support reference line in
 Figure~\ref{fig:gaussian-one-step}. These values are specific to
 $(g,N,\epsilon,\eta,c)$, but the ordering is the point: ESS locates the
 support regime, while MSE reduction and retained alignment jointly determine
@@ -585,13 +587,13 @@ the better update.
   \centering
   \includegraphics[width=\linewidth]{figures/gaussian_quadratic_one_step.pdf}
   \caption{Exact Gaussian-bandit comparison with $g=2$, $N=32$,
-  $\epsilon=0.2$, $c=1.2$, and $\eta=0.4$. (a) Gradient MSE as effective
+  $\epsilon=0.2$, $c=3$, and $\eta=0.4$. (a) Gradient MSE as effective
   support contracts. (b) Population-gradient alignment retained by each
   estimator. (c) Exact expected one-step improvement, equal here to
-  $B_u(\eta)$. The IS--TIS certificate crossover is $\rho=0.093716$; the
-  dashed line marks the IS--PPO crossover at $\rho_B=0.039230$, and the
+  $B_u(\eta)$. The substantive IS--TIS crossover is $\rho=0.105$; the
+  dashed line marks the IS--PPO crossover at $\rho_B=0.0392$, and the
   dash-dotted line marks PPO's zero certificate at
-  $\rho_{\mathrm{stop}}=0.010890$.}
+  $\rho_{\mathrm{stop}}=0.0109$.}
   \label{fig:gaussian-one-step}
 \end{figure}
 \FloatBarrier
@@ -600,41 +602,32 @@ the better update.
 
 The Gaussian comparison holds the policy state fixed. Large-model training
 adds a temporal question: does observed effective support deteriorate before
-the performance loss becomes visible? We return to the two permissive
-Qwen3-30B-A3B trajectories in Figure~\ref{fig:llm-motivation}, which use
-truncated importance sampling (TIS) with caps 3 and 5. We complement them with
-a third trajectory trained with GRPO without clipping. Each run is trained for
-up to 200 policy updates and evaluated on AIME-2024 using mean@16.
+the performance loss becomes visible? Figure~\ref{fig:llm-no-clip-ess} places
+the two permissive Qwen3-30B-A3B trajectories from
+Figure~\ref{fig:llm-motivation}, which use TIS caps 3 and 5, beside a third
+trajectory trained with GRPO without clipping. Each run is trained for up to
+200 policy updates and evaluated on AIME-2024 using mean@16.
 
-The TIS trajectories establish the temporal ordering that motivates an ESS
-diagnostic. In Figure~\ref{fig:llm-motivation}, sample ESS first falls below
-$0.1$ at steps 66 and 62 for TIS 3 and TIS 5, respectively. These crossings
-occur after the step-60 performance peaks but before the next evaluation at
-step 70 reveals a decline. Performance subsequently falls below its step-0
-value at steps 100 and 110. 
-
-Figure~\ref{fig:llm-no-clip-ess} gives the complementary case. The first ESS
-observation below $0.1$ at step 57 is transient. We therefore define the onset
-of a low-support episode, using ESS alone, as the first of five consecutive
-observations below $0.1$; this occurs at step 99. From the first evaluation
-after this onset at step 100 through the performance peak at step 140, 34 of 41
-ESS observations are below $0.1$, while AIME performance rises from $39.8\%$
-to $44.4\%$. Low ESS therefore identifies weak effective support without
-implying immediate performance failure or determining which controlled
-estimator gives the better update.
+The two TIS trajectories establish the temporal ordering that motivates an
+ESS diagnostic. Their sample ESS first falls below $0.01$ at steps 77 and 68,
+respectively, after both performance curves peak at step 60 and before their
+subsequent collapse. The unclipped trajectory supplies the necessary
+counterexample: its first sub-$0.01$ observation at step 57 is isolated, ESS
+recovers at the next updates, and AIME performance continues from $28.1\%$ at
+step 60 to a $44.4\%$ peak at step 140. Low ESS therefore identifies weak
+effective support without itself certifying immediate failure or determining
+which controlled estimator gives the better update.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.72\linewidth]{figures_mains/result/q30ba3b/ungated_governs/ess_governs_update.pdf}
-  \caption{Effective support during Qwen3-30B-A3B GRPO without clipping.
-  The black curve reports AIME-2024 mean@16, and the red curve reports
-  per-step normalized sequence ESS computed before truncation or masking. The
-  red horizontal line marks the prespecified threshold $0.1$. The red dotted
-  vertical line marks the low-support onset at step 99, defined as the first of
-  five consecutive ESS observations below $0.1$; the black dashed line marks
-  the performance peak at step 140. From the first evaluation after onset at
-  step 100 through the peak, 34 of 41 ESS observations are below $0.1$, while
-  performance rises from $39.8\%$ to $44.4\%$.}
+  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/ungated_governs/ess_governs_update.pdf}
+  \caption{Effective support along three permissive Qwen3-30B-A3B
+  trajectories. Panels (a) and (b) reproduce the TIS-3 and TIS-5 motivation
+  runs, whose first crossings below the $0.01$ ESS reference precede collapse.
+  Panel (c) shows GRPO without clipping: its crossing at step 57 is transient,
+  and performance continues improving to step 140. The black curves report
+  AIME-2024 mean@16 and the red curves report per-step normalized sequence
+  ESS. Vertical dotted lines mark the first sub-$0.01$ observation.}
   \label{fig:llm-no-clip-ess}
 \end{figure}
 \FloatBarrier
@@ -677,9 +670,9 @@ ratio cap 3, or no coefficient clipping in the explicit unclipped ablation.
 The low-support branch uses conventional GRPO clipping, Clip-Higher
 \citep{yu2025dapo}, DPPO \citep{qi2026dppo}, or skips the minibatch update.
 Most variants compute $\widehat\rho$ from the raw complete-sequence ratios
-before coefficient control. The 30B TIS/Clip-Higher construction, its 8B
-counterpart, and the RLHF transfer instead compute the same statistic after
-the coefficient cap; we refer to this implementation as shaped ESS. Results
+before coefficient control. The 30B TIS/Clip-Higher and TIS-5 constructions,
+their 8B counterpart, and the RLHF transfer instead compute the same statistic
+after the coefficient cap; we refer to this implementation as shaped ESS. Results
 are complete training trajectories, so the comparisons below describe the
 temporal and endpoint behavior of the reported runs. Each curve represents one
 training trajectory; no across-seed uncertainty is available.
@@ -687,42 +680,54 @@ training trajectory; no across-seed uncertainty is available.
 \subsection{Main results}
 \label{sec:llm-experiments}
 
-\textcolor{blue}{Add the figure for the comparision in GRPO, and GRPO-clip higher too. for each result, add paragraph}
-
-We now address failure modes each..
-
-\paragraph{TIS 3..}
-Figure~\ref{fig:llm-main} shows the two clearest conditional transitions. In
-panel (a), static DPPO peaks at $37.5\%$ but recedes to $30.4\%$, whereas the
-ESS-conditioned trajectory finishes at $39.2\%$. In panel (b), TIS 3 without
-an ESS gate reaches $31.7\%$ at step 60 and then collapses to $0.4\%$ at its
-last recorded evaluation, step 170. The conditional TIS 3/Clip-Higher
-construction instead reaches $47.3\%$ and finishes at $44.8\%$. The latter is
-the full conditional construction: TIS 3 is the permissive branch and
-Clip-Higher is the low-support branch. Its trajectory exhibits the intended
-ordering, with permissive learning first and increasingly controlled updates
-as effective support contracts.
+Figure~\ref{fig:llm-main} compares four 30B constructions that pair a
+permissive high-support update with a prespecified low-support safeguard.
+Panels (a) and (b) are complete-recipe comparisons matched on the safeguard's
+clip band; panels (c) and (d) directly compare static and ESS-conditioned
+versions of the named estimator.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/curves/overall.pdf}
-  \caption{ESS-conditioned policy optimization on Qwen3-30B-A3B. Panel (a)
-  compares static DPPO with a TIS-3 update that activates DPPO in the
-  low-support regime. Panel (b) compares TIS 3 without an ESS gate with the
-  conditional TIS-3/Clip-Higher construction. Direct labels give the last
-  reported AIME-2024 mean@16; the static TIS-3 trajectory ends at step 170
-  after collapse, while the other trajectories end at step 200.}
+  \caption{ESS-conditioned policy optimization on Qwen3-30B-A3B. (a) Static
+  GRPO versus TIS 3 with an ESS-conditioned GRPO safeguard. (b) Static
+  Clip-Higher versus TIS 3 with an ESS-conditioned Clip-Higher safeguard.
+  (c) Static versus ESS-conditioned DPPO. (d) Static TIS 3 versus the same
+  TIS-3/Clip-Higher trajectory shown in panel (b). Direct labels give the last
+  reported AIME-2024 mean@16; static TIS 3 ends at step 170 after collapse,
+  while the other trajectories end at step 200.}
   \label{fig:llm-main}
 \end{figure}
 
-The same endpoint ordering appears in the two band-matched operational
-comparisons. A TIS-3 construction that activates the standard GRPO band
-$0.2/0.2$ finishes at $38.5\%$, compared with $26.2\%$ for static GRPO. With
-the Clip-Higher band $0.2/0.28$, the corresponding endpoints are $44.8\%$ and
-$37.9\%$. These are comparisons of the complete conditional recipes because
-their high-support branches differ.
+\paragraph{GRPO.}
+Static GRPO peaks at $29.6\%$ and finishes at $26.2\%$. The conditional recipe,
+which uses TIS 3 while ESS is high and the standard $0.2/0.2$ GRPO band when
+ESS is low, peaks at $40.8\%$ and finishes at $38.5\%$. Because the
+high-support branches differ, this is a band-matched comparison of complete
+recipes rather than a gate-only ablation.
 
-\paragraph{GRPO no clips}
+\paragraph{Clip-Higher.}
+Always applying the $0.2/0.28$ Clip-Higher band reaches and finishes at
+$37.9\%$. Using TIS 3 in the high-support regime and activating the same band
+only in the low-support regime instead peaks at $47.3\%$ and finishes at
+$44.8\%$. This is likewise a complete-recipe comparison, now holding the
+low-support safeguard fixed.
+
+\paragraph{DPPO.}
+Static DPPO peaks at $37.5\%$ but recedes to $30.4\%$, whereas its
+ESS-conditioned counterpart peaks at $40.2\%$ and finishes at $39.2\%$.
+Conditioning therefore preserves the late trajectory without sacrificing its
+best observed performance.
+
+\paragraph{TIS 3.}
+Without an ESS gate, TIS 3 reaches $31.7\%$ at step 60 and then collapses to
+$0.417\%$ at its last recorded evaluation, step 170. The conditional
+TIS-3/Clip-Higher construction instead reaches $47.3\%$ and finishes at
+$44.8\%$. Its trajectory exhibits the intended ordering: permissive learning
+first, followed by increasingly controlled updates as effective support
+contracts.
+
+\paragraph{Unclipped update.}
 
 The unclipped comparison isolates the intervention rule more directly. All
 three runs in Figure~\ref{fig:llm-noclip-gate} use the same unclipped
@@ -753,8 +758,24 @@ $0.153$ to $0.668$. Figure~\ref{fig:llm-gate-action} reports the corresponding
 patterns for all three safeguards. Protection is therefore present but limited
 early, and intensifies as effective support contracts.
 
-\paragraph{TIS 5..}
-\textcolor{blue}{add tis 5 results}
+\paragraph{TIS 5.}
+The TIS-5 pair isolates the gate more directly because both trajectories use
+the same permissive update and differ only in the ESS-conditioned skip. Static
+TIS 5 peaks at $28.3\%$ at step 60 and then collapses to $0.00\%$, whereas the
+conditioned trajectory reaches and finishes at $39.4\%$. This replication
+therefore shows that the late rescue is not specific to the TIS-3 cap or to
+clipping as the low-support action.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/tis5/overall.pdf}
+  \caption{Gate-only replication with TIS cap 5. Panel (a) compares the
+  AIME-2024 mean@16 trajectories; panel (b) reports normalized shaped ESS.
+  The static trajectory collapses to $0.00\%$, whereas the fixed-$0.1$
+  ESS-conditioned skip reaches $39.4\%$.}
+  \label{fig:tis5-replication}
+\end{figure}
+\FloatBarrier
 
 \subsection{Transfer across models and objectives}
 
@@ -783,17 +804,15 @@ Qwen3-4B-Instruct-2507 for 200 updates on Anthropic HH-RLHF
 \citep{liu2024skywork} as the reward model. Figure~\ref{fig:llm-rlhf-transfer}
 compares the complete GRPO and TIS-3-plus-ESS recipes. Their reward-model
 scores start at comparable levels and finish at $43.0$ and $60.7$,
-respectively. The conditional recipe also produces longer responses, ending
-at 460 tokens rather than 352. This experiment tests optimization transfer on
-the training reward model; it does not measure human preference directly.
+respectively. This experiment tests optimization transfer on the training
+reward model; it does not measure human preference directly.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures_mains/result/rlhf_4b/overall.pdf}
-  \caption{\textcolor{blue}{delete response length plot and the explanations }Transfer to open-ended RLHF on Qwen3-4B-Instruct-2507. Panel (a)
-  reports the training reward-model score and panel (b) reports mean response
-  length. Thin curves are per-step observations; thick curves are trailing
-  seven-step means. Direct labels give the step-200 observations. This is a
+  \includegraphics[width=0.72\linewidth]{figures_mains/result/rlhf_4b/overall.pdf}
+  \caption{Transfer to open-ended RLHF on Qwen3-4B-Instruct-2507. Thin curves
+  are per-step reward-model scores; thick curves are trailing seven-step
+  means. Direct labels give the step-200 observations. This is a
   complete-recipe comparison between GRPO and TIS 3 with an ESS-conditioned
   safeguard.}
   \label{fig:llm-rlhf-transfer}
@@ -839,7 +858,7 @@ Section~\ref{sec:gaussian-example}.
 
 
 
-We compare IS, upper-truncated IS with $c=1+\epsilon$, and the PPO-style rule
+We compare IS, upper-truncated IS with $c=3$, and the PPO-style rule
 in Equation~\eqref{eq:ppo-coefficient-rule}, using the exact current-policy
 value baseline.
 
@@ -890,9 +909,9 @@ fixed-step certificate is exact:
  =B_u(\eta).
  \label{eq:gaussian-exact-gain}
 \end{equation}
-We use $N=32$, the standard PPO radius $\epsilon=0.2$, and choose $g=2$ and
-$\eta=0.4$ so that the MSE, improvement, and abstention regimes are all
-visible on one monotone ESS path.
+We use $N=32$, the standard PPO radius $\epsilon=0.2$, TIS cap $c=3$, and
+choose $g=2$ and $\eta=0.4$ so that the MSE, improvement, and abstention
+regimes are all visible on one monotone ESS path.
 
 \paragraph{Exact Closed Form Computations}
 Let $z=a-\theta$. Under the current policy,
@@ -969,14 +988,14 @@ in Equation~\eqref{eq:gaussian-exact-gain} gives the reported boundaries.
 \paragraph{Results}
 We evaluate
 $0.2\le\Delta\le\sqrt{-\log(0.005)}$. Numerical evaluation of the closed-form
-moments gives four distinct boundaries on this branch:
+moments gives four substantive boundaries on this branch:
 \begin{equation}
- \rho_{\mathrm{MSE}}=0.122756,
- \qquad \rho_{\mathrm{T}}=0.093716,
+ \rho_{\mathrm{MSE}}=0.123,
+ \qquad \rho_{\mathrm{T}}=0.105,
  \qquad
- \rho_B=0.039230,
+ \rho_B=0.0392,
  \qquad
- \rho_{\mathrm{stop}}=0.010890.
+ \rho_{\mathrm{stop}}=0.0109.
  \label{eq:gaussian-thresholds}
 \end{equation}
 The MSE oracle over $\mathcal U=\{u_{\mathrm{IS}},u_{\mathrm{P}}\}$ selects IS
@@ -987,6 +1006,11 @@ $\rho<\rho_{\mathrm{stop}}$. Adjacent choices tie at each boundary. The TIS
 overlay has lower MSE than both pairwise candidates on the displayed branch;
 its certificate overtakes IS at $\rho_{\mathrm{T}}$ and remains above the PPO
 certificate thereafter.
+Because the cap barely changes the upper tail at the highest-support edge, IS
+and TIS also cross at $\rho=0.922$ with a maximum certificate difference of
+only $2.64\times10^{-6}$ over $0.922<\rho\le0.961$. They are visually
+indistinguishable there; $\rho_{\mathrm T}=0.105$ denotes the substantive
+low-support crossover discussed in the main text.
 
 \section{Additional coefficient-rule details}
 \label{app:coefficient-rules}
@@ -1041,8 +1065,8 @@ conditional rule intervenes and the accompanying training dynamics.
 
 Figure~\ref{fig:llm-gate-action} shows the intended temporal ordering:
 intervention is already possible early, but its frequency increases as ESS
-contracts. The remaining figures record response length, entropy, reward, and
-a second permissive TIS setting.
+contracts. The remaining figures record response length, entropy, and reward
+diagnostics.
 
 \begin{figure}[htbp]
   \centering
@@ -1062,15 +1086,6 @@ a second permissive TIS setting.
   intervention increases the clipped fraction as ESS declines and keeps both
   diagnostics controlled.}
   \label{fig:tis3-dynamics}
-\end{figure}
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/tis5/overall.pdf}
-  \caption{Replication with TIS cap 5. The static trajectory collapses to zero
-  after ESS vanishes, whereas the fixed-$0.1$ conditional run reaches an
-  AIME-2024 mean@16 score of $39.4\%$.}
-  \label{fig:tis5-replication}
 \end{figure}
 
 \clearpage

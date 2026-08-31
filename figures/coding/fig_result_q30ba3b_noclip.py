@@ -14,7 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import matplotlib.pyplot as plt
 import paperstyle
-from paperstyle import FULL, C, use_paper_style, save
+from paperstyle import FULL, C, format_sig, use_paper_style, save
 from runlog import series
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,7 +29,7 @@ VARIANTS = [
 
 def annotate_endpoint(ax, x, y, color, offset):
     ax.annotate(
-        f"{100 * y:.1f}%",
+        f"{format_sig(100 * y)}%",
         xy=(x, 100 * y),
         xytext=(5, offset),
         textcoords="offset points",

@@ -11,6 +11,7 @@ figures are one visual system and match the LaTeX body text.
 See for_paper/AGENTS.md for the rules these defaults implement.
 """
 import os
+import math
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -51,6 +52,18 @@ FAM = [
 ]
 # baseline dashed / ours solid, so the figures survive greyscale printing
 LS = {"ours": "-", "gated": "-", "baseline": "--", "ref": ":"}
+
+
+def format_sig(value, digits=3):
+    """Format a finite scalar with a fixed number of significant digits."""
+    value = float(value)
+    if not math.isfinite(value):
+        return str(value)
+    if value == 0.0:
+        return f"{value:.{digits - 1}f}"
+    decimals = digits - 1 - math.floor(math.log10(abs(value)))
+    rounded = round(value, decimals)
+    return f"{rounded:.{max(decimals, 0)}f}"
 
 
 def use_paper_style():

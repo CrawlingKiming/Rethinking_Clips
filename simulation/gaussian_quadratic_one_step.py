@@ -22,12 +22,12 @@ FIGURES_DIR = ROOT / "figures"
 sys.path.insert(0, str(ROOT / "figures" / "coding"))
 
 import matplotlib.pyplot as plt
-from paperstyle import FAM, FULL, use_paper_style
+from paperstyle import FAM, FULL, format_sig, use_paper_style
 
 G = 2.0
 N = 32
 EPSILON = 0.2
-TIS_CAP = 1.0 + EPSILON
+TIS_CAP = 3.0
 ETA = 0.4
 SMOOTHNESS = 1.0
 MINIMUM_DELTA = 0.2
@@ -400,7 +400,7 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
     risk_axis.set_ylabel("Gradient MSE")
     risk_axis.set_title("(a) Estimation error", loc="left")
     risk_axis.annotate(
-        r"$\rho_{\rm MSE}=0.123$",
+        rf"$\rho_{{\rm MSE}}={format_sig(rho_mse)}$",
         xy=(rho_mse, 0.97),
         xycoords=("data", "axes fraction"),
         xytext=(-3, -2),
@@ -447,7 +447,7 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
         zorder=5,
     )
     gain_axis.annotate(
-        rf"$\rho_B={rho_certificate:.3f}$",
+        rf"$\rho_B={format_sig(rho_certificate)}$",
         xy=(rho_certificate, 0.97),
         xycoords=("data", "axes fraction"),
         xytext=(-3, -2),
@@ -459,7 +459,7 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
         color=NEUTRAL_COLOR,
     )
     gain_axis.annotate(
-        rf"$\rho_{{\rm stop}}={rho_stop:.3f}$",
+        rf"$\rho_{{\rm stop}}={format_sig(rho_stop)}$",
         xy=(rho_stop, 0.97),
         xycoords=("data", "axes fraction"),
         xytext=(-2, -3),

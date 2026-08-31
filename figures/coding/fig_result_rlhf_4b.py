@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 """Open-ended RLHF transfer on Qwen3-4B-Instruct-2507.
 
-The main figure reports the optimized reward-model score and response length.
-Thin curves are the per-step observations; thick curves are trailing seven-step
-means. Entropy is kept out of the main result because it is not needed for the
-transfer claim.
+The main figure reports only the optimized reward-model score. Thin curves are
+per-step observations; thick curves are trailing seven-step means.
 
 Output:
   figures_mains/result/rlhf_4b/overall.pdf
@@ -16,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import paperstyle
-from paperstyle import FULL, C, use_paper_style, save
+from paperstyle import FULL, C, format_sig, use_paper_style, save
 from runlog import series
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -38,7 +36,7 @@ def trailing_mean(values, window=7):
 
 def annotate_endpoint(ax, x, y, color, offset):
     ax.annotate(
-        f"{y:.1f}",
+        format_sig(y),
         xy=(x, y),
         xytext=(5, offset),
         textcoords="offset points",
@@ -69,11 +67,9 @@ def draw(ax, metric, ylim, ylabel):
 
 
 use_paper_style()
-fig, axes = plt.subplots(1, 2, figsize=(FULL, 2.25))
-draw(axes[0], "reward", (0, 66), "reward-model score")
-axes[0].set_title("(a) optimized reward", loc="left")
-draw(axes[1], "length", (310, 495), "response length (tokens)")
-axes[1].set_title("(b) response length", loc="left")
+fig, axis = plt.subplots(figsize=(0.72 * FULL, 2.35))
+draw(axis, "reward", (0, 66), "reward-model score")
+axis.set_title("Open-ended RLHF", loc="left")
 
 handles = [
     Line2D([0], [0], color="#4d4d4d", linestyle="--", linewidth=1.25,
