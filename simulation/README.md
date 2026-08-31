@@ -2,7 +2,8 @@
 
 ## Exactly solvable Gaussian one-step example
 
-`gaussian_quadratic_one_step.py` generates the main-text theoretical example.
+`gaussian_quadratic_one_step.py` generates the main-text theoretical
+IS/TIS/PPO example.
 The current policy is `Normal(theta, 1)`, the rollout policy is
 `Normal(theta - delta, 1)`, and the reward is quadratic. The script evaluates
 the IS and PPO-style masked estimators from closed-form truncated Gaussian

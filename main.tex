@@ -422,15 +422,18 @@ terms fixed, both the admissible step and the certified improvement shrink as
 ESS falls. This complements population policy-deviation guarantees, which
 characterize the consequences of changing the policy, by controlling the
 finite-rollout direction used to make that change. Having established when the
-IS update is reliable, we next ask when clipping provides the stronger one-step
-certificate.
+IS update is reliable, we next ask when an alternative gradient estimator
+provides the stronger one-step certificate.
 
-\subsection{Gradient estimators and clipping}
+\subsection{Choosing an alternative gradient estimator}
 \label{sec:clipping-recovery}
 
-The preceding result connects the reliability of the IS estimator to policy improvement. Intuitively, the role of PPO's clipped estimator can be understood as a better estimate when this guarantee weakens. We answer this intuition in two steps: first
-as a question of gradient estimation, and then as a question of policy
-improvement at a common fixed step. Write
+The preceding result connects the reliability of the IS estimator to policy
+improvement. When this guarantee weakens, one may instead use a controlled
+coefficient rule, such as truncated IS or PPO-style masking. We compare a
+general rule $u$ with IS in two steps: first as a question of gradient
+estimation, and then as a question of policy improvement at a common fixed
+step. Write
 $\widehat g_k(u):=\widehat g_N(u;\theta_k)$. For a rule $u$, adding and
 subtracting the estimator mean gives the MSE decomposition
 \begin{equation}
@@ -442,9 +445,11 @@ subtracting the estimator mean gives the MSE decomposition
  \label{eq:clipping-risk-decomposition}
 \end{equation}
 The two terms are squared bias and sampling variation. Since the IS estimator
-is unbiased, PPO has lower MSE exactly when its reduction in sampling variation
-exceeds the squared bias introduced by masking. He denote this as the estimator-level
-bias-variance crossover. To formulate the role of such crossover, we provide next theorem to give the expected-improvement certificate used to compare candidate estimators at a common fixed step.
+is unbiased, a controlled rule has lower MSE exactly when its reduction in
+sampling variation exceeds the squared bias introduced by changing the
+coefficients. We call this the estimator-level bias--variance crossover. The
+next theorem gives the expected-improvement certificate used to compare such
+estimators at a common fixed step.
 
 \begin{theorem}[Improvement certificate]
 \label{thm:fixed-step-certificate}
@@ -460,51 +465,73 @@ that $\E\|\widehat g_k(u)\|_2^2<\infty$. For any step size $\eta_k>0$,
 \end{equation}
 \end{theorem}
 
-The above theorem identifies the role of the gradient estimators. Denote this right-hand side by
+Denote the right-hand side by
 \begin{equation}
  B_k(u;\eta_k)
  :=\eta_k g_k^\top\E[\widehat g_k(u)]
  -\frac{L_k\eta_k^2}{2}\E\|\widehat g_k(u)\|_2^2.
  \label{eq:full-certificate}
 \end{equation}
-The $B_k(u;\eta_k)$ has two parts. The first rewards alignment with the population gradient; the second penalizes the expected squared update under smoothness. Clipping improves this certificate only when the penalty it removes outweighs the useful alignment it removes. The next corollary state this crossover directly.
+The certificate has two parts. The first rewards alignment with the population
+gradient; the second penalizes the expected squared update under smoothness.
+Coefficient control improves the certificate only when the penalty it removes
+outweighs the useful alignment it removes. The next corollary states this
+crossover directly.
 
-\begin{corollary}[IS-PPO certificate crossover]
+\begin{corollary}[IS-to-controlled-estimator crossover]
 \label{cor:certificate-crossover}
-Let $u_{\mathrm{IS}}$ and $u_{\mathrm{P}}$ denote the IS and PPO coefficient
-rules. Suppose the same deterministic $L_k$ is valid almost surely for both
-families of update segments. With a common step size
-$0<\eta_k\le1/L_k$, PPO has the stronger certificate if and only if
+Let $u_{\mathrm{IS}}$ denote the IS coefficient rule and let $u$ be any
+alternative rule. Suppose the same deterministic $L_k$ is valid almost surely
+for both families of update segments. With a common step size
+$0<\eta_k\le1/L_k$, the alternative rule has the stronger certificate if and
+only if
 \begin{equation}
- B_k(u_{\mathrm{P}};\eta_k)>B_k(u_{\mathrm{IS}};\eta_k)
+ B_k(u;\eta_k)>B_k(u_{\mathrm{IS}};\eta_k)
  \quad\Longleftrightarrow\quad
- m_k(u_{\mathrm{IS}})-m_k(u_{\mathrm{P}})
+ m_k(u_{\mathrm{IS}})-m_k(u)
  >(1-L_k\eta_k)
  \left\{
  \E\|\widehat g_k(u_{\mathrm{IS}})\|_2^2
- -\E\|\widehat g_k(u_{\mathrm{P}})\|_2^2
+ -\E\|\widehat g_k(u)\|_2^2
  \right\}.
- \label{eq:is-ppo-certificate-crossover}
+ \label{eq:is-controlled-certificate-crossover}
 \end{equation}
 \end{corollary}
 
-When clipping lowers the update second moment, the right-hand side of
-Equation~\eqref{eq:is-ppo-certificate-crossover} is its discounted reduction.
-PPO's MSE gain must exceed this amount. Since the IS estimator is unbiased,
-the same condition has the equivalent alignment form
+When the alternative lowers the update second moment, the right-hand side of
+Equation~\eqref{eq:is-controlled-certificate-crossover} is its discounted
+reduction. Its MSE gain must exceed this amount. Since the IS estimator is
+unbiased, the same condition has the equivalent alignment form
 \begin{equation}
- \|g_k\|_2^2-g_k^\top\E[\widehat g_k(u_{\mathrm{P}})]
+ \|g_k\|_2^2-g_k^\top\E[\widehat g_k(u)]
  <\frac{L_k\eta_k}{2}
  \left\{
  \E\|\widehat g_k(u_{\mathrm{IS}})\|_2^2
- -\E\|\widehat g_k(u_{\mathrm{P}})\|_2^2
+ -\E\|\widehat g_k(u)\|_2^2
  \right\}.
- \label{eq:is-ppo-alignment-crossover}
+ \label{eq:is-controlled-alignment-crossover}
 \end{equation}
-The left-hand side is the population-gradient alignment lost to clipping; the
-right-hand side is the reduction in the quadratic smoothness penalty.
+The left-hand side is the population-gradient alignment lost by changing the
+estimator; the right-hand side is the reduction in the quadratic smoothness
+penalty.
 
-\textcolor{blue}{Add remark with 1) TIS, 2) PPO each. change this subsection as more "general gradient estimator other than IS choices". For TIS part, it should conclude that it should be a cheap choice to bound variance with minimal bias intervention but the bounded effect is small. }
+\begin{remark}[Truncated importance sampling]
+Upper truncation, $u_{\mathrm{T},t}=\min\{r_t,c\}$, caps each selected ratio
+without deleting its tail contribution. It is therefore a cheap variance
+safeguard with comparatively mild bias intervention. Its control is also
+limited: it acts only on the chosen upper tail, so the reduction in the update
+second moment can be modest under sequence-level mismatch.
+\end{remark}
+
+\begin{remark}[PPO-style masking]
+The PPO rule in Equation~\eqref{eq:ppo-coefficient-rule} removes saturated
+positive-advantage terms and low-ratio negative-advantage terms. It can reduce
+the update second moment more aggressively than upper truncation, but it also
+discards more population-gradient alignment. Equations
+\eqref{eq:is-controlled-certificate-crossover} and
+\eqref{eq:is-controlled-alignment-crossover} state when that stronger
+intervention is worthwhile.
+\end{remark}
 
 
 \section{Policy optimization and ESS}
@@ -522,41 +549,49 @@ Gaussian bandit with a quadratic reward. Gaussian policies and smooth
 objectives provide a standard analytic setting for policy-gradient methods
 \citep{pirotta2013adaptive,metelli2018pois,papini2022smoothing}. We hold the
 current policy fixed and vary only its distance from the rollout policy. Along
-this path, the construction admits the closed form computations contains no Monte Carlo error which serves as a theoretical testbed; Appendix~\ref{app:gaussian} gives the setup and calculations.
+this path, every quantity is available in closed form and contains no Monte
+Carlo error; Appendix~\ref{app:gaussian} gives the setup and calculations.
 
-\textcolor{blue}{Add the motivation figure here, and make the the vertical line should be about 0.01 not 0.1.}
-
-At each point on this path, the MSE oracle selects the candidate with smaller gradient-estimation MSE, whereas the certificate oracle selects the candidate
+At each point on this path, the MSE oracle selects between IS and PPO by
+gradient-estimation MSE, whereas the certificate oracle selects the candidate
 with larger $B_k(u;\eta_k)$. The safe certificate oracle additionally includes
-a null update with certificate zero. We use $N=32$, PPO radius
-$\epsilon=0.2$, gradient $g=2$, and step size $\eta=0.4$, and vary $\rho$ so that all three decisions occur on one
-monotone ESS path.
+a null update with certificate zero. To show how the alternative choices in
+Section~\ref{sec:clipping-recovery} act, we also report upper-truncated IS with
+the matched cap $c=1+\epsilon=1.2$. We use $N=32$, PPO radius
+$\epsilon=0.2$, gradient $g=2$, and step size $\eta=0.4$, and vary $\rho$
+along one monotone ESS path.
 
-Figure~\ref{fig:gaussian-one-step} shows that estimator accuracy and update
-quality switch at different ESS levels. PPO first attains lower MSE at
-$\rho_{\mathrm{MSE}}=0.122$. Thus, throughout
-$0.039230<\rho<0.122756$, PPO is the more accurate gradient estimator while IS
-is the better policy update. PPO remains the preferred positive update down to
-$\rho_{\mathrm{stop}}=0.010890$; below this point, neither candidate has a
-positive certificate. These numerical boundaries are specific to
-$(g,N,\epsilon,\eta)$. ESS parameterizes the loss of effective support, but
-the full certificate, rather than MSE alone, determines which update is
-preferred.
+Figure~\ref{fig:gaussian-one-step} first shows why MSE matters. As effective
+support contracts from $\rho=0.961$ to $0.0109$, the IS MSE rises from $0.228$
+to $62.2$ and its exact expected improvement falls from $1.262$ to $-3.695$.
+The same ESS path therefore reveals the reliability loss before choosing a
+particular intervention. It is a regime diagnostic, not the oracle: the
+pairwise IS--PPO MSE crossover occurs at
+$\rho_{\mathrm{MSE}}=0.122756$, while their certificate crossover occurs later
+at $\rho_B=0.039230$.
 
-\textcolor{blue}{Calculate the certificate each with PPO, and TIS, add it in figure. and this current figure is shit. remove "MSE and improvement rankings disagree". the plot should and this subsection should read, A) the MSE does affect a lot on policy improvement and B) the ESS is a good empirical guess (maybe plot a bound figure) and C) the role of the each estimator. the current lacks a lot  }
+The two controlled estimators explain the gap. TIS caps the upper tail while
+retaining substantially more population-gradient alignment; it overtakes the
+IS certificate at $\rho=0.093716$ and remains positive throughout the displayed
+path. PPO masking removes more of the update. It overtakes IS only below
+$\rho_B$ and reaches zero certificate at
+$\rho_{\mathrm{stop}}=0.010890$, marked by the low-support reference line in
+Figure~\ref{fig:gaussian-one-step}. These values are specific to
+$(g,N,\epsilon,\eta,c)$, but the ordering is the point: ESS locates the
+support regime, while MSE reduction and retained alignment jointly determine
+the better update.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/gaussian_quadratic_one_step.pdf}
-  \caption{Exact one-step comparison for the Gaussian bandit with $g=2$,
-  $N=32$, $\epsilon=0.2$, and $\eta=0.4$. (a) The MSE oracle switches from IS
-  to PPO at $\rho_{\mathrm{MSE}}=0.122756$. The shaded interval marks the
-  regime in which PPO has lower MSE but IS has larger expected improvement.
-  (b) The safe certificate oracle selects IS above $\rho_B=0.039230$, PPO for
-  $\rho_{\mathrm{stop}}<\rho<\rho_B$, and the null update below
-  $\rho_{\mathrm{stop}}=0.010890$. The dotted, dashed, and dash-dotted lines
-  mark the MSE crossover, certificate crossover, and abstention boundary,
-  respectively.}
+  \caption{Exact Gaussian-bandit comparison with $g=2$, $N=32$,
+  $\epsilon=0.2$, $c=1.2$, and $\eta=0.4$. (a) Gradient MSE as effective
+  support contracts. (b) Population-gradient alignment retained by each
+  estimator. (c) Exact expected one-step improvement, equal here to
+  $B_u(\eta)$. The IS--TIS certificate crossover is $\rho=0.093716$; the
+  dashed line marks the IS--PPO crossover at $\rho_B=0.039230$, and the
+  dash-dotted line marks PPO's zero certificate at
+  $\rho_{\mathrm{stop}}=0.010890$.}
   \label{fig:gaussian-one-step}
 \end{figure}
 \FloatBarrier
@@ -641,8 +676,8 @@ mean@16. The permissive branch uses truncated importance sampling (TIS) with
 ratio cap 3, or no coefficient clipping in the explicit unclipped ablation.
 The low-support branch uses conventional GRPO clipping, Clip-Higher
 \citep{yu2025dapo}, DPPO \citep{qi2026dppo}, or skips the minibatch update.
-Most variants compute $\widehat\rho$ from the raw complete-sequence ratios in
-Equation~\eqref{eq:sample-ess}. The 30B TIS/Clip-Higher construction, its 8B
+Most variants compute $\widehat\rho$ from the raw complete-sequence ratios
+before coefficient control. The 30B TIS/Clip-Higher construction, its 8B
 counterpart, and the RLHF transfer instead compute the same statistic after
 the coefficient cap; we refer to this implementation as shaped ESS. Results
 are complete training trajectories, so the comparisons below describe the
@@ -804,13 +839,13 @@ Section~\ref{sec:gaussian-example}.
 
 
 
-We compare IS with the PPO-style rule in
-Equation~\eqref{eq:ppo-coefficient-rule}, using the exact current-policy value
-baseline.
+We compare IS, upper-truncated IS with $c=1+\epsilon$, and the PPO-style rule
+in Equation~\eqref{eq:ppo-coefficient-rule}, using the exact current-policy
+value baseline.
 
-Because the score contribution is polynomial and each mask boundary
-is linear in $z$, the means, MSEs, and update second moments of both candidates
-are finite sums of truncated Gaussian moments. 
+Because the score contribution is polynomial and each truncation or mask
+boundary is linear in $z$, the means, MSEs, and update second moments are finite
+sums of truncated Gaussian moments.
 
 We choose a quadratic reward because it makes the smoothness certificate equal
 to the true expected gain. Any separation between the two oracles is therefore
@@ -893,6 +928,21 @@ per-sample moments
  \qquad u\in\{\mathrm{IS},\mathrm{P}\}.
  \label{eq:gaussian-exact-moments}
 \end{align}
+For TIS, which in this one-factor bandit uses
+$\min\{W_\Delta,c\}f_g$, let
+$b_c(\Delta):=\{\log c-\Delta^2/2\}/\Delta$. Since
+$\min\{W_\Delta,c\}=W_\Delta$ below $b_c(\Delta)$ and equals $c$ above it,
+\begin{align}
+ \mu_{\mathrm{T}}(\Delta)
+ &=\int_{-\infty}^{b_c(\Delta)}f_g(z)\phi(z)\,dz
+ +c\int_{b_c(\Delta)}^\infty f_g(z)\phi(z+\Delta)\,dz,
+ \nonumber\\
+ h_{\mathrm{T}}(\Delta)
+ &=e^{\Delta^2}\int_{-\infty}^{b_c(\Delta)}
+ f_g(z)^2\phi(z-\Delta)\,dz
+ +c^2\int_{b_c(\Delta)}^\infty f_g(z)^2\phi(z+\Delta)\,dz.
+ \label{eq:gaussian-tis-moments}
+\end{align}
 In particular, $\mu_{\mathrm{IS}}=g$. For an iid estimator with batch size $N$,
 \begin{equation}
  m_u=(\mu_u-g)^2+\frac{h_u-\mu_u^2}{N},
@@ -914,14 +964,15 @@ $I_j(a,b):=\int_a^bz^j\phi(z)\,dz$, integration by parts gives
 starting from $I_0=\Phi(b)-\Phi(a)$ and
 $I_1=\phi(a)-\phi(b)$. Boundary terms vanish at infinity. Substituting these
 moments into Equation~\eqref{eq:gaussian-risk-second-moment} and the exact gain
-in Equation~\eqref{eq:gaussian-exact-gain} gives the three thresholds.
+in Equation~\eqref{eq:gaussian-exact-gain} gives the reported boundaries.
 
 \paragraph{Results}
- We evaluate
+We evaluate
 $0.2\le\Delta\le\sqrt{-\log(0.005)}$. Numerical evaluation of the closed-form
-moments gives three distinct boundaries on this branch:
+moments gives four distinct boundaries on this branch:
 \begin{equation}
  \rho_{\mathrm{MSE}}=0.122756,
+ \qquad \rho_{\mathrm{T}}=0.093716,
  \qquad
  \rho_B=0.039230,
  \qquad
@@ -932,7 +983,10 @@ The MSE oracle over $\mathcal U=\{u_{\mathrm{IS}},u_{\mathrm{P}}\}$ selects IS
 above $\rho_{\mathrm{MSE}}$ and PPO below it. The safe certificate oracle adds
 the null update and instead selects IS for $\rho>\rho_B$, PPO for
 $\rho_{\mathrm{stop}}<\rho<\rho_B$, and no update for
-$\rho<\rho_{\mathrm{stop}}$. Adjacent choices tie at each boundary.
+$\rho<\rho_{\mathrm{stop}}$. Adjacent choices tie at each boundary. The TIS
+overlay has lower MSE than both pairwise candidates on the displayed branch;
+its certificate overtakes IS at $\rho_{\mathrm{T}}$ and remains above the PPO
+certificate thereafter.
 
 \section{Additional coefficient-rule details}
 \label{app:coefficient-rules}
@@ -1235,51 +1289,39 @@ by expectation, gives
  -\E\|\widehat g-g_k\|_2^2.
  \label{eq:polarization}
 \end{equation}
-Substituting Equation~\eqref{eq:polarization}, with
-$\widehat g=\widehat g_k(u)$, into the definition of $B_k$ proves
-Equation~\eqref{eq:full-certificate-polarized}.
-
-Subtracting the IS certificate from the PPO certificate gives
+Substituting Equation~\eqref{eq:polarization} into the certificate and
+subtracting the IS certificate gives
 \begin{align}
- B_k(u_{\mathrm{P}};\eta_k)-B_k(u_{\mathrm{IS}};\eta_k)
+ B_k(u;\eta_k)-B_k(u_{\mathrm{IS}};\eta_k)
  &=\frac{\eta_k}{2}
- \bigl[m_k(u_{\mathrm{IS}})-m_k(u_{\mathrm{P}})\bigr]
+ \bigl[m_k(u_{\mathrm{IS}})-m_k(u)\bigr]
  \nonumber\\
  &\quad-\frac{\eta_k}{2}(1-L_k\eta_k)
  \left\{
  \E\|\widehat g_k(u_{\mathrm{IS}})\|_2^2
- -\E\|\widehat g_k(u_{\mathrm{P}})\|_2^2
+ -\E\|\widehat g_k(u)\|_2^2
  \right\}.
  \label{eq:certificate-crossover-proof}
 \end{align}
 Since $\eta_k>0$, the right-hand side is positive exactly under
-Equation~\eqref{eq:is-ppo-certificate-crossover}, proving
+Equation~\eqref{eq:is-controlled-certificate-crossover}, proving
 Corollary~\ref{cor:certificate-crossover}. Since the IS estimator is unbiased,
 subtracting the certificate definitions instead gives
 \begin{align}
- B_k(u_{\mathrm{P}};\eta_k)-B_k(u_{\mathrm{IS}};\eta_k)
+ B_k(u;\eta_k)-B_k(u_{\mathrm{IS}};\eta_k)
  &=-\eta_k\left\{
- \|g_k\|_2^2-g_k^\top\E[\widehat g_k(u_{\mathrm{P}})]
+ \|g_k\|_2^2-g_k^\top\E[\widehat g_k(u)]
  \right\}
  \nonumber\\
  &\quad+\frac{L_k\eta_k^2}{2}
  \left\{
  \E\|\widehat g_k(u_{\mathrm{IS}})\|_2^2
- -\E\|\widehat g_k(u_{\mathrm{P}})\|_2^2
+ -\E\|\widehat g_k(u)\|_2^2
  \right\}.
  \label{eq:certificate-alignment-proof}
 \end{align}
 Its positivity is equivalent to
-Equation~\eqref{eq:is-ppo-alignment-crossover}. Finally,
-Equation~\eqref{eq:full-certificate-polarized} implies
-\begin{equation}
- B_k(u;\eta_k)>0
- \quad\Longleftrightarrow\quad
- m_k(u)<\|g_k\|_2^2
- +(1-L_k\eta_k)\E\|\widehat g_k(u)\|_2^2.
- \label{eq:positive-full-certificate-proof}
-\end{equation}
-This is Equation~\eqref{eq:positive-full-certificate}.
+Equation~\eqref{eq:is-controlled-alignment-crossover}.
 
 \subsection{Intact prompt groups}
 
