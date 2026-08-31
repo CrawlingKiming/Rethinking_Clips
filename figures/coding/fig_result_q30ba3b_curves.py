@@ -1,80 +1,82 @@
 #!/usr/bin/env python
-"""Result figure (Qwen3-30B-A3B): baselines vs gate-conditional updates.
+"""Core Qwen3-30B-A3B trajectories for Section 6.
 
-Read results_sweep_A_B1.md "Gate ablation" before relabelling this figure. Only (c) and (d) are gate toggles; (a) and (b) are matched on the **clip band**, not on the loss:
+The main figure keeps the two comparisons that most directly expose the
+static-versus-conditional transition. GRPO and clip-higher band-matched
+comparisons remain numerical supporting evidence in the text; placing them in
+the same figure would make four panels look like four identical gate ablations.
 
-  (a) GRPO, band 0.2/0.2        `udg7vbgfsn` clips every step  vs `ircyhpdmku` TIS 3 base + ESS
-  (b) GRPO clip-higher, 0.2/0.28 `t82djeyx43` clips every step  vs `328rfu6eb2` TIS 3 base + ESS
-  (c) DPPO                       `z95e8ih6mr` no gate           vs `52iya9e2hr` same loss + ESS
-  (d) TIS 3                      `sjjc7dcpzf` no gate           vs `328rfu6eb2` + ESS (with latch)
-
-(a) and (b) therefore compare clipping on *every* step against falling back to that same clip *only*
-when ESS says the batch has gone off-policy. An identical-loss with-and-without-gate pair does not
-exist for either GRPO variant; no such run was trained. TIS 5 is plotted separately in tis5.pdf,
-because its gated partner has no held-out number yet.
-
-Note `328rfu6eb2` appears in both (b) and (d): it is simultaneously the clip-higher-band
-ESS-conditional run and the TIS-3-based gated run. That is a property of the run matrix, not a
-duplication error.
-
-Legend numbers are the final in-training validation step, not the held-out sweep, and the two
-differ (STAR: 44.8 in-training vs 42.1 held-out). Held-out numbers live in results_sweep_A_B1.md.
-
--> for_paper/figures/result/q30ba3b/curves/overall.pdf  (A)
--> for_paper/figures/result/q30ba3b/curves/{grpo,grpo_cliphigher,dppo,tis3}.pdf  (B)
+Output:
+  figures_mains/result/q30ba3b/curves/overall.pdf
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import paperstyle
-from paperstyle import COL, FULL, C, use_paper_style, save
+from paperstyle import FULL, C, use_paper_style, save
 from runlog import series
 
-paperstyle.FIGDIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "figures_mains")
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+paperstyle.FIGDIR = os.path.join(ROOT, "figures_mains")
 
-# (panel title, baseline run, baseline label, gated run, gated label)
+STATIC = "#4d4d4d"
+CONDITIONAL = C["ours"]
 PANELS = [
-    ("GRPO", "grpo_base", "GRPO",
-     "grpo_ess_clip", "ESS-conditional clip", "grpo"),
-    ("GRPO clip-higher", "dapo_base", "GRPO clip-higher",
-     "dapo_ess", "ESS-conditional clip", "grpo_cliphigher"),
-    ("DPPO", "dppo_base", "DPPO", "dppo_ess", "+ ESS gate", "dppo"),
-    ("TIS 3", "cispo3_nogate", "TIS 3, no gate", "dapo_ess", "+ ESS gate", "tis3"),
+    ("DPPO", "dppo_base", "dppo_ess", (-1.5, 1.2)),
+    ("TIS 3", "cispo3_nogate", "dapo_ess", (1.8, 1.0)),
 ]
 
 
-def draw(a, b_run, b_lbl, g_run, g_lbl):
-    for run, lbl, col, ls in [(b_run, b_lbl, C["baseline2"], "--"),
-                              (g_run, g_lbl, C["gated"], "-")]:
+def annotate_endpoint(ax, x, y, color, offset):
+    ax.annotate(
+        f"{100 * y:.1f}%",
+        xy=(x, 100 * y),
+        xytext=(5, offset),
+        textcoords="offset points",
+        color=color,
+        fontsize=6.5,
+        ha="left",
+        va="center",
+        clip_on=False,
+    )
+
+
+def draw(ax, static_run, conditional_run, offsets):
+    for run, color, linestyle, linewidth, offset in [
+        (static_run, STATIC, "--", 1.2, offsets[0]),
+        (conditional_run, CONDITIONAL, "-", 1.6, offsets[1]),
+    ]:
         xs, ys = series(run, "eval")
-        a.plot(xs, [v * 100 for v in ys], color=col, ls=ls, marker="o",
-               lw=1.6 if ls == "-" else 1.2, label=f"{lbl}: {ys[-1] * 100:.1f}%")
-    a.set_ylim(-1.5, 52)
-    a.set_xlim(-3, 203)
-    a.legend(loc="lower left")
+        ax.plot(
+            xs,
+            [100 * value for value in ys],
+            color=color,
+            linestyle=linestyle,
+            linewidth=linewidth,
+            marker="o",
+            markersize=2.7,
+        )
+        annotate_endpoint(ax, xs[-1], ys[-1], color, offset)
+    ax.set_xlim(-3, 222)
+    ax.set_ylim(-1.5, 50)
+    ax.set_xlabel("training step")
+
 
 use_paper_style()
+fig, axes = plt.subplots(1, 2, figsize=(FULL, 2.35), sharex=True, sharey=True)
+for index, (title, static_run, conditional_run, offsets) in enumerate(PANELS):
+    draw(axes[index], static_run, conditional_run, offsets)
+    axes[index].set_title(f"({'ab'[index]}) {title}", loc="left")
+axes[0].set_ylabel("AIME-2024 mean@16 (%)")
 
-# --- A) overall ---
-fig, ax = plt.subplots(2, 2, figsize=(FULL, 4.2), sharey=True, sharex=True)
-flat = ax.ravel()
-for i, (tag, b_run, b_lbl, g_run, g_lbl, _slug) in enumerate(PANELS):
-    a = flat[i]
-    draw(a, b_run, b_lbl, g_run, g_lbl)
-    a.set_title(f"({'abcd'[i]}) {tag}", loc="left")
-    if i % 2 == 0:
-        a.set_ylabel("AIME-2024 mean@16 (%)")
-    if i >= 2:
-        a.set_xlabel("training step")
+handles = [
+    Line2D([0], [0], color=STATIC, linestyle="--", linewidth=1.2,
+           marker="o", markersize=2.7, label="static update"),
+    Line2D([0], [0], color=CONDITIONAL, linestyle="-", linewidth=1.6,
+           marker="o", markersize=2.7, label="ESS-conditioned update"),
+]
+fig.legend(handles=handles, loc="outside lower center", ncol=2, frameon=False)
 save(fig, "result/q30ba3b/curves/overall")
-
-# --- B) one per panel ---
-for tag, b_run, b_lbl, g_run, g_lbl, slug in PANELS:
-    fig, a = plt.subplots(figsize=(COL, 2.35))
-    draw(a, b_run, b_lbl, g_run, g_lbl)
-    a.set_title(tag, loc="left")
-    a.set_ylabel("AIME-2024 mean@16 (%)")
-    a.set_xlabel("training step")
-    save(fig, f"result/q30ba3b/curves/{slug}")

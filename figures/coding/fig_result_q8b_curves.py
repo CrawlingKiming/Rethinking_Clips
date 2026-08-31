@@ -1,67 +1,80 @@
 #!/usr/bin/env python
-"""Result figure (Qwen3-8B): baselines vs gate-conditional updates, one panel per method.
+"""Aggregation-matched Qwen3-8B comparisons for Section 6.
 
-Baselines are the **conventional token-mean** GRPO / GRPO-clip-higher runs (verl's implemented
-loss_agg_mode = seq-mean-token-mean), NOT the 0813 `*_alwaysclip_ref` runs (those are sum-norm).
+The GRPO pair is omitted because its static and gated runs use different loss
+aggregation. The two displayed pairs keep aggregation fixed.
 
-  (a) GRPO, band 0.2/0.2         `yfs6ms6w6a` GRPO token-mean   vs `n2bu8xky6c` ESS-clip 0.2/0.2
-  (b) GRPO clip-higher, 0.2/0.28 `5sra49tycr` DAPO token-mean   vs `bxjnvy6f3s` ESS-clip 0.2/0.28
-  (c) DPPO (total-variation)     `zrmqamex4j` latch/step        vs `vdfa57r99z` dppo-tv + ESS
-
-Aggregation match: (b) is clean — baseline AND ESS run are both token-mean (`5sra49tycr` /
-`bxjnvy6f3s`). (a) baseline is token-mean but its ESS partner `n2bu8xky6c` is sum-norm (no
-token-mean plain-GRPO-band ESS run was trained — an open cell). (c) DPPO is not a verl-conventional
-loss, kept as-is. No cispo/TIS-only no-gate run at 8B, so no (d) panel; not needed.
-Legend numbers are final in-training AIME-2024 mean@16. Saves to figures_mains/result/8b/curves/.
+Output:
+  figures_mains/result/8b/curves/overall.pdf
 """
-import os, sys
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import paperstyle
-from paperstyle import COL, FULL, C, use_paper_style, save
+from paperstyle import FULL, C, use_paper_style, save
 from runlog import series
 
-# route output into figures_mains/ (where the paper's main figures live), not figures/
-paperstyle.FIGDIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "figures_mains")
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+paperstyle.FIGDIR = os.path.join(ROOT, "figures_mains")
 
-# (panel title, baseline run, baseline label, gated run, gated label, slug)
+STATIC = "#4d4d4d"
+CONDITIONAL = C["ours"]
 PANELS = [
-    ("GRPO", "q8b_grpo_base", "GRPO",
-     "q8b_grpo_ess", "ESS-conditional clip", "grpo"),
-    ("GRPO clip-higher", "q8b_dapo_base", "GRPO clip-higher",
-     "q8b_dapo_ess_nonorm", "ESS-conditional clip", "grpo_cliphigher"),
-    ("DPPO", "q8b_dppo_alwayslatch", "DPPO", "q8b_dppo_ess", "+ ESS gate", "dppo"),
+    ("Clip-Higher", "q8b_dapo_base", "q8b_dapo_ess_nonorm", (-5, 6)),
+    ("DPPO", "q8b_dppo_alwayslatch", "q8b_dppo_ess", (-7, 7)),
 ]
 
 
-def draw(a, b_run, b_lbl, g_run, g_lbl):
-    for run, lbl, col, ls in [(b_run, b_lbl, C["baseline2"], "--"),
-                              (g_run, g_lbl, C["gated"], "-")]:
+def annotate_endpoint(ax, x, y, color, offset):
+    ax.annotate(
+        f"{100 * y:.1f}%",
+        xy=(x, 100 * y),
+        xytext=(5, offset),
+        textcoords="offset points",
+        color=color,
+        fontsize=6.5,
+        ha="left",
+        va="center",
+        clip_on=False,
+    )
+
+
+def draw(ax, static_run, conditional_run, offsets):
+    for run, color, linestyle, linewidth, offset in [
+        (static_run, STATIC, "--", 1.2, offsets[0]),
+        (conditional_run, CONDITIONAL, "-", 1.6, offsets[1]),
+    ]:
         xs, ys = series(run, "eval")
-        a.plot(xs, [v * 100 for v in ys], color=col, ls=ls, marker="o",
-               lw=1.6 if ls == "-" else 1.2, label=f"{lbl}: {ys[-1] * 100:.1f}%")
-    a.set_ylim(8, 38)
-    a.set_xlim(-3, 203)
-    a.legend(loc="lower right")
+        ax.plot(
+            xs,
+            [100 * value for value in ys],
+            color=color,
+            linestyle=linestyle,
+            linewidth=linewidth,
+            marker="o",
+            markersize=2.7,
+        )
+        annotate_endpoint(ax, xs[-1], ys[-1], color, offset)
+    ax.set_xlim(-3, 222)
+    ax.set_ylim(10, 36)
+    ax.set_xlabel("training step")
+
 
 use_paper_style()
+fig, axes = plt.subplots(1, 2, figsize=(FULL, 2.25), sharex=True, sharey=True)
+for index, (title, static_run, conditional_run, offsets) in enumerate(PANELS):
+    draw(axes[index], static_run, conditional_run, offsets)
+    axes[index].set_title(f"({'ab'[index]}) {title}", loc="left")
+axes[0].set_ylabel("AIME-2024 mean@16 (%)")
 
-# --- A) overall (1x3) ---
-fig, ax = plt.subplots(1, 3, figsize=(FULL, 2.1), sharey=True)
-for i, (tag, b_run, b_lbl, g_run, g_lbl, _slug) in enumerate(PANELS):
-    a = ax[i]
-    draw(a, b_run, b_lbl, g_run, g_lbl)
-    a.set_title(f"({'abc'[i]}) {tag}", loc="left")
-    a.set_xlabel("training step")
-    if i == 0:
-        a.set_ylabel("AIME-2024 mean@16 (%)")
+handles = [
+    Line2D([0], [0], color=STATIC, linestyle="--", linewidth=1.2,
+           marker="o", markersize=2.7, label="static update"),
+    Line2D([0], [0], color=CONDITIONAL, linestyle="-", linewidth=1.6,
+           marker="o", markersize=2.7, label="ESS-conditioned update"),
+]
+fig.legend(handles=handles, loc="outside lower center", ncol=2, frameon=False)
 save(fig, "result/8b/curves/overall")
-
-# --- B) one per method ---
-for tag, b_run, b_lbl, g_run, g_lbl, slug in PANELS:
-    fig, a = plt.subplots(figsize=(COL, 2.35))
-    draw(a, b_run, b_lbl, g_run, g_lbl)
-    a.set_title(tag, loc="left")
-    a.set_ylabel("AIME-2024 mean@16 (%)")
-    a.set_xlabel("training step")
-    save(fig, f"result/8b/curves/{slug}")

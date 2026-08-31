@@ -671,93 +671,180 @@ a failure certificate. The operational question is therefore whether
 conditioning a safeguard on ESS improves low-support updates without
 sacrificing permissive learning when support is high. We test this rule next.
 
-\section{Optimization with ESS}
+\clearpage
+\section{ESS-conditioned policy optimization}
 
-We implement the preceding idea with an ESS gate. The gate retains the
-permissive update when observed support is high and activates a selected
-safeguard when support is low.
+Section~5 identifies ESS as a coordinate for effective support, but not as an
+update oracle. We now test whether this coordinate can time an existing
+safeguard: retain a permissive update while observed support is broad, and
+activate control only after support contracts. We first study this transition
+in Qwen3-30B-A3B math RLVR, then change the model scale and training objective.
 
-\paragraph{ESS-gated update.}
+\subsection{Update rule and protocol}
 
-As ESS rises, likelihood-ratio mismatch provides less reason to incur masking bias. As ESS falls, the IS certificate weakens. ESS therefore identifies the
-support regime; Equation~\eqref{eq:clipping-risk-decomposition} determines
-whether control lowers gradient-estimation MSE, and
-Corollary~\ref{cor:certificate-crossover} determines whether it gives the stronger update. 
-
-Given a threshold $\tau$ and a selected clipping rule, the minibatch update is
-
+Let $\widehat g_{\mathrm{perm}}$ denote the permissive update and
+$\widehat g_{\mathrm{safe}}$ a prespecified safeguard. Given a threshold
+$\tau$, the ESS-conditioned update is
 \begin{equation}
-  \widehat g_{\mathrm{LLM}}
+  \widehat g_{\mathrm{gate}}
   =\begin{cases}
-    \widehat g_{\mathrm{IS/TIS}},&\widehat\rho\ge \tau,\\
-    \widehat g_{\mathrm{Clipping}},&\widehat\rho< \tau.
+    \widehat g_{\mathrm{perm}},&\widehat\rho\ge \tau,\\
+    \widehat g_{\mathrm{safe}},&\widehat\rho< \tau.
   \end{cases}
   \label{eq:llm-gate}
 \end{equation}
+ESS determines when the update changes; the selected safeguard determines how
+the low-support update is controlled. We fix $\tau=0.1$ throughout. This value
+was prescribed for the language-model runs and is not derived from the
+Gaussian thresholds in Section~\ref{sec:gaussian-example}.
 
-The gate uses ESS only to time the intervention; the selected clipping rule
-determines how the low-support update is controlled.
+The main experiment trains Qwen3-30B-A3B for 200 policy updates on the boxed
+mathematical-reasoning data of \citet{yu2025dapo} and evaluates AIME-2024 using
+mean@16. The permissive branch uses truncated importance sampling (TIS) with
+ratio cap 3, or no coefficient clipping in the explicit unclipped ablation.
+The low-support branch uses conventional GRPO clipping, Clip-Higher
+\citep{yu2025dapo}, DPPO \citep{qi2026dppo}, or skips the minibatch update.
+Most variants compute $\widehat\rho$ from the raw complete-sequence ratios in
+Equation~\eqref{eq:sample-ess}. The 30B TIS/Clip-Higher construction, its 8B
+counterpart, and the RLHF transfer instead compute the same statistic after
+the coefficient cap; we refer to this implementation as shaped ESS. Results
+are complete training trajectories, so the comparisons below describe the
+temporal and endpoint behavior of the reported runs. Each curve represents one
+training trajectory; no across-seed uncertainty is available.
 
-
-
-
-\paragraph{Analysis on the ESS gates with TIS}
+\subsection{Qwen3-30B-A3B results}
 \label{sec:llm-experiments}
-We test conventional GRPO clipping, Clip-Higher \citep{yu2025dapo}, and the
-divergence constraint of DPPO \citep{qi2026dppo}. The permissive TIS branch has
-ratio cap 3, with $\tau=0.1$.  the results : 
 
+Figure~\ref{fig:llm-main} shows the two clearest conditional transitions. In
+panel (a), static DPPO peaks at $37.5\%$ but recedes to $30.4\%$, whereas the
+ESS-conditioned trajectory finishes at $39.2\%$. In panel (b), TIS 3 without
+an ESS gate reaches $31.7\%$ at step 60 and then collapses to $0.4\%$ at its
+last recorded evaluation, step 170. The conditional TIS 3/Clip-Higher
+construction instead reaches $47.3\%$ and finishes at $44.8\%$. The latter is
+the full conditional construction: TIS 3 is the permissive branch and
+Clip-Higher is the low-support branch. Its trajectory exhibits the intended
+ordering, with permissive learning first and increasingly controlled updates
+as effective support contracts.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/curves/overall.pdf}
-  \caption{Testing the predicted regime change in Qwen3-30B-A3B RLVR. Panels
-  (a)--(b) use band-matched comparisons, panel (c) toggles ESS conditioning
-  within DPPO, and panel (d) compares ungated TIS 3 with the conditional
-  trajectory also shown in panel (b). The legend reports step-200 AIME-2024
-  mean@16. Conditional protection improves all four reported endpoints.}
+  \caption{ESS-conditioned policy optimization on Qwen3-30B-A3B. Panel (a)
+  compares static DPPO with a TIS-3 update that activates DPPO in the
+  low-support regime. Panel (b) compares TIS 3 without an ESS gate with the
+  conditional TIS-3/Clip-Higher construction. Direct labels give the last
+  reported AIME-2024 mean@16; the static TIS-3 trajectory ends at step 170
+  after collapse, while the other trajectories end at step 200.}
   \label{fig:llm-main}
 \end{figure}
 
+The same endpoint ordering appears in the two band-matched operational
+comparisons. A TIS-3 construction that activates the standard GRPO band
+$0.2/0.2$ finishes at $38.5\%$, compared with $26.2\%$ for static GRPO. With
+the Clip-Higher band $0.2/0.28$, the corresponding endpoints are $44.8\%$ and
+$37.9\%$. These are comparisons of the complete conditional recipes because
+their high-support branches differ.
 
-\begin{table}[htbp]
-\centering
-\small
-\caption{Step-200 AIME-2024 mean@16 read from the reported trajectories.
-Gain is the ESS-conditional score minus its static counterpart in percentage points.}
-\label{tab:llm-main}
-\begin{tabular}{lrrr}
-\toprule
-Update family & Static counterpart & ESS conditional & Gain \\
-\midrule
-GRPO, band $0.2/0.2$ & $26.2$ & $38.5$ & $+12.3$ \\
-GRPO Clip-Higher, band $0.2/0.28$ & $37.9$ & $44.8$ & $+6.9$ \\
-DPPO & $30.4$ & $39.2$ & $+8.8$ \\
-TIS 3 & $0.4$ & $44.8$ & $+44.4$ \\
-\bottomrule
-\end{tabular}
-\end{table}
+The unclipped comparison isolates the intervention rule more directly. All
+three runs in Figure~\ref{fig:llm-noclip-gate} use the same unclipped
+coefficient update. The reference has no ESS-conditioned action; the other two
+runs either clip or skip when raw ESS is below $0.1$. The reference attains the
+highest early peak, $44.4\%$, but finishes at $34.6\%$. Conditional clipping
+retains nearly the same peak, $43.3\%$, and improves the endpoint to $38.1\%$.
+Skipping the low-support updates finishes at $35.6\%$, but reaches that level
+more slowly. Thus, in this controlled family, clipping preserves most of the
+permissive learning while providing the strongest late retention.
 
-Surprising enough, not only gains the stability, avoiding from the 
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.72\linewidth]{figures_mains/result/q30ba3b/noclip/overall.pdf}
+  \caption{Gate-action ablation with an unclipped Qwen3-30B-A3B update. The
+  reference run has no ESS-conditioned action; its nominal fraction trigger
+  produces only three small interventions. The other runs either clip or skip
+  a minibatch update when raw normalized ESS is below $0.1$. Direct labels give
+  the step-200 AIME-2024 mean@16.}
+  \label{fig:llm-noclip-gate}
+\end{figure}
+\FloatBarrier
 
-\paragraph{Analysis on the ESS gates with IS}
-We now turn our comparioson with the IS versions..
+The implemented intervention also follows the predicted temporal ordering.
+For the DPPO construction, mean raw ESS falls from $0.412$ over steps 1--50 to
+$0.120$ over steps 151--200, while the mean intervention fraction rises from
+$0.153$ to $0.668$. Figure~\ref{fig:llm-gate-action} reports the corresponding
+patterns for all three safeguards. Protection is therefore present but limited
+early, and intensifies as effective support contracts.
 
-\textcolor{blue}{ ADD it with grpo-no clip versions}
-\paragraph{Analysis on the Dense model}
-we use Qwen3-8B model
+\subsection{Transfer across models and objectives}
 
-\paragraph{Analysis on the RLHF and ESS gating}
-We finally extend the result in the RLHF case. Here, our setting is we further conduct RLHF experiments on open-ended alignment data with dense model, Qwen3-4B-Instruct-2507. We compare GRPO with GRPO-ESS trained on HH-RLHF with Skywork-Reward-Llama-3.1-8B as the reward model. As shown in Figure , ...
+We first change the model scale while keeping the math-RLVR task fixed.
+Figure~\ref{fig:llm-8b-transfer} reports the two Qwen3-8B comparisons for which
+loss aggregation is matched. Under Clip-Higher, the static trajectory finishes
+at $29.0\%$, while the ESS-conditioned construction finishes at $32.7\%$.
+Under DPPO, the corresponding endpoints are $31.7\%$ and $32.5\%$. These gains
+are smaller than the 30B rescue and depend on the safeguard. The endpoint
+ordering favors the conditional construction in both aggregation-matched
+comparisons after the change in model scale.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures_mains/result/8b/curves/overall.pdf}
+  \caption{Dense-model transfer on Qwen3-8B. Panel (a) compares token-mean
+  Clip-Higher with its token-mean ESS-conditioned construction. Panel (b)
+  compares static and ESS-conditioned DPPO under the same sum-normalized
+  aggregation. Direct labels give the step-200 AIME-2024 mean@16.}
+  \label{fig:llm-8b-transfer}
+\end{figure}
+
+Finally, we change both the objective and the data. We train
+Qwen3-4B-Instruct-2507 for 200 updates on Anthropic HH-RLHF
+\citep{bai2022hh} using Skywork-Reward-Llama-3.1-8B
+\citep{liu2024skywork} as the reward model. Figure~\ref{fig:llm-rlhf-transfer}
+compares the complete GRPO and TIS-3-plus-ESS recipes. Their reward-model
+scores start at comparable levels and finish at $43.0$ and $60.7$,
+respectively. The conditional recipe also produces longer responses, ending
+at 460 tokens rather than 352. This experiment tests optimization transfer on
+the training reward model; it does not measure human preference directly.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures_mains/result/rlhf_4b/overall.pdf}
+  \caption{Transfer to open-ended RLHF on Qwen3-4B-Instruct-2507. Panel (a)
+  reports the training reward-model score and panel (b) reports mean response
+  length. Thin curves are per-step observations; thick curves are trailing
+  seven-step means. Direct labels give the step-200 observations. This is a
+  complete-recipe comparison between GRPO and TIS 3 with an ESS-conditioned
+  safeguard.}
+  \label{fig:llm-rlhf-transfer}
+\end{figure}
+\FloatBarrier
+
+Across these experiments, ESS contributes timing rather than a new clipping
+rule. High observed support leaves the permissive branch active; lower support
+increases the use of a prespecified control. The 30B rescue patterns, the
+smaller 8B gains, and the RLHF transfer are consistent with the same division
+of labor: ESS locates the reliability regime, while the safeguarded estimator
+determines the low-support update.
 
 \section{Conclusion}
 
+We studied clipping as a finite-sample estimator choice rather than a default
+property of policy optimization. The theory separates gradient-estimation
+error from the useful update retained after control: reducing MSE improves the
+fixed-step certificate only when that gain compensates for the signal removed
+by clipping. This distinction makes IS preferable while effective support is
+broad and explains why controlled estimators become attractive as mismatch
+grows. The exact Gaussian construction exhibits separate MSE and update
+crossovers. The reported language-model trajectories then show that sequence
+ESS can reveal support contraction and time a prespecified safeguard without
+serving as the oracle itself. In the RLVR and RLHF examples, the resulting
+conditional constructions retain permissive learning in the higher-support
+regime and protect training more strongly as support contracts. ESS therefore
+provides the operational link between importance-weight reliability and the
+decision of when to control an update.
 
 \appendix
 
 \section{Numerical Experiments}
-
-We provide detials in 
 
 
 \subsection{Gaussian bandit}
@@ -772,7 +859,7 @@ Section~\ref{sec:gaussian-example}.
 
 We compare IS with the PPO-style rule in
 Equation~\eqref{eq:ppo-coefficient-rule}, using the exact current-policy value
-baseline. WE con
+baseline.
 
 Because the score contribution is polynomial and each mask boundary
 is linear in $z$, the means, MSEs, and update second moments of both candidates
@@ -935,37 +1022,26 @@ interchangeable.
 
 
 
-\subsection{Observed behavior}
+\subsection{Intervention and training dynamics}
 
-Figure~\ref{fig:llm-main} gives a consistent trajectory-level result. The
-ESS-conditional runs improve the GRPO, Clip-Higher, and DPPO endpoints by
-$6.9$ to $12.3$ percentage points. The TIS comparison isolates the stability
-failure most clearly: the static TIS 3 run improves early but finishes at
-$0.4\%$, whereas the conditional run finishes at $44.8\%$. The common ordering
-across safeguards supports ESS as a shared reliability coordinate.
+The main text reports evaluation performance. We record here how often the
+conditional rule intervenes and the accompanying training dynamics.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/gate/overall.pdf}
-  \caption{When the ESS-conditioned intervention activates. Normalized
-  sequence ESS decreases during training (left), while the fraction of clipped
-  updates increases (right). The rule therefore applies little protection
-  while effective support is broad and progressively activates each safeguard
-  as support deteriorates.}
+  \caption{Realized ESS-conditioned intervention schedules. Each panel pairs
+  the per-step intervention fraction (thin black) and its trailing seven-step
+  mean (thick black) with normalized ESS (red). GRPO and DPPO use raw ESS;
+  Clip-Higher uses shaped ESS after the coefficient cap. The dotted line marks
+  the threshold $0.1$.}
   \label{fig:llm-gate-action}
 \end{figure}
 
 Figure~\ref{fig:llm-gate-action} shows the intended temporal ordering:
-protection rises only after sample ESS declines. The gate preserves the
-permissive early regime and concentrates regularization in the later,
-low-support regime.
-Detailed response-length, entropy, and TIS diagnostics are reported in
-Appendix~\ref{app:llm-diagnostics}.
-
-
-The main text reports evaluation performance and when conditional protection
-activates. This section records the accompanying training dynamics and a
-second permissive TIS setting.
+intervention is already possible early, but its frequency increases as ESS
+contracts. The remaining figures record response length, entropy, reward, and
+a second permissive TIS setting.
 
 \begin{figure}[htbp]
   \centering

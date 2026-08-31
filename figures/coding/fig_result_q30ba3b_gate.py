@@ -1,79 +1,89 @@
 #!/usr/bin/env python
-"""Gate diagnostics (Qwen3-30B-A3B): what the gate sees and how often it clips.
+"""Realized ESS-conditioned intervention schedule on Qwen3-30B-A3B.
 
-  (a) normalized sequence ESS per step, linear axis, with the 0.1 gate threshold
-  (b) fraction of updates clipped, corrected by runlog.gate_fraction()
+Each panel pairs the gate's ESS statistic with the raw intervention fraction.
+GRPO and DPPO use raw complete-sequence ESS; the Clip-Higher construction uses
+post-cap shaped ESS. Thin black traces are per-step intervention fractions and
+thick black traces are trailing seven-step means.
 
-Runs are the ESS-gate variants that run in CLIP mode, so that panel (b) is a clipping fraction
-throughout:
-
-    GRPO + ESS               `ircyhpdmku`   clipped, logged max 0.875
-    GRPO clip-higher + ESS   `328rfu6eb2`   clipped, logged max 0.875
-    DPPO + ESS               `52iya9e2hr`   clipped, logged max 0.875
-
-Not `grpo_noclip_ess`: that GRPO-band run drives the gate in SKIP mode, so its
-`actor/gate/clipped` is flat zero and it cannot appear in a clipping-fraction panel.
-
-Colours match the dynamics figures: FAM[0] GRPO, FAM[1] clip-higher, FAM[2] DPPO.
-
--> for_paper/figures/result/q30ba3b/gate/overall.pdf  (A)
--> for_paper/figures/result/q30ba3b/gate/{ess,clipped}.pdf  (B)
+Output:
+  figures_mains/result/q30ba3b/gate/overall.pdf
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import matplotlib.pyplot as plt
-from paperstyle import COL, FULL, C, FAM, use_paper_style, save
-from runlog import series, gate_fraction
+from matplotlib.lines import Line2D
+import paperstyle
+from paperstyle import FULL, C, use_paper_style, save
+from runlog import series
 
-# (run, label, colour)
-GATED = [
-    ("grpo_ess_clip", "GRPO + ESS",             FAM[0]),
-    ("dapo_ess",      "GRPO clip-higher + ESS", FAM[1]),
-    ("dppo_ess",      "DPPO + ESS",             FAM[2]),
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+paperstyle.FIGDIR = os.path.join(ROOT, "figures_mains")
+
+PANELS = [
+    ("GRPO", "grpo_ess_clip", "ess"),
+    ("Clip-Higher", "dapo_ess", "ess_shaped"),
+    ("DPPO", "dppo_ess", "ess"),
 ]
 
-def draw_ess(a):
-    for run, lbl, col in GATED:
-        xs, ys = series(run, "ess")
-        a.plot(xs, ys, color=col, lw=1.2, label=lbl)
-    a.axhline(0.1, color=C["baseline"], ls=(0, (1, 2)), lw=0.9, label="gate threshold 0.1")
-    a.set_ylabel("ESS (normalized)")
-    a.set_ylim(0, 0.66)
+
+def trailing_mean(values, window=7):
+    output = []
+    for index in range(len(values)):
+        current = values[max(0, index - window + 1): index + 1]
+        output.append(sum(current) / len(current))
+    return output
 
 
-def draw_clipped(a):
-    for run, lbl, col in GATED:
-        xs, ys = gate_fraction(run, "clipped")
-        a.plot(xs, ys, color=col, lw=1.0, alpha=0.95, label=lbl)
-    a.set_ylabel("fraction of updates clipped")
-    a.set_ylim(-0.03, 1.06)
+def draw(ax, run, ess_metric, show_left, show_right):
+    tx, trip = series(run, "trip")
+    ax.plot(tx, trip, color=C["eval"], linewidth=0.55, alpha=0.18)
+    ax.plot(tx, trailing_mean(trip), color=C["eval"], linewidth=1.45)
+    ax.set_xlim(-3, 203)
+    ax.set_ylim(-0.03, 1.03)
+    ax.set_xlabel("training step")
+    ax.tick_params(axis="y", labelleft=show_left)
+    if show_left:
+        ax.set_ylabel("intervention fraction")
 
+    ex, ess = series(run, ess_metric)
+    right = ax.twinx()
+    right.plot(ex, ess, color=C["ours"], linewidth=1.0)
+    right.axhline(0.1, color=C["ours"], linestyle=(0, (1, 2)), linewidth=0.9)
+    right.set_ylim(0, 0.68)
+    right.grid(False)
+    right.spines["right"].set_visible(show_right)
+    right.spines["right"].set_color(C["ours"])
+    right.tick_params(
+        axis="y",
+        colors=C["ours"],
+        right=show_right,
+        labelright=show_right,
+    )
+    if show_right:
+        right.set_ylabel("ESS (normalized)", color=C["ours"])
 
-PANELS = [(draw_ess, "what the gate measures", "ess"),
-          (draw_clipped, "how often the gate clips", "clipped")]
 
 use_paper_style()
+fig, axes = plt.subplots(1, 3, figsize=(FULL, 2.25))
+for index, (title, run, ess_metric) in enumerate(PANELS):
+    draw(
+        axes[index],
+        run,
+        ess_metric,
+        show_left=index == 0,
+        show_right=index == len(PANELS) - 1,
+    )
+    axes[index].set_title(f"({'abc'[index]}) {title}", loc="left")
 
-# --- A) overall ---
-fig, ax = plt.subplots(1, 2, figsize=(FULL, 2.3))
-for i, (fn, tag, _slug) in enumerate(PANELS):
-    fn(ax[i])
-    ax[i].set_title(f"({'ab'[i]}) {tag}", loc="left")
-    ax[i].set_xlim(-3, 203)
-    ax[i].set_xlabel("training step")
-h, l = ax[0].get_legend_handles_labels()
-fig.legend(h, l, loc="outside lower center", ncol=4, frameon=False)
+handles = [
+    Line2D([0], [0], color=C["eval"], linewidth=1.45,
+           label="intervention (7-step mean)"),
+    Line2D([0], [0], color=C["ours"], linewidth=1.0, label="ESS"),
+    Line2D([0], [0], color=C["ours"], linestyle=(0, (1, 2)), linewidth=0.9,
+           label="threshold 0.1"),
+]
+fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False)
 save(fig, "result/q30ba3b/gate/overall")
-
-# --- B) one per panel ---
-for fn, tag, slug in PANELS:
-    fig, a = plt.subplots(figsize=(COL, 2.5))
-    fn(a)
-    a.set_title(tag, loc="left")
-    a.set_xlim(-3, 203)
-    a.set_xlabel("training step")
-    h, l = a.get_legend_handles_labels()
-    fig.legend(h, l, loc="outside lower center", ncol=2, frameon=False)
-    save(fig, f"result/q30ba3b/gate/{slug}")

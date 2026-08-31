@@ -1,59 +1,85 @@
 #!/usr/bin/env python
-"""RLHF result (Qwen3-4B-Instruct, Anthropic HH-RLHF): GRPO baseline vs cispo3+ESS.
-Metric is the reward-model score (critic/score/mean), not AIME. Panels: reward (headline),
-entropy, response length. Data from only_for_figures/data/rlhf_{grpo,cispo3_ess}.csv.
+"""Open-ended RLHF transfer on Qwen3-4B-Instruct-2507.
 
--> for_paper/figures_mains/result/rlhf_4b/{overall,reward,entropy,length}.pdf
+The main figure reports the optimized reward-model score and response length.
+Thin curves are the per-step observations; thick curves are trailing seven-step
+means. Entropy is kept out of the main result because it is not needed for the
+transfer claim.
+
+Output:
+  figures_mains/result/rlhf_4b/overall.pdf
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import paperstyle
-from paperstyle import COL, FULL, FAM, use_paper_style, save
+from paperstyle import FULL, C, use_paper_style, save
 from runlog import series
 
-paperstyle.FIGDIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "figures_mains")
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+paperstyle.FIGDIR = os.path.join(ROOT, "figures_mains")
 
-# (run, label, colour, linestyle, lw)
-SERIES = [
-    ("rlhf_grpo",       "GRPO",         FAM[2], "--", 1.2),
-    ("rlhf_cispo3_ess", "cispo3 + ESS", FAM[1], "-",  1.6),
-]
-# (metric, ylabel, panel title, slug)
-PANELS = [
-    ("reward",  "reward-model score", "(a) reward",          "reward"),
-    ("entropy", "policy entropy",     "(b) entropy",         "entropy"),
-    ("length",  "mean response length (tokens)", "(c) response length", "length"),
+RUNS = [
+    ("rlhf_grpo", "GRPO", "#4d4d4d", "--", -5),
+    ("rlhf_cispo3_ess", "TIS 3 + ESS gate", C["ours"], "-", 6),
 ]
 
 
-def draw(a, metric, ylab):
-    for run, lbl, col, ls, lw in SERIES:
+def trailing_mean(values, window=7):
+    output = []
+    for index in range(len(values)):
+        current = values[max(0, index - window + 1): index + 1]
+        output.append(sum(current) / len(current))
+    return output
+
+
+def annotate_endpoint(ax, x, y, color, offset):
+    ax.annotate(
+        f"{y:.1f}",
+        xy=(x, y),
+        xytext=(5, offset),
+        textcoords="offset points",
+        color=color,
+        fontsize=6.5,
+        ha="left",
+        va="center",
+        clip_on=False,
+    )
+
+
+def draw(ax, metric, ylim, ylabel):
+    for run, _label, color, linestyle, offset in RUNS:
         xs, ys = series(run, metric)
-        tag = f"{lbl}: {ys[-1]:.1f}" if metric == "reward" else lbl
-        a.plot(xs, ys, color=col, ls=ls, lw=lw, marker="o" if metric == "reward" else None,
-               ms=2.5, label=tag)
-    a.set_ylabel(ylab)
-    a.set_xlabel("training step")
+        ax.plot(xs, ys, color=color, linewidth=0.55, alpha=0.20)
+        ax.plot(
+            xs,
+            trailing_mean(ys),
+            color=color,
+            linestyle=linestyle,
+            linewidth=1.55 if linestyle == "-" else 1.25,
+        )
+        annotate_endpoint(ax, xs[-1], ys[-1], color, offset)
+    ax.set_xlim(0, 220)
+    ax.set_ylim(*ylim)
+    ax.set_xlabel("training step")
+    ax.set_ylabel(ylabel)
 
 
 use_paper_style()
+fig, axes = plt.subplots(1, 2, figsize=(FULL, 2.25))
+draw(axes[0], "reward", (0, 66), "reward-model score")
+axes[0].set_title("(a) optimized reward", loc="left")
+draw(axes[1], "length", (310, 495), "response length (tokens)")
+axes[1].set_title("(b) response length", loc="left")
 
-# --- A) combined ---
-fig, ax = plt.subplots(1, 3, figsize=(FULL, 2.5))
-for a, (metric, ylab, tag, _slug) in zip(ax, PANELS):
-    draw(a, metric, ylab)
-    a.set_title(tag, loc="left")
-ax[0].legend(loc="lower right")
+handles = [
+    Line2D([0], [0], color="#4d4d4d", linestyle="--", linewidth=1.25,
+           label="GRPO"),
+    Line2D([0], [0], color=C["ours"], linestyle="-", linewidth=1.55,
+           label="TIS 3 + ESS gate"),
+]
+fig.legend(handles=handles, loc="outside lower center", ncol=2, frameon=False)
 save(fig, "result/rlhf_4b/overall")
-
-# --- B) one per metric ---
-for metric, ylab, tag, slug in PANELS:
-    fig, a = plt.subplots(figsize=(COL, 2.4))
-    draw(a, metric, ylab)
-    a.set_title(tag, loc="left")
-    a.legend(loc="lower right")
-    save(fig, f"result/rlhf_4b/{slug}")
-print("rlhf figures done")
