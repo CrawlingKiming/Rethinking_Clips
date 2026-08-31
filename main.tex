@@ -548,10 +548,10 @@ boundary while the IS rule does not.
 
 \section{Policy optimization and ESS}
 
-This section examines two consequences of the preceding theory.
-We first separate estimator MSE from one-step policy improvement in an exactly
-solvable Gaussian bandit. We then ask whether sequence-level ESS exhibits the
-corresponding temporal pattern along large-model training trajectories.
+This section makes the theoretical distinction observable in two settings.
+An exactly solvable Gaussian bandit first separates gradient-estimation MSE
+from one-step policy improvement. Large-model trajectories then show how
+observed effective support evolves around delayed optimization failure.
 
 \subsection{Policy optimization in a Gaussian bandit}
 \label{sec:gaussian-example}
@@ -575,8 +575,8 @@ $\epsilon=0.2$, gradient $g=2$, and step size $\eta=0.4$, and vary
 $0.2\le\Delta\le\sqrt{-\log(0.005)}$ so that all three decisions occur on one
 monotone ESS path.
 
-Figure~\ref{fig:gaussian-one-step} shows that the two oracle decisions do not
-coincide. PPO first attains lower MSE at
+Figure~\ref{fig:gaussian-one-step} shows that estimator accuracy and update
+quality switch at different ESS levels. PPO first attains lower MSE at
 $\rho_{\mathrm{MSE}}=0.122756$, but it does not attain larger expected
 improvement until $\rho_B=0.039230$. Thus, throughout
 $0.039230<\rho<0.122756$, PPO is the more accurate gradient estimator while IS
@@ -605,17 +605,17 @@ preferred.
 
 \subsection{Policy optimization in language models}
 
-The Gaussian example holds the policy state fixed. We next examine whether the
-same effective-support diagnostic is informative along language-model
-training, where both the policy and its population gradient evolve. We extend
-the motivating comparison to three permissive Qwen3-30B-A3B runs: truncated
-importance sampling (TIS) with caps 3 and 5, and GRPO without clipping. The
-training horizon is 200 policy updates, although the recorded TIS 3 evaluation
-trajectory ends at step 170 after collapse. We evaluate each trajectory on
-AIME-2024 using mean@16.
+The Gaussian comparison holds the policy state fixed. Large-model training
+adds a temporal question: does observed effective support deteriorate before
+the performance loss becomes visible? We return to the two permissive
+Qwen3-30B-A3B trajectories in Figure~\ref{fig:llm-motivation}, which use
+truncated importance sampling (TIS) with caps 3 and 5. We complement them with
+a third trajectory trained with GRPO without clipping. Each run is trained for
+up to 200 policy updates and evaluated on AIME-2024 using mean@16; the recorded
+TIS 3 evaluation trajectory ends at step 170.
 
-Because $\rho_k$ is a population quantity, we use the standard normalized
-sample ESS
+Because the population ESS $\rho_k$ is unavailable during training, at each
+update we compute the normalized sample ESS
 \begin{equation}
  \widehat\rho_k
  :=\frac{\left(\sum_{i=1}^N W_{k,i}\right)^2}
@@ -623,67 +623,68 @@ sample ESS
  \label{eq:sample-ess}
 \end{equation}
 computed from the complete-sequence ratios before any truncation or masking.
-This statistic measures the observed concentration of importance weights; it
-is a diagnostic of IS reliability rather than the full gradient MSE. The
-threshold $0.1$ used in the next section was prespecified for the
-language-model experiments and was not calibrated from the Gaussian
-crossovers.
+This statistic measures the concentration of the observed importance weights.
+It is therefore a diagnostic of IS reliability, not an estimate of the full
+gradient MSE or a failure score. The threshold $0.1$ used below was
+prespecified for the language-model experiments and was not calibrated from
+the Gaussian example.
 
-To compare support deterioration with a conventional optimization diagnostic,
-we align the per-step sample ESS and gradient norm with the validation
-trajectory. For the two TIS runs, we display each diagnostic through the first
-evaluation below its step-0 value; beyond this point, the policy is already in
-the failure regime that the diagnostic is intended to anticipate. The GRPO
-no-clip trajectory never crosses this criterion. Thin lines show the per-step
-diagnostics, and thick lines show trailing seven-step averages.
+The TIS trajectories establish the temporal ordering that motivates an ESS
+diagnostic. In Figure~\ref{fig:llm-motivation}, sample ESS first falls below
+$0.1$ at steps 66 and 62 for TIS 3 and TIS 5, respectively. These crossings
+occur after the step-60 performance peaks but before the next evaluation at
+step 70 reveals a decline. Performance subsequently falls below its step-0
+value at steps 100 and 110. Effective support can therefore deteriorate before
+the failure is visible in the evaluation trajectory.
 
-Figure~\ref{fig:llm-ess-gradient} shows two distinct patterns. For TIS 3 and
-TIS 5, per-step ESS first falls below $0.1$ at steps 66 and 62, respectively,
-whereas validation first falls below its initial value at steps 100 and 110.
-At the ESS crossings, the corresponding gradient norms are $0.047$ and
-$0.073$; their substantial growth occurs later. The no-clip trajectory
-separates support deterioration from immediate performance loss: ESS falls
-below $0.1$ and the gradient norm spikes at step 57, yet AIME performance
-continues to improve and peaks at $44.4\%$ at step 140. Thus neither low ESS
-nor a large gradient norm is by itself a failure certificate. In the two TIS
-runs, ESS records a loss of effective support before validation deteriorates.
-The no-clip run shows that this loss alone does not determine update quality,
-consistent with the certificate's additional dependence on the remaining
-gradient signal. These runs therefore support a trajectory-level diagnostic,
-not a between-run statistical comparison.
+Figure~\ref{fig:llm-no-clip-ess} gives the complementary case. The first ESS
+observation below $0.1$ at step 57 is transient. We therefore define the onset
+of a low-support episode, using ESS alone, as the first of five consecutive
+observations below $0.1$; this occurs at step 99. From the first evaluation
+after this onset at step 100 through the performance peak at step 140, 34 of 41
+ESS observations are below $0.1$, while AIME performance rises from $39.8\%$
+to $44.4\%$. Low ESS therefore identifies weak effective support without
+implying immediate performance failure or determining which controlled
+estimator gives the better update.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/ungated_governs/ess_governs_update.pdf}
-  \caption{Temporal diagnostics for the permissive Qwen3-30B-A3B runs.
-  Panel (a) reports AIME-2024 mean@16. Panels (b)--(c) report per-step
-  normalized sequence ESS and gradient norm. Thin lines show per-step traces,
-  and thick lines show trailing seven-step averages; downward triangles mark
-  the first ESS observation below $0.1$. Diagnostic traces for TIS 3 and TIS 5
-  end at the first evaluation below their step-0 values, marked by crosses in panel (a), while
-  the GRPO no-clip trace never crosses this criterion. The dotted line in
-  panel (b) is the prespecified threshold evaluated in the next section.}
-  \label{fig:llm-ess-gradient}
+  \includegraphics[width=0.72\linewidth]{figures_mains/result/q30ba3b/ungated_governs/ess_governs_update.pdf}
+  \caption{Effective support during Qwen3-30B-A3B GRPO without clipping.
+  The black curve reports AIME-2024 mean@16, and the red curve reports
+  per-step normalized sequence ESS computed before truncation or masking. The
+  red horizontal line marks the prespecified threshold $0.1$. The red dotted
+  vertical line marks the low-support onset at step 99, defined as the first of
+  five consecutive ESS observations below $0.1$; the black dashed line marks
+  the performance peak at step 140. From the first evaluation after onset at
+  step 100 through the peak, 34 of 41 ESS observations are below $0.1$, while
+  performance rises from $39.8\%$ to $44.4\%$.}
+  \label{fig:llm-no-clip-ess}
 \end{figure}
 \FloatBarrier
 
-The two examples assign ESS a specific role. It does not determine the better
-estimator by itself; instead, it diagnoses effective support, the quantity
-governing the IS reliability bound. This motivates conditioning
-the use of safeguards on observed ESS, which we evaluate next.
+The two examples give ESS a precise empirical role. In the Gaussian bandit,
+ESS indexes the support regime, while the full certificate determines the
+preferred update. In the language-model trajectories, sample ESS reveals
+support loss before failure becomes visible, but does not itself constitute
+a failure certificate. The operational question is therefore whether
+conditioning a safeguard on ESS improves low-support updates without
+sacrificing permissive learning when support is high. We test this rule next.
 
 \section{Optimization with ESS}
 
-In the preceding section we have shown that ESS plays an important role in optimization. This motivates a simple optimization rule .. in this sectdion we ..
+We implement the preceding idea with an ESS gate. The gate retains the
+permissive update when observed support is high and activates a selected
+safeguard when support is low.
 
-\paragraph{Optimization Rule from ESS gates}
+\paragraph{ESS-gated update.}
 
 As ESS rises, likelihood-ratio mismatch provides less reason to incur masking bias. As ESS falls, the IS certificate weakens. ESS therefore identifies the
 support regime; Equation~\eqref{eq:clipping-risk-decomposition} determines
 whether control lowers gradient-estimation MSE, and
 Corollary~\ref{cor:certificate-crossover} determines whether it gives the stronger update. 
 
-To formulate, consider $\tau$ and a clipping stragies during the training such that during the PPO-minibatch steps, if one observes the ... then.. the gradient is computedas
+Given a threshold $\tau$ and a selected clipping rule, the minibatch update is
 
 \begin{equation}
   \widehat g_{\mathrm{LLM}}
@@ -693,6 +694,9 @@ To formulate, consider $\tau$ and a clipping stragies during the training such t
   \end{cases}
   \label{eq:llm-gate}
 \end{equation}
+
+The gate uses ESS only to time the intervention; the selected clipping rule
+determines how the low-support update is controlled.
 
 
 
