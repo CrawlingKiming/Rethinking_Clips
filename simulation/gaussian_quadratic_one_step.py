@@ -363,7 +363,7 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
     risk_axis.text(
         math.sqrt(rho_certificate * rho_mse),
         0.28,
-        "PPO lower MSE,\nIS larger gain",
+        "MSE and improvement\nrankings disagree",
         color=DIFFERENCE_COLOR,
         ha="center",
         va="bottom",
@@ -383,17 +383,23 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
         linestyle="--",
         linewidth=1.0,
     )
+    gain_axis.axvline(
+        rho_stop,
+        color=NEUTRAL_COLOR,
+        linestyle="-.",
+        linewidth=1.0,
+    )
     gain_axis.set_xscale("log")
     gain_axis.set_xlim(MINIMUM_RHO, maximum_rho)
     gain_axis.set_ylim(-4.3, 1.45)
     gain_axis.set_xlabel(r"Normalized ESS $\rho$ (log scale)")
-    gain_axis.set_ylabel("Exact expected one-step gain")
-    gain_axis.set_title("(b) Exact one-step improvement")
+    gain_axis.set_ylabel("Expected one-step improvement")
+    gain_axis.set_title("(b) Policy improvement")
     gain_axis.grid(True, which="major", color=GRID_COLOR, linewidth=0.6)
     gain_axis.legend(frameon=False, loc="lower right")
-    gain_axis.text(0.23, 1.18, "IS", color=RAW_COLOR, ha="center", fontsize=7)
-    gain_axis.text(0.021, 1.18, "PPO", color=PPO_COLOR, ha="center", fontsize=7)
-    gain_axis.text(0.0073, 1.18, "No update", color=NEUTRAL_COLOR, ha="center", fontsize=7)
+    gain_axis.text(0.23, 1.18, "IS update", color=RAW_COLOR, ha="center", fontsize=7)
+    gain_axis.text(0.021, 1.18, "PPO update", color=PPO_COLOR, ha="center", fontsize=7)
+    gain_axis.text(0.0073, 1.18, "Abstain", color=NEUTRAL_COLOR, ha="center", fontsize=7)
 
     for axis in axes:
         axis.annotate(
@@ -420,6 +426,19 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
             fontsize=6.5,
             color=NEUTRAL_COLOR,
         )
+
+    gain_axis.annotate(
+        r"$\rho_{\rm stop}=0.011$",
+        xy=(rho_stop, 1.0),
+        xycoords=("data", "axes fraction"),
+        xytext=(-2, -3),
+        textcoords="offset points",
+        ha="right",
+        va="top",
+        rotation=90,
+        fontsize=6.5,
+        color=NEUTRAL_COLOR,
+    )
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     figure_base = FIGURES_DIR / "gaussian_quadratic_one_step"

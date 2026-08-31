@@ -12,10 +12,12 @@ import os
 import re
 import bisect
 
-# Local-only: figures regenerate purely from for_paper/only_for_figures/ — clean CSVs in data/
-# (read by series()), with the raw log captures (toolu_*.json / *_runlog.txt) here as a fallback.
-# No dependency on any Claude-session tool-results dir.
-_ONLY = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "only_for_figures")
+# Local-only: figures regenerate from the clean CSVs in the repository-level
+# only_for_figures/data directory, with raw log captures used only as a fallback.
+_REPO_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, os.pardir)
+)
+_ONLY = os.path.join(_REPO_ROOT, "only_for_figures")
 TR = {"30b": _ONLY, "8b": _ONLY}
 
 # short name -> (tool-result root, dump file). Qwen3-30B-A3B unless noted.
@@ -125,7 +127,7 @@ def ex(root, fname, key):
     return d
 
 
-_DATADIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "only_for_figures", "data")
+_DATADIR = os.path.join(_ONLY, "data")
 
 
 def _series_from_csv(run, metric, cut):

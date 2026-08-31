@@ -546,35 +546,131 @@ For $0<\eta_k\le1/L_k$, a rule $u$ has a positive certificate exactly when
 Thus clipping recovers a certified update only if it crosses this positivity
 boundary while the IS rule does not.
 
-\section{Analysis on the Policy Optmization and ESS}
-\subsection{Policy optimization on Gaussian bandits}
+\section{Policy optimization and ESS}
+
+This section examines two consequences of the preceding theory.
+We first separate estimator MSE from one-step policy improvement in an exactly
+solvable Gaussian bandit. We then ask whether sequence-level ESS exhibits the
+corresponding temporal pattern along large-model training trajectories.
+
+\subsection{Policy optimization in a Gaussian bandit}
 \label{sec:gaussian-example}
-To exhibit the separation between the MSE and certificate oracles in a concrete policy problem, we construct a scalar Gaussian bandit with quadratic rewards which serves as the theoretical testbed in many policy optimization literatures [CITATIONS], in which ESS, estimator MSE, and expected one-step improvement are all available exactly. Appendix~\ref{app:gaussian} derives these quantities and the exact settings.
 
-Figure~\ref{fig:gaussian-one-step} shows the validation of the theoreies. We show ESS serves as the MSE... and .. the figure b shows that the reliablity of the estimator determines the one step improvement
+To isolate the estimator and optimization comparisons, we construct a scalar
+Gaussian bandit with a quadratic reward. Gaussian policies and smooth
+objectives provide a standard analytic setting for policy-gradient methods
+\citep{pirotta2013adaptive,metelli2018pois,papini2022smoothing}. We hold the
+current policy fixed and vary only its distance from the rollout policy. Along
+this path, normalized ESS is $\rho(\Delta)=\exp(-\Delta^2)$, and the estimator
+moments are finite sums of truncated Gaussian moments. Moreover, the quadratic
+objective makes the fixed-step certificate equal the exact expected one-step
+improvement. The construction therefore contains no Monte Carlo error;
+Appendix~\ref{app:gaussian} gives the setup and calculations.
 
+At each point on this path, the MSE oracle selects the candidate with smaller
+gradient-estimation MSE, whereas the certificate oracle selects the candidate
+with larger $B_k(u;\eta_k)$. The safe certificate oracle additionally includes
+a null update with certificate zero. We use $N=32$, PPO radius
+$\epsilon=0.2$, gradient $g=2$, and step size $\eta=0.4$, and vary
+$0.2\le\Delta\le\sqrt{-\log(0.005)}$ so that all three decisions occur on one
+monotone ESS path.
+
+Figure~\ref{fig:gaussian-one-step} shows that the two oracle decisions do not
+coincide. PPO first attains lower MSE at
+$\rho_{\mathrm{MSE}}=0.122756$, but it does not attain larger expected
+improvement until $\rho_B=0.039230$. Thus, throughout
+$0.039230<\rho<0.122756$, PPO is the more accurate gradient estimator while IS
+is the better policy update. PPO remains the preferred positive update down to
+$\rho_{\mathrm{stop}}=0.010890$; below this point, neither candidate has a
+positive certificate. These numerical boundaries are specific to
+$(g,N,\epsilon,\eta)$. ESS parameterizes the loss of effective support, but
+the full certificate, rather than MSE alone, determines which update is
+preferred.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/gaussian_quadratic_one_step.pdf}
-  \caption{\textcolor{blue}{ change (b) title to Policy Improvement, erase the current words inside seach Figures (like ppo lower mse) and change it to better ones aligning our theories}Policy optimization on Gaussian bandit results. (a) PPO begins to lower MSE at $\rho_{\mathrm{MSE}}=0.122$. The shaded interval marks states in which the MSE oracle selects PPO but IS has the larger expected improvement. (b) The
-  quadratic objective makes the full certificate equal to the exact expected one-step gain. The safe certificate oracle selects IS above $\rho_B=0.039$, PPO between $\rho_{\mathrm{stop}}=0.010890$ and $\rho_B$,
-  and no update below $\rho_{\mathrm{stop}}$. The dotted and dashed lines mark the MSE and certificate
-  crossovers, respectively.}
+  \caption{Exact one-step comparison for the Gaussian bandit with $g=2$,
+  $N=32$, $\epsilon=0.2$, and $\eta=0.4$. (a) The MSE oracle switches from IS
+  to PPO at $\rho_{\mathrm{MSE}}=0.122756$. The shaded interval marks the
+  regime in which PPO has lower MSE but IS has larger expected improvement.
+  (b) The safe certificate oracle selects IS above $\rho_B=0.039230$, PPO for
+  $\rho_{\mathrm{stop}}<\rho<\rho_B$, and the null update below
+  $\rho_{\mathrm{stop}}=0.010890$. The dotted, dashed, and dash-dotted lines
+  mark the MSE crossover, certificate crossover, and abstention boundary,
+  respectively.}
   \label{fig:gaussian-one-step}
 \end{figure}
 \FloatBarrier
 
-\subsection{Policy optimization on LLMs}
+\subsection{Policy optimization in language models}
 
-We next test the role of the ESS on LLMs by looking at the non-trust region methods' failure modes, where the failure modes were extreme in the Qwen3-30B-A3B models. 
-We optimize Qwen3-30B-A3B for 200 training steps and evaluate on AIME-2024 with
-mean@16. The primary comparison is the complete evaluation trajectory and its
-step-200 endpoint. We also align normalized sequence ESS and the fraction of
-clipped updates to the training axis to verify that the rule responds to a loss
-of effective support. Revisting the motivating examples, we show three..  first revisit the motivating examples, and show, TIS 3, TIS5, and grpo no clips. 
+The Gaussian example holds the policy state fixed. We next examine whether the
+same effective-support diagnostic is informative along language-model
+training, where both the policy and its population gradient evolve. We extend
+the motivating comparison to three permissive Qwen3-30B-A3B runs: truncated
+importance sampling (TIS) with caps 3 and 5, and GRPO without clipping. The
+training horizon is 200 policy updates, although the recorded TIS 3 evaluation
+trajectory ends at step 170 after collapse. We evaluate each trajectory on
+AIME-2024 using mean@16.
 
-The Figure [Figure that has, results with only aboves, the ESS and grad norms] depicts the results. Interesting enough, while existing papers suspect exploding grad norms as the culprit of policy degrdation, a clear correlation was rather observed in the...ESS .. this thus shows 
+Because $\rho_k$ is a population quantity, we use the standard normalized
+sample ESS
+\begin{equation}
+ \widehat\rho_k
+ :=\frac{\left(\sum_{i=1}^N W_{k,i}\right)^2}
+ {N\sum_{i=1}^N W_{k,i}^2},
+ \label{eq:sample-ess}
+\end{equation}
+computed from the complete-sequence ratios before any truncation or masking.
+This statistic measures the observed concentration of importance weights; it
+is a diagnostic of IS reliability rather than the full gradient MSE. The
+threshold $0.1$ used in the next section was prespecified for the
+language-model experiments and was not calibrated from the Gaussian
+crossovers.
+
+To compare support deterioration with a conventional optimization diagnostic,
+we align the per-step sample ESS and gradient norm with the validation
+trajectory. For the two TIS runs, we display each diagnostic through the first
+evaluation below its step-0 value; beyond this point, the policy is already in
+the failure regime that the diagnostic is intended to anticipate. The GRPO
+no-clip trajectory never crosses this criterion. Thin lines show the per-step
+diagnostics, and thick lines show trailing seven-step averages.
+
+Figure~\ref{fig:llm-ess-gradient} shows two distinct patterns. For TIS 3 and
+TIS 5, per-step ESS first falls below $0.1$ at steps 66 and 62, respectively,
+whereas validation first falls below its initial value at steps 100 and 110.
+At the ESS crossings, the corresponding gradient norms are $0.047$ and
+$0.073$; their substantial growth occurs later. The no-clip trajectory
+separates support deterioration from immediate performance loss: ESS falls
+below $0.1$ and the gradient norm spikes at step 57, yet AIME performance
+continues to improve and peaks at $44.4\%$ at step 140. Thus neither low ESS
+nor a large gradient norm is by itself a failure certificate. In the two TIS
+runs, ESS records a loss of effective support before validation deteriorates.
+The no-clip run shows that this loss alone does not determine update quality,
+consistent with the certificate's additional dependence on the remaining
+gradient signal. These runs therefore support a trajectory-level diagnostic,
+not a between-run statistical comparison.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/ungated_governs/ess_governs_update.pdf}
+  \caption{Temporal diagnostics for the permissive Qwen3-30B-A3B runs.
+  Panel (a) reports AIME-2024 mean@16. Panels (b)--(c) report per-step
+  normalized sequence ESS and gradient norm. Thin lines show per-step traces,
+  and thick lines show trailing seven-step averages; downward triangles mark
+  the first ESS observation below $0.1$. Diagnostic traces for TIS 3 and TIS 5
+  end at the first evaluation below their step-0 values, marked by crosses in panel (a), while
+  the GRPO no-clip trace never crosses this criterion. The dotted line in
+  panel (b) is the prespecified threshold evaluated in the next section.}
+  \label{fig:llm-ess-gradient}
+\end{figure}
+\FloatBarrier
+
+The two examples assign ESS a specific role. It does not determine the better
+estimator by itself; instead, it diagnoses effective support, the quantity
+governing the IS reliability bound. This motivates conditioning
+the use of safeguards on observed ESS, which we evaluate next.
 
 \section{Optimization with ESS}
 

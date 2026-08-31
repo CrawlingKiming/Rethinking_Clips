@@ -1,96 +1,182 @@
 #!/usr/bin/env python
-"""What governs a performance update in the UNGATED runs? Scope: the three no-gate runs that vary
-only the ratio cap — pure TIS cap-3 (`sjjc7dcpzf`), pure TIS cap-5 (`ayv2ajeuqk`), GRPO no-clip
-cap-inf (`bvrscfn6u8`). A run is considered collapsed once validation falls below its initial
-(step-0) value; all windows from that step on are dropped (cispo3 @100, cispo5 @110, no-clip never).
-Pooled over the surviving eval windows, the per-window change in validation tracks the window's mean
-sequence ESS far more than grad_norm:
+"""Temporal diagnostics for three permissive Qwen3-30B-A3B runs.
 
--> for_paper/figures_mains/result/q30ba3b/ungated_governs/ess_governs_update.pdf
+The figure aligns AIME-2024 validation, per-step normalized sequence ESS, and
+gradient norm for TIS 3, TIS 5, and GRPO without clipping. For the two TIS
+runs, diagnostic traces stop at the first evaluation below the step-0 score;
+the validation curves remain complete. This avoids treating post-collapse ESS
+recovery as evidence of renewed support. The no-clip run never crosses that
+collapse criterion over its recorded trajectory.
+
+The output is descriptive. It does not estimate a population gradient MSE or
+claim that ESS alone determines update quality.
 """
 import os
 import sys
-import math
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import matplotlib.pyplot as plt
 import paperstyle
-from paperstyle import FULL, C, FAM, use_paper_style, save
+from paperstyle import C, FAM, FULL, use_paper_style, save
 from runlog import series
 
-paperstyle.FIGDIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "figures_mains")
 
-# (label, runlog key, colour) — the three UNGATED runs, cap 3 / 5 / inf
+paperstyle.FIGDIR = os.path.abspath(
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        os.pardir,
+        os.pardir,
+        "figures_mains",
+    )
+)
+
 RUNS = [
-    ("pure TIS, cap 3",     "cispo3_nogate", FAM[3]),
-    ("pure TIS, cap 5",     "cispo5_nogate", FAM[1]),
-    ("GRPO no-clip, cap ∞", "noclip_ungated", FAM[0]),
+    ("TIS 3", "cispo3_nogate", FAM[3]),
+    ("TIS 5", "cispo5_nogate", FAM[1]),
+    ("GRPO, no clip", "noclip_ungated", FAM[0]),
 ]
+ESS_THRESHOLD = 0.1
+SMOOTHING_WINDOW = 7
 
 
-def windows(key):
-    """per-eval-window (Δ AIME %, mean ESS, max grad_norm, mean frac_upper), post-collapse dropped.
-
-    Collapse = validation falls below its initial (step-0) value; everything from that step on is
-    discarded (the run has regressed past where it started, so its ESS trace is not meaningful)."""
-    xe, ev = series(key, "eval")
-    esd = dict(zip(*series(key, "ess")))
-    gnd = dict(zip(*series(key, "grad_norm")))
-    frd = dict(zip(*series(key, "frac_upper")))
-    base = ev[0]
-    collapse_start = next((xe[i] for i in range(1, len(xe)) if ev[i] < base), None)
-    out = []
-    for i in range(len(xe) - 1):
-        if collapse_start is not None and xe[i] >= collapse_start:
-            continue
-        s0, s1 = xe[i], xe[i + 1]
-        we = [esd[s] for s in esd if s0 < s <= s1]
-        wg = [gnd[s] for s in gnd if s0 < s <= s1]
-        wf = [frd[s] for s in frd if s0 < s <= s1]
-        if we and wg and wf:
-            out.append(((ev[i + 1] - ev[i]) * 100.0,
-                        sum(we) / len(we), max(wg), sum(wf) / len(wf)))
-    return out
+def first_validation_drop(run):
+    """First evaluation step below the run's step-0 value, if it occurs."""
+    steps, values = series(run, "eval")
+    baseline = values[0]
+    for step, value in zip(steps[1:], values[1:]):
+        if value < baseline:
+            return step
+    return None
 
 
-def pear(x, y):
-    n = len(x); mx = sum(x) / n; my = sum(y) / n
-    cov = sum((a - mx) * (b - my) for a, b in zip(x, y))
-    vx = sum((a - mx) ** 2 for a in x) ** .5
-    vy = sum((b - my) ** 2 for b in y) ** .5
-    return cov / (vx * vy)
+def first_ess_crossing(run):
+    """First step at which normalized sequence ESS falls below 0.1."""
+    steps, values = series(run, "ess")
+    for step, value in zip(steps, values):
+        if value < ESS_THRESHOLD:
+            return step, value
+    return None, None
 
 
-# gather
-data = {lbl: windows(key) for lbl, key, _ in RUNS}
-D  = [w[0] for lbl in data for w in data[lbl]]
-E  = [w[1] for lbl in data for w in data[lbl]]
-G  = [w[2] for lbl in data for w in data[lbl]]
-Fu = [w[3] for lbl in data for w in data[lbl]]
+def truncate_at_drop(run, steps, values):
+    drop = first_validation_drop(run)
+    if drop is None:
+        return steps, values
+    kept = [(step, value) for step, value in zip(steps, values) if step <= drop]
+    return [item[0] for item in kept], [item[1] for item in kept]
+
+
+def trailing_mean(values, window=SMOOTHING_WINDOW):
+    smoothed = []
+    for index in range(len(values)):
+        local = values[max(0, index - window + 1) : index + 1]
+        smoothed.append(sum(local) / len(local))
+    return smoothed
+
 
 use_paper_style()
-fig, ax = plt.subplots(1, 2, figsize=(FULL, 2.7), sharey=True)
+fig, axes = plt.subplots(1, 3, figsize=(FULL, 2.65))
+eval_axis, ess_axis, grad_axis = axes
 
-r_ess = pear(E, D)
-r_gn  = pear([math.log10(max(g, 1e-3)) for g in G], D)
+for label, run, color in RUNS:
+    eval_steps, eval_values = series(run, "eval")
+    eval_axis.plot(
+        eval_steps,
+        [100.0 * value for value in eval_values],
+        color=color,
+        marker="o",
+        linewidth=1.35,
+        label=label,
+    )
+    drop = first_validation_drop(run)
+    if drop is not None:
+        drop_value = dict(zip(eval_steps, eval_values))[drop]
+        eval_axis.scatter(
+            [drop],
+            [100.0 * drop_value],
+            marker="X",
+            s=24,
+            color=color,
+            edgecolor="white",
+            linewidth=0.45,
+            zorder=5,
+        )
 
-def panel(a, xi, xlab, logx, thresh, title, r):
-    for lbl, key, col in RUNS:
-        ws = data[lbl]
-        a.scatter([w[xi] for w in ws], [w[0] for w in ws],
-                  s=15, color=col, alpha=0.85, edgecolors="none", label=lbl)
-    a.axhline(0, color=C["baseline"], lw=0.8)
-    if logx:
-        a.set_xscale("log")
-    if thresh is not None:
-        a.axvline(thresh, color=C["baseline"], ls=(0, (1, 2)), lw=0.9)
-    a.set_xlabel(xlab)
-    a.set_title(f"{title}  (r={r:+.2f})", loc="left", fontsize=8)
+    ess_steps, ess_values = truncate_at_drop(run, *series(run, "ess"))
+    ess_axis.plot(ess_steps, ess_values, color=color, alpha=0.22, linewidth=0.65)
+    ess_axis.plot(
+        ess_steps,
+        trailing_mean(ess_values),
+        color=color,
+        linewidth=1.35,
+    )
 
-panel(ax[0], 1, "window-mean ESS",      False, 0.1, "(a) ESS", r_ess)
-panel(ax[1], 2, "window-max grad_norm", True,  None, "(b) grad_norm", r_gn)
-ax[0].set_ylabel(r"$\Delta$ AIME mean@16 (pts)")
-ax[0].legend(loc="lower right", fontsize=6.5, handletextpad=0.2)
+    grad_steps, grad_values = truncate_at_drop(run, *series(run, "grad_norm"))
+    grad_axis.plot(grad_steps, grad_values, color=color, alpha=0.22, linewidth=0.65)
+    grad_axis.plot(
+        grad_steps,
+        trailing_mean(grad_values),
+        color=color,
+        linewidth=1.35,
+    )
+
+    crossing_step, crossing_ess = first_ess_crossing(run)
+    if crossing_step is not None and crossing_step in set(ess_steps):
+        ess_axis.scatter(
+            [crossing_step],
+            [crossing_ess],
+            marker="v",
+            s=20,
+            color=color,
+            edgecolor="white",
+            linewidth=0.4,
+            zorder=5,
+        )
+        grad_at_step = dict(zip(grad_steps, grad_values)).get(crossing_step)
+        if grad_at_step is not None:
+            grad_axis.scatter(
+                [crossing_step],
+                [grad_at_step],
+                marker="v",
+                s=20,
+                color=color,
+                edgecolor="white",
+                linewidth=0.4,
+                zorder=5,
+            )
+
+eval_axis.set_title("(a) Validation performance", loc="left")
+eval_axis.set_ylabel("AIME-2024 mean@16 (%)")
+eval_axis.set_ylim(-1.5, 48)
+eval_axis.legend(loc="lower center", fontsize=6.4)
+
+ess_axis.set_title("(b) Normalized sequence ESS", loc="left")
+ess_axis.set_ylabel("Normalized sample ESS")
+ess_axis.set_ylim(0.0, 0.65)
+ess_axis.axhline(
+    ESS_THRESHOLD,
+    color=C["baseline"],
+    linestyle=(0, (1, 2)),
+    linewidth=0.9,
+)
+
+grad_axis.set_title("(c) Gradient norm", loc="left")
+grad_axis.set_ylabel("Gradient norm")
+grad_axis.set_yscale("log")
+
+for axis in axes:
+    axis.set_xlim(-3, 203)
+    axis.set_xlabel("Training step")
 
 save(fig, "result/q30ba3b/ungated_governs/ess_governs_update")
-print(f"n={len(D)}  r(ESS)={r_ess:+.3f}  r(log grad_norm)={r_gn:+.3f}")
+
+for label, run, _ in RUNS:
+    drop = first_validation_drop(run)
+    crossing_step, crossing_ess = first_ess_crossing(run)
+    grad_steps, grad_values = series(run, "grad_norm")
+    grad_at_crossing = dict(zip(grad_steps, grad_values)).get(crossing_step)
+    print(
+        f"{label}: ESS<0.1 at {crossing_step} "
+        f"(ESS={crossing_ess:.4g}, grad_norm={grad_at_crossing:.4g}); "
+        f"validation drop={drop}"
+    )
