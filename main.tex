@@ -63,44 +63,84 @@ early learning while preventing late failure.
 
 \section{Introduction}
 
-Reinforcement learning (RL) is a foundational paradigm for
-fine-tuning Large Language Models (LLMs), enabling alignment with human preferences (Ouyang et al., 2022; Rafailov
-et al., 2023) and complex reasoning tasks (Guo et al., 2025;
-Qi et al., 2025a). now central. While Proximal Policy Optimization (PPO1) (Schulman et al.,
-2017) is the dominant algorithm in this setting the application on this LLM based on the trust region based understanding.  Their practical performance, however, is largely not very understood and see mismatch on the .. soething..
+Reinforcement learning has become central to post-training large language
+models for preference alignment and mathematical reasoning
+\citep{bai2022hh,shao2024deepseekmath,yu2025dapo}. In scalable training
+systems, a rollout policy generates responses that a trainer reuses for one or
+more gradient updates, so the current policy need not match the policy that
+produced the data \citep{qi2026dppo}. To limit the resulting policy deviation,
+PPO-style objectives, including GRPO, use ratio-based clipping or masking
+\citep{schulman2015trpo,schulman2017ppo,shao2024deepseekmath}. This control
+promotes stability, but it can also suppress informative gradient
+contributions and slow learning.
 
-Existing works such as TIS (CISPO) and grpo no-clip reports that permissive updates permissive update can work surprisingly well in this setting: performance rises quickly and
-remains stable, but then collapses abruptly. Figure~\ref{fig:llm-motivation}
-shows this delayed failure. not understood..
+Permissive estimators expose the other side of this tradeoff. Truncated
+importance sampling (TIS), as used by CISPO, retains contributions that PPO
+would mask, while a fully unclipped update removes coefficient control
+altogether \citep{minimax2025m1,qi2026dppo}. These estimators can learn
+rapidly, yet their success need not persist. Figure~\ref{fig:llm-motivation}
+shows TIS caps 3 and 5 improving for many updates before abruptly collapsing.
+The central puzzle is temporal: why can the same estimator be productive early
+in training and unreliable later?
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/motivation/overall.pdf}
-  \caption{A delayed failure in Qwen3-30B-A3B training. The permissive runs
-  improve for many updates and fail only after the effective support of the
-  rollout data has sharply deteriorated. This transition is the phenomenon
-  studied in the paper.}
+  \caption{Delayed failure under permissive TIS updates on Qwen3-30B-A3B.
+  Both TIS 3 and TIS 5 improve AIME-2024 mean@16 for many updates, an ESS
+  collapse emerges, and performance subsequently fails. This ordering
+  motivates the question of when a finite rollout stops supporting a reliable
+  policy-gradient update.}
   \label{fig:llm-motivation}
 \end{figure}
 
-Classical theory explains why moving too far from the rollout policy can be dangerous \citep{schulman2015trpo,schulman2017ppo,qi2026dppo}, however under the low value of the learning rate, the explanation does not fully support why failure is delayed. A
-policy-deviation bound controls a population approximation; The practical question raised by Figure~\ref{fig:llm-motivation}
-is therefore statistical: when does the rollout cease to support a reliable
-next update?
+Classical trust-region theory explains why moving too far from the rollout
+policy can be unsafe
+\citep{schulman2015trpo,schulman2017ppo,qi2026dppo}. It does not, however,
+resolve the delayed transition in Figure~\ref{fig:llm-motivation}: failure
+follows many apparently successful steps rather than one conspicuous move.
+Repeated updates can progressively concentrate complete-trajectory likelihood
+weights, reducing the effective support provided by the rollout even when the
+empirical update uses factorwise coefficients. A policy-deviation bound
+controls a population approximation; it does not track the statistical
+adequacy of the available rollout. The practical question is therefore: when
+does a finite rollout cease to support a reliable next update?
 
-Here, we provide a useful theoretical .... gradient estimator.. and show how reliablity can connect.. and ess as the practical criterion for this.. Normalized ESS measures this contraction. We connect it first to
-gradient reliability and then to policy improvement. we show the role of the .. estimators.. and .. 
+We answer this question in two stages. We first analyze the ordinary
+full-trajectory importance-sampling (IS) estimator, for which normalized
+effective sample size (ESS) replaces the nominal batch size $N$ with the
+effective count $N\rho$ in the finite-sample error bound. Combined with
+smoothness, this yields an ESS-dependent one-step improvement guarantee. We
+then compare the factorwise coefficient-controlled estimators used in practice.
+Low ESS indicates when the IS guarantee weakens, but it does not determine
+which alternative update is better. Clipping or truncation can reduce sampling
+variation and MSE while also removing useful population-gradient alignment. We
+therefore derive a full fixed-step certificate that determines when the risk
+reduction is sufficient to justify the signal removed by control.
+
+An exactly solvable Gaussian bandit separates these decisions without Monte
+Carlo error: PPO attains lower MSE before it attains the larger exact expected
+improvement, and the safe oracle follows an IS-to-PPO-to-stop ordering as
+effective support contracts. Large-model trajectories then establish the
+operational consequence. Sample ESS exposes support loss under both TIS 3 and
+an unclipped update, while ESS-conditioned safeguards preserve permissive
+learning and activate control only in the low-support regime. On
+Qwen3-30B-A3B, ungated TIS 3 collapses to $0.417\%$, whereas the
+ESS-conditioned TIS-3/Clip-Higher trajectory retains $44.8\%$ at step 200.
+
 \subsection{Contributions}
 
 \begin{enumerate}
-  \item We show how normalized ESS controls the finite-sample error of the IS
-  gradient estimator from a fixed rollout and yields a one-step population
-  improvement guarantee.
-  \item We distinguish estimator accuracy from update quality and derive the
-  fixed-step condition under which coefficient control has the stronger
-  improvement certificate.
-  \item We separate the two crossovers exactly in a Gaussian bandit and then
-  evaluate ESS-conditioned safeguards in large-model training.
+  \item We show that normalized ESS controls the policy-mismatch component of
+  the finite-sample error of the full-trajectory IS gradient estimator and
+  yields an ESS-dependent one-step population-improvement guarantee.
+  \item We derive a fixed-step certificate that separates MSE reduction from
+  lost population-gradient alignment and identifies when coefficient control
+  provides the stronger update.
+  \item We separate the MSE and update-quality crossovers exactly in a
+  Gaussian bandit, then show in large-model training that ESS supplies an
+  actionable timing signal for safeguards that preserve learning and prevent
+  late failure.
 \end{enumerate}
 
 \section{Related work}
@@ -259,6 +299,15 @@ normalized effective sample size \citep{metelli2018pois,metelli2020is}:
  =\exp\{-D_2(P_\theta\|Q)\}.
  \label{eq:population-ess}
 \end{equation}
+Its observable normalized sample analogue is
+\begin{equation}
+ \widehat\rho_\theta
+ :=\frac{\left(\sum_{i=1}^N W_{\theta,i}\right)^2}
+ {N\sum_{i=1}^N W_{\theta,i}^2}.
+ \label{eq:sample-ess}
+\end{equation}
+It lies in $[1/N,1]$ and is computed directly from the complete-trajectory
+weights in the batch used for the update.
 When $\E_Q[W_\theta^2]<\infty$, Jensen's inequality and
 $\E_Q[W_\theta]=1$ give $\rho_\theta\in(0,1]$, and $N\rho_\theta$ is the
 effective sample count corresponding to nominal batch size $N$. As the second
@@ -524,96 +573,88 @@ observed effective support evolves around delayed optimization failure.
 \subsection{Policy optimization in a Gaussian bandit}
 \label{sec:gaussian-example}
 
-To isolate the estimator and optimization comparisons, we construct a scalar
-Gaussian bandit with a quadratic reward. Gaussian policies and smooth
-objectives provide a standard analytic setting for policy-gradient methods
-\citep{pirotta2013adaptive,metelli2018pois,papini2022smoothing}. We hold the
-current policy fixed and vary only its distance from the rollout policy. Along
-this path, every quantity is available in closed form and contains no Monte
-Carlo error; Appendix~\ref{app:gaussian} gives the setup and calculations.
-
-At each point on this path, the MSE oracle selects between IS and PPO by
-gradient-estimation MSE, whereas the certificate oracle selects the candidate
-with larger $B_k(u;\eta_k)$. The safe certificate oracle additionally includes
-a null update with certificate zero. We use $N=32$, PPO radius
-$\epsilon=0.2$, gradient $g=2$, and step size $\eta=0.4$, and vary $\rho$
-along one monotone ESS path.
-
-Figure~\ref{fig:gaussian-one-step} first shows why MSE matters. As effective
-support contracts from $\rho=0.961$ to $0.0109$, the IS MSE rises from $0.228$
-to $62.3$ and its exact expected improvement falls from $1.26$ to $-3.70$.
-The same ESS path therefore reveals the reliability loss before choosing a
-particular intervention. It is a regime diagnostic, not the oracle: the
-pairwise IS--PPO MSE crossover occurs at
-$\rho_{\mathrm{MSE}}=0.123$, while their certificate crossover occurs later
-at $\rho_B=0.0392$.
-
-The gap between the two crossovers shows why MSE alone does not determine the
-better update. PPO has lower MSE below $\rho_{\mathrm{MSE}}$, but masking also
-removes population-gradient alignment. Its certificate therefore overtakes
-IS only below $\rho_B$, where the reduction in update variability finally
-compensates for the discarded signal. At still lower support, PPO reaches
-zero certificate at $\rho_{\mathrm{stop}}=0.0109$ and the safe oracle
-abstains. These values are specific to $(g,N,\epsilon,\eta)$, but the ordering
-is the point: ESS locates the support regime, while MSE reduction and retained
-alignment jointly determine the better update.
+Does lower gradient-estimation MSE necessarily identify the better policy
+update? We answer this question in a scalar Gaussian bandit with a quadratic
+reward. We hold the current policy fixed and vary only its distance from the
+rollout policy, so exact population ESS decreases monotonically along a
+controlled off-policy path. All estimator moments are available in closed
+form, and the quadratic objective makes the fixed-step certificate equal to
+the exact expected one-step improvement. Thus, disagreement between the MSE
+and certificate oracles cannot be attributed to Monte Carlo error or a loose
+smoothness bound. At each policy state, the MSE oracle chooses between IS and
+PPO by gradient-estimation MSE, while the safe certificate oracle chooses the
+largest nonnegative certificate among IS, PPO, and a null update.
+Because the bandit contains a single decision, the complete-trajectory IS
+weight and the factorwise ratio coincide.
+Appendix~\ref{app:gaussian} gives the exact calculations.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/gaussian_quadratic_one_step.pdf}
-  \caption{Exact Gaussian-bandit comparison with $g=2$, $N=32$,
-  $\epsilon=0.2$, and $\eta=0.4$. (a) Gradient MSE as effective
-  support contracts. (b) Population-gradient alignment retained by each
-  estimator. (c) Exact expected one-step improvement, equal here to
-  $B_u(\eta)$. The dotted line in panel (a) marks
-  $\rho_{\mathrm{MSE}}=0.123$; in panel (c), the dashed line marks
-  $\rho_B=0.0392$ and the dash-dotted line marks PPO's zero certificate at
-  $\rho_{\mathrm{stop}}=0.0109$.}
+  \caption{Lower gradient MSE need not imply a better one-step update. In an
+  exact Gaussian bandit with $g=2$, $N=32$, $\epsilon=0.2$, and $\eta=0.4$,
+  PPO attains lower MSE below $\rho_{\mathrm{MSE}}=0.123$ (a), but its loss of
+  population-gradient alignment (b) delays the improvement crossover until
+  $\rho_B=0.0392$ (c). Below $\rho_{\mathrm{stop}}=0.0109$, the safe oracle
+  selects no update.}
   \label{fig:gaussian-one-step}
 \end{figure}
 \FloatBarrier
 
+Figure~\ref{fig:gaussian-one-step} gives a direct counterexample to choosing an
+update by MSE alone. For $0.0392<\rho<0.123$, PPO has lower MSE, yet IS gives
+the larger exact improvement because the alignment removed by masking
+outweighs the reduction in the quadratic expected-update penalty. Below
+$\rho_B=0.0392$, control becomes preferable; below
+$\rho_{\mathrm{stop}}=0.0109$, the safe oracle abstains. The resulting rule is
+IS$\rightarrow$PPO$\rightarrow$no update as support contracts. These
+boundaries are configuration-specific: ESS locates the support regime, whereas
+the full certificate determines the action.
+
 \subsection{Policy optimization in large language models}
 
 The Gaussian comparison holds the policy state fixed. Large-model training
-adds a temporal question: can observed effective support flag a sustained
-low-support regime before held-out performance begins to fall? We examine
-this ordering along an unclipped Qwen3-30B-A3B policy-gradient trajectory,
-evaluated on AIME-2024 using mean@16.
+adds a temporal question: does sample ESS expose the same loss of effective
+support when the permissive update is either fully unclipped or already
+truncated? We revisit the ungated TIS-3 trajectory from
+Figure~\ref{fig:llm-motivation} and compare it with an unclipped
+Qwen3-30B-A3B policy-gradient trajectory. Both are evaluated on AIME-2024
+using mean@16. Figure~\ref{fig:ess-predicts-performance} compares the trailing
+seven-update average of raw sequence ESS with held-out performance and
+gradient norm.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=\linewidth]{figures/result/q30ba3b/noclip/ess_predicts_val.pdf}
-  \caption{In this trajectory, normalized ESS flags low support before late
-  performance degradation. (a) The trailing seven-update average of
-  normalized ESS enters a prolonged sub-$0.1$ regime near step 103, whereas
-  AIME-2024 mean@16 peaks at step 140 and subsequently declines. The thin
-  curve is raw ESS. (b) Gradient norm spikes episodically: the large step-57
-  event is followed by continued improvement, while the largest event occurs
-  only after the validation peak. Green curves report AIME-2024 mean@16.}
+  \caption{ESS exposes support loss under both an unclipped update and TIS 3
+  before major performance degradation, whereas gradient norm is episodic or
+  late. The top row pairs raw ESS (thin blue), its trailing seven-update
+  average (thick blue), and AIME-2024 mean@16 (green). The bottom row replaces
+  ESS with gradient norm (red). The post-step-77 TIS-3 ESS segment is gray: its
+  later numerical rebound occurs after the observed collapse and does not
+  represent recovered policy quality.}
   \label{fig:ess-predicts-performance}
 \end{figure}
 \FloatBarrier
 
 
-Figure~\ref{fig:ess-predicts-performance} shows the ordering directly.
-Smoothed ESS enters the prolonged low-support regime roughly 37 updates before
-AIME performance peaks at $44.4\%$; performance then falls by $9.79$
-percentage points to $34.6\%$ at step 200. The diagnostic value lies in this
-lead time: support contraction becomes visible while optimization still
-appears successful, leaving a window in which to activate a safeguard.
-Gradient norm provides no comparable ordering. Its step-57 spike is followed
-by a $16.3$-point improvement through step 140, whereas its largest spike at
-step 176 occurs after performance has peaked. Along this trajectory, ESS
-therefore provides the earlier support warning, while gradient norm mainly
-records episodic or already-emerging instability.
+Figure~\ref{fig:ess-predicts-performance} gives the decisive temporal contrast.
+For the unclipped update, the first five-update episode in which trailing ESS
+remains below $0.1$ begins near step 103, 37 updates before validation peaks.
+Under TIS 3, the corresponding episode begins while performance remains near
+its peak and before the subsequent collapse. Gradient norm provides no
+comparable cross-trajectory ordering: its early spike under the unclipped
+update is followed by continued improvement and its maximum is post-peak,
+while under TIS 3 it rises mainly alongside the performance decline. The late
+TIS-3 ESS rebound occurs after collapse, underscoring that ESS measures overlap
+with the rollout policy rather than policy quality.
 
-Together, the two examples separate diagnosis from action. The Gaussian
-bandit shows why effective support governs estimator reliability, and the
-large-model trajectory shows that sample ESS can expose support contraction
-before held-out degradation. ESS does not determine the low-support update;
-the next section tests whether using it to time a prespecified safeguard
-preserves permissive learning while preventing late failure.
+Across these trajectories, complete-trajectory sample ESS provides a common
+warning that the rollout is entering a low-support regime. It is not the MSE
+of either factorwise estimator and does not determine the appropriate
+low-support update. Section~6 tests whether using this timing signal to
+activate a prespecified safeguard preserves permissive learning while
+preventing collapse.
 
 \section{ESS-conditioned policy optimization}
 
@@ -642,26 +683,33 @@ the low-support update is controlled. We fix $\tau=0.1$ for all primary
 comparisons and vary it only in the threshold ablation. This value was
 prescribed for the language-model runs and is not derived from the Gaussian
 thresholds in Section~\ref{sec:gaussian-example}.
+GRPO, DPPO, and the unclipped construction use the raw $\widehat\rho$ in
+Equation~\eqref{eq:sample-ess}. Clip-Higher instead uses the analogous shaped
+ESS computed from post-cap sequence coefficients.
 
 \paragraph{Evaluation protocol.}
-The main experiment trains Qwen3-30B-A3B for 200 policy updates on the boxed
-mathematical-reasoning data of \citet{yu2025dapo} and evaluates AIME-2024 using
-mean@16. The primary permissive branch is TIS with ratio cap 3; an explicit
-ablation instead uses the unclipped IS update. At low ESS, we test three
-prespecified safeguards: conventional GRPO clipping
+The main experiment trains Qwen3-30B-A3B for up to 200 policy updates on the
+boxed mathematical-reasoning data of \citet{yu2025dapo} and evaluates
+AIME-2024 using mean@16. The primary permissive branch is TIS with ratio cap 3;
+an explicit ablation instead uses the unclipped update. At low ESS, we test
+three prespecified safeguards: conventional GRPO clipping
 \citep{shao2024deepseekmath}, Clip-Higher \citep{yu2025dapo}, and DPPO
 \citep{qi2026dppo}.
+The static 30B recipes use their native token-mean aggregation, whereas the
+TIS-3 conditional recipes use sum normalization. Panels (a)--(c) of the main
+figure therefore compare complete recipes; the TIS-3 pair in panel (d) and the
+unclipped comparison isolate ESS conditioning.
 
 \subsection{Main results}
 \label{sec:llm-experiments}
 
 Figure~\ref{fig:llm-main} establishes the central empirical result. Each
-conditional trajectory uses TIS 3 while effective support is high and
-activates the named safeguard only when normalized ESS falls below $0.1$.
-Across GRPO, Clip-Higher, and DPPO, this construction achieves both a higher
-peak and a higher final AIME score than applying the same safeguard throughout
-training, with endpoint gains ranging from $6.88$ to $12.3$ percentage points.
-The direct TIS-3 comparison isolates the failure that conditioning prevents:
+conditional recipe uses TIS 3 while effective support is high and activates
+the named safeguard only when normalized ESS falls below $0.1$. Across GRPO,
+Clip-Higher, and DPPO, the conditional recipes achieve both a higher peak and
+a higher final AIME score than the corresponding static recipes, with endpoint
+gains ranging from $6.88$ to $12.3$ percentage points. The matched TIS-3
+comparison isolates the failure that conditioning prevents:
 ungated TIS 3 peaks at $31.7\%$ and then collapses to $0.417\%$, whereas the
 ESS-conditioned trajectory reaches $47.3\%$ and retains $44.8\%$ at step 200.
 ESS conditioning therefore does more than stabilize a permissive estimator.
@@ -674,10 +722,11 @@ control only after effective support contracts.
   \caption{ESS conditioning combines permissive high-support learning with
   low-support control on Qwen3-30B-A3B. Each conditional trajectory uses TIS
   3 when $\widehat\rho\ge 0.1$ and the named safeguard otherwise. Panels
-  (a)--(c) compare this construction with applying GRPO, Clip-Higher, or DPPO
-  throughout training. Panel (d) isolates collapse prevention against ungated
-  TIS 3 using the TIS-3/Clip-Higher trajectory from panel (b). Direct labels
-  report the final observed AIME-2024 mean@16.}
+  (a)--(c) compare the complete conditional and static recipes; the former use
+  sum normalization and the latter their native token-mean aggregation. Panel
+  (d) gives the matched collapse-prevention comparison against ungated TIS 3,
+  using the TIS-3/Clip-Higher trajectory from panel (b). Direct labels report
+  the final observed AIME-2024 mean@16.}
   \label{fig:llm-main}
 \end{figure}
 

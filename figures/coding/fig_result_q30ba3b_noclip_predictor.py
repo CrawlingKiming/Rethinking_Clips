@@ -1,12 +1,10 @@
 #!/usr/bin/env python
-"""Ungated no-clip (`bvrscfn6u8`): what anticipates the validation fade?
+"""ESS and gradient-norm timing for two permissive Qwen3-30B-A3B updates.
 
-(a) smoothed ESS vs validation. Trailing-average ESS enters a prolonged sub-0.1
-    regime before the AIME peak at step 140, providing an online warning of the
-    subsequent fade to 34.6.
-(b) grad_norm (log) vs validation. Its spikes are episodic and coincident: the step-57 spike is a
-    false alarm (val kept rising), and the biggest spike (5.9e5) fires at ~180, i.e. AS the final
-    crash happens, not before it. grad_norm is a symptom, not an early predictor.
+The columns compare an unclipped update (`bvrscfn6u8`) with ungated TIS 3
+(`sjjc7dcpzf`). The top row pairs raw and trailing-average normalized ESS with
+AIME-2024; the bottom row pairs gradient norm with the same evaluation curve.
+All smoothing is trailing, so the diagnostic uses no future observations.
 
 -> figures/result/q30ba3b/noclip/ess_predicts_val.pdf
 """
@@ -14,9 +12,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import matplotlib.pyplot as plt
 import paperstyle
-from paperstyle import COL, FULL, C, FAM, use_paper_style, save
+import matplotlib.pyplot as plt
+from paperstyle import FULL, C, FAM, use_paper_style, save
 from runlog import series
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -32,62 +30,112 @@ def smooth(ys, w=7):
     return out
 
 
+def sustained_onset(xs, ys, threshold=0.1, length=5):
+    """Retrospective start of the first ``length``-point low-ESS episode."""
+    return next(
+        (xs[i] for i in range(len(xs) - length + 1)
+         if all(v < threshold for v in ys[i:i + length])),
+        None,
+    )
+
+
+def load(run):
+    xe, ev = series(run, "eval")
+    xs, es = series(run, "ess")
+    xg, gn = series(run, "grad_norm")
+    ess_trailing = smooth(es, 7)
+    peak_step = xe[ev.index(max(ev))]
+    onset = sustained_onset(xs, ess_trailing)
+    return {
+        "xe": xe, "ev": ev, "xs": xs, "es": es,
+        "xg": xg, "gn": gn, "ess_trailing": ess_trailing,
+        "peak_step": peak_step, "onset": onset,
+    }
+
+
 use_paper_style()
 
-xe, ev = series("noclip_ungated", "eval")
-xs, es = series("noclip_ungated", "ess")
-xg, gn = series("noclip_ungated", "grad_norm")
-ess_s = smooth(es, 7)
-
-pk_step = xe[ev.index(max(ev))]                      # validation peak = step 140
-# First five-step episode in which trailing-average ESS stays below the gate.
-onset = next((xs[i] for i in range(len(xs))
-              if all(v < 0.1 for v in ess_s[i:i + 5])), None)
-
+runs = [
+    ("Unclipped update", load("noclip_ungated"), 203, (10, 50), None),
+    ("TIS 3", load("cispo3_nogate"), 173, (-1, 35), 77),
+]
 c_val, c_ess, c_gn = FAM[2], FAM[0], FAM[3]
 
-fig, ax = plt.subplots(1, 2, figsize=(FULL, 2.7), sharex=True)
+fig, ax = plt.subplots(2, 2, figsize=(FULL, 4.55), sharex="col")
+letters = (("a", "b"), ("c", "d"))
 
-# --- (a) ESS (smoothed) vs validation ---
-a = ax[0]
-a.plot(xs, es, color=c_ess, lw=0.6, alpha=0.35)
-a.plot(xs, ess_s, color=c_ess, lw=1.7, label="ESS (smoothed)")
-a.axhline(0.1, color=C["baseline"], ls=(0, (1, 2)), lw=0.9)
-a.set_ylabel("ESS (normalized)", color=c_ess)
-a.tick_params(axis="y", labelcolor=c_ess)
-a.set_ylim(0, 0.66)
-if onset is not None:
-    a.axvspan(onset, 203, color=c_ess, alpha=0.07)
-    a.axvline(onset, color=c_ess, ls=":", lw=1.0)
-    a.text(onset + 3, 0.26, f"prolonged low ESS\nfrom ~{onset}",
-           color=c_ess, fontsize=7, va="top")
-a.axvline(pk_step, color=c_val, ls="--", lw=1.0)
-a.set_title("(a) ESS provides lead time", loc="left")
-a.set_xlabel("training step")
-av = a.twinx()
-av.plot(xe, [v * 100 for v in ev], color=c_val, lw=1.4, marker="o", ms=3)
-av.set_ylabel("AIME mean@16 (%)", color=c_val)
-av.tick_params(axis="y", labelcolor=c_val)
-av.set_ylim(10, 50)
-av.text(pk_step - 3, 46, f"peak @ {pk_step}", color=c_val, fontsize=7, ha="right")
+for col, (name, d, xmax, val_ylim, ess_end) in enumerate(runs):
+    # Top row: ESS and held-out performance.
+    a = ax[0, col]
+    end = len(d["xs"]) if ess_end is None else next(
+        i for i, x in enumerate(d["xs"]) if x > ess_end
+    )
+    a.plot(d["xs"][:end], d["es"][:end], color=c_ess, lw=0.6, alpha=0.32,
+           label="raw ESS")
+    a.plot(d["xs"][:end], d["ess_trailing"][:end], color=c_ess, lw=1.7,
+           label="trailing ESS")
+    if ess_end is not None:
+        post = max(0, end - 1)
+        a.plot(d["xs"][post:], d["es"][post:], color=C["baseline"],
+               lw=0.6, alpha=0.20)
+        a.plot(d["xs"][post:], d["ess_trailing"][post:],
+               color=C["baseline"], lw=1.4, alpha=0.65)
+        a.text(145, 0.67, "post-collapse\noverlap", color=C["baseline"],
+               fontsize=6.6, ha="center", va="bottom")
+    a.axhline(0.1, color=C["baseline"], ls=(0, (1, 2)), lw=0.9)
+    a.axvline(d["onset"], color=c_ess, ls=":", lw=1.0)
+    a.axvline(d["peak_step"], color=c_val, ls="--", lw=1.0)
+    a.text(d["onset"] + 3, 0.13,
+           f"first sustained\nsub-0.1 episode: {d['onset']}",
+           color=c_ess, fontsize=6.6, va="bottom")
+    a.set_ylim(0, 0.9)
+    a.set_xlim(-3, xmax)
+    a.tick_params(axis="y", labelcolor=c_ess)
+    a.set_title(f"({letters[0][col]}) {name}: ESS", loc="left")
+    if col == 0:
+        a.set_ylabel("normalized ESS", color=c_ess)
+        a.legend(loc="upper right", frameon=False)
 
-# --- (b) grad_norm (log) vs validation ---
-b = ax[1]
-b.plot(xg, [max(v, 1e-3) for v in gn], color=c_gn, lw=0.9, label="grad_norm")
-b.set_yscale("log")
-b.set_ylabel("gradient norm", color=c_gn)
-b.tick_params(axis="y", labelcolor=c_gn)
-b.axvline(57, color=c_gn, ls=":", lw=1.0)
-b.text(59, 3e4, "false alarm\n@57", color=c_gn, fontsize=7, va="top")
-b.axvline(pk_step, color=c_val, ls="--", lw=1.0)
-b.set_title("(b) Gradient norm reacts late", loc="left")
-b.set_xlabel("training step")
-b.set_xlim(-3, 203)
-bv = b.twinx()
-bv.plot(xe, [v * 100 for v in ev], color=c_val, lw=1.4, marker="o", ms=3)
-bv.set_ylabel("AIME mean@16 (%)", color=c_val)
-bv.tick_params(axis="y", labelcolor=c_val)
-bv.set_ylim(10, 50)
+    av = a.twinx()
+    av.plot(d["xe"], [100 * v for v in d["ev"]], color=c_val,
+            lw=1.4, marker="o", ms=3)
+    av.set_ylim(*val_ylim)
+    av.tick_params(axis="y", labelcolor=c_val)
+    av.grid(False)
+    av.spines["right"].set_visible(True)
+    av.spines["right"].set_color(c_val)
+    if col == 1:
+        av.set_ylabel("AIME mean@16 (%)", color=c_val)
+
+    # Bottom row: gradient norm and the same held-out performance.
+    b = ax[1, col]
+    b.plot(d["xg"], [max(v, 1e-3) for v in d["gn"]], color=c_gn, lw=0.9)
+    b.set_yscale("log")
+    b.axvline(d["peak_step"], color=c_val, ls="--", lw=1.0)
+    b.set_xlim(-3, xmax)
+    b.tick_params(axis="y", labelcolor=c_gn)
+    b.set_title(f"({letters[1][col]}) {name}: gradient norm", loc="left")
+    b.set_xlabel("training step")
+    if col == 0:
+        b.set_ylabel("gradient norm", color=c_gn)
+
+    if col == 0:
+        b.axvline(57, color=c_gn, ls=":", lw=1.0)
+        b.text(60, 2.2e4, "early spike", color=c_gn, fontsize=6.6, va="top")
+        b.axvline(176, color=c_gn, ls=":", lw=1.0)
+        b.text(173, 2.5e5, "post-peak max", color=c_gn,
+               fontsize=6.6, ha="right", va="top")
+    bv = b.twinx()
+    bv.plot(d["xe"], [100 * v for v in d["ev"]], color=c_val,
+            lw=1.4, marker="o", ms=3)
+    bv.set_ylim(*val_ylim)
+    bv.tick_params(axis="y", labelcolor=c_val)
+    bv.grid(False)
+    bv.spines["right"].set_visible(True)
+    bv.spines["right"].set_color(c_val)
+    if col == 1:
+        bv.set_ylabel("AIME mean@16 (%)", color=c_val)
 
 save(fig, "result/q30ba3b/noclip/ess_predicts_val")
-print(f"val peak @ {pk_step}; ESS sub-0.1 onset @ {onset}")
+for name, d, _xmax, _ylim, _ess_end in runs:
+    print(f"{name}: peak {d['peak_step']}; sustained sub-0.1 onset {d['onset']}")
