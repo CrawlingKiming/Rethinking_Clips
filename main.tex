@@ -595,6 +595,8 @@ alignment jointly determine the better update.
 
 \subsection{Policy optimization in large language models}
 
+[]
+We now investiage the ESS and the observed 
 The Gaussian comparison holds the policy state fixed. Large-model training
 adds a temporal question: does observed effective support deteriorate before
 the performance loss becomes visible? Figure~\ref{fig:llm-no-clip-ess} places
@@ -665,22 +667,16 @@ the low-support update is controlled. We fix $\tau=0.1$ throughout. This value
 was prescribed for the language-model runs and is not derived from the
 Gaussian thresholds in Section~\ref{sec:gaussian-example}.
 
-The main experiment trains Qwen3-30B-A3B for 200 policy updates on the boxed
-mathematical-reasoning data of \citet{yu2025dapo} and evaluates AIME-2024 using
-mean@16. The permissive branch uses truncated importance sampling (TIS) with
-ratio cap 3, or no coefficient clipping in the explicit unclipped ablation.
-The low-support branch uses conventional GRPO clipping, Clip-Higher
-\citep{yu2025dapo}, DPPO \citep{qi2026dppo}, or skips the minibatch update.
-Most variants compute $\widehat\rho$ from the raw complete-sequence ratios
-before coefficient control. The 30B TIS/Clip-Higher and TIS-5 constructions,
-their 8B counterpart, and the RLHF transfer instead compute the same statistic
-after the coefficient cap; we refer to this implementation as shaped ESS. Results
-are complete training trajectories, so the comparisons below describe the
-temporal and endpoint behavior of the reported runs. Each curve represents one
-training trajectory; no across-seed uncertainty is available.
+\paragraph{Evaulation Protocol}
+The main experiment trains Qwen3-30B-A3B for 200 policy updates on the boxed mathematical-reasoning data of \citet{yu2025dapo} and evaluates AIME-2024 using
+mean@16. Here, we test two permissive branch uses truncated importance sampling (TIS) with
+ratio cap 3, or no coefficient clipping in the explicit unclipped ablation, which have shown the failure modes. We test clipping branches with conventional GRPO clipping, Clip-Higher
+\citep{yu2025dapo}, DPPO \citep{qi2026dppo}.
 
 \subsection{Main results}
 \label{sec:llm-experiments}
+
+\paragraph{Results on TIS}
 
 Figure~\ref{fig:llm-main} tests one conditional template: use TIS 3 while
 effective support is high, then activate a prespecified clipping rule when ESS
@@ -704,34 +700,9 @@ safeguard.
   \label{fig:llm-main}
 \end{figure}
 
-\paragraph{GRPO.}
-Static GRPO peaks at $29.6\%$ and finishes at $26.2\%$. The conditional recipe,
-which uses TIS 3 while ESS is high and the standard $0.2/0.2$ GRPO band when
-ESS is low, peaks at $40.8\%$ and finishes at $38.5\%$. Selective clipping
-therefore retains the permissive high-support phase while improving both the
-peak and the final evaluation over always-on GRPO.
+Surprisngly, not only the ESS conditioned update rule prevents the collapse, but acheives better performance with each coupled clipping strategies. ESS conditioning prevents the observed permissive-estimator collapse while retaining its high-support learning phase. 
 
-\paragraph{Clip-Higher.}
-Always applying the $0.2/0.28$ Clip-Higher band reaches and finishes at
-$37.9\%$. Using TIS 3 at high ESS and activating the same band only at low ESS
-instead peaks at $47.3\%$ and finishes at $44.8\%$. Delaying the safeguard
-until support contracts again improves the entire observed trajectory.
-
-\paragraph{DPPO.}
-Static DPPO peaks at $37.5\%$ but recedes to $30.4\%$, whereas the
-TIS-3/DPPO conditional construction peaks at $40.2\%$ and finishes at
-$39.2\%$. The same high-ESS TIS-3 and low-ESS safeguard pattern therefore
-preserves late performance under a third clipping rule.
-
-\paragraph{TIS 3.}
-The direct TIS-3 comparison makes the failure-prevention effect explicit.
-Without ESS conditioning, TIS 3 reaches $31.7\%$ at step 60 and then collapses
-to $0.417\%$ at its last recorded evaluation, step 170. Switching to
-Clip-Higher only in the low-ESS regime instead reaches $47.3\%$ and finishes
-at $44.8\%$. ESS conditioning prevents the observed permissive-estimator
-collapse while retaining its high-support learning phase.
-
-\paragraph{Unclipped update.}
+\paragraph{Results unclipped updates.}
 
 The unclipped comparison tests whether the same timing principle extends
 beyond TIS. Both runs in Figure~\ref{fig:llm-noclip-gate} use an unclipped
@@ -760,32 +731,8 @@ $0.153$ to $0.668$. Figure~\ref{fig:llm-gate-action} reports the corresponding
 patterns for all three safeguards. Protection is therefore present but limited
 early, and intensifies as effective support contracts.
 
-\paragraph{Other ESS-conditioned optimization variants.}
-A hard update veto provides a simpler low-support action.
-Figure~\ref{fig:skip-variants} groups this alternative across two permissive
-updates. With an unclipped high-support update, ESS-conditioned skipping
-finishes at $35.6\%$, compared with $34.6\%$ without an ESS action and $38.1\%$
-under conditional clipping. The matched TIS-5 pair gives the sharper
-failure-prevention result: static TIS 5 peaks at $28.3\%$ and collapses to
-$0.00\%$, whereas the trajectory that
-skips low-ESS updates reaches and finishes at $39.4\%$. The same observed
-collapse is therefore prevented at a second TIS cap and with a simpler ESS
-action, although skipping need not be the best action when the permissive run
-remains viable.
+\paragraph{Results on different models and objectives}
 
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/skip_gate/overall.pdf}
-  \caption{ESS-conditioned skipping as an alternative low-support action.
-  Panel (a) applies the veto to an otherwise unclipped update. Panel (b) gives
-  the matched TIS-5 comparison: static TIS 5 collapses, whereas skipping
-  low-support updates finishes at $39.4\%$. All curves report AIME-2024
-  mean@16.}
-  \label{fig:skip-variants}
-\end{figure}
-\FloatBarrier
-
-\subsection{Transfer across models and objectives}
 
 We first change the model scale while keeping the math-RLVR task fixed.
 Figure~\ref{fig:llm-8b-transfer} reports the two Qwen3-8B comparisons for which
@@ -833,6 +780,53 @@ increases the use of a prespecified control. The 30B rescue patterns, the
 smaller 8B gains, and the RLHF transfer are consistent with the same division
 of labor: ESS locates the reliability regime, while the safeguarded estimator
 determines the low-support update.
+
+\subsection{Analysis on ablations}
+
+\paragraph{Change on the $\tau$}
+\begin{figure}
+    \centering
+    \includegraphics[width=0.5\linewidth]{figures_mains/result/q30ba3b/cispo3_ess_threshold/eval.pdf}
+    \caption{ess }
+    \label{fig:placeholder}
+\end{figure}
+
+\paragraph{Change on the optimization methods}
+
+Based on the theoretial insight, other choice is not to  update .. hence we investiage the ess-skip, where skips the updates when the ess is lower than the criterion..
+\begin{figure}
+    \centering
+    \includegraphics[width=0.5\linewidth]{figures_mains/result/q30ba3b/skip_gate/noclip_eval.pdf}
+    \caption{Enter Caption}
+    \label{fig:placeholder}
+\end{figure}
+Other possible section rule is the fraction of the outlierss.. 
+
+\paragraph{Other ESS-conditioned optimization variants.}
+A hard update veto provides a simpler low-support action.
+Figure~\ref{fig:skip-variants} groups this alternative across two permissive
+updates. With an unclipped high-support update, ESS-conditioned skipping
+finishes at $35.6\%$, compared with $34.6\%$ without an ESS action and $38.1\%$
+under conditional clipping. The matched TIS-5 pair gives the sharper
+failure-prevention result: static TIS 5 peaks at $28.3\%$ and collapses to
+$0.00\%$, whereas the trajectory that
+skips low-ESS updates reaches and finishes at $39.4\%$. The same observed
+collapse is therefore prevented at a second TIS cap and with a simpler ESS
+action, although skipping need not be the best action when the permissive run
+remains viable.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/skip_gate/overall.pdf}
+  \caption{ESS-conditioned skipping as an alternative low-support action.
+  Panel (a) applies the veto to an otherwise unclipped update. Panel (b) gives
+  the matched TIS-5 comparison: static TIS 5 collapses, whereas skipping
+  low-support updates finishes at $39.4\%$. All curves report AIME-2024
+  mean@16.}
+  \label{fig:skip-variants}
+\end{figure}
+\FloatBarrier
+
 
 \section{Conclusion}
 
