@@ -615,7 +615,7 @@ evaluated on AIME-2024 using mean@16.
 \end{figure}
 \FloatBarrier
 
-\paragraph{ESS flags low support before performance deteriorates.}
+
 Figure~\ref{fig:ess-predicts-performance} shows the ordering directly.
 Smoothed ESS enters the prolonged low-support regime roughly 37 updates before
 AIME performance peaks at $44.4\%$; performance then falls by $9.79$
@@ -675,7 +675,6 @@ prespecified safeguards: conventional GRPO clipping
 \subsection{Main results}
 \label{sec:llm-experiments}
 
-\paragraph{ESS conditioning preserves learning while preventing collapse.}
 Figure~\ref{fig:llm-main} establishes the central empirical result. Each
 conditional trajectory uses TIS 3 while effective support is high and
 activates the named safeguard only when normalized ESS falls below $0.1$.
@@ -702,17 +701,6 @@ control only after effective support contracts.
   \label{fig:llm-main}
 \end{figure}
 
-\paragraph{ESS controls when intervention is needed.}
-The realized intervention schedule confirms that conditioning changes the
-timing, rather than the definition, of each safeguard. For the DPPO
-construction, mean normalized ESS decreases from $0.412$ over steps 1--50 to
-$0.120$ over steps 151--200, while the safeguarded-update fraction increases
-from $0.153$ to $0.668$. Figure~\ref{fig:llm-gate-action} shows the same
-ordering for all three safeguards. The gate therefore leaves the permissive
-estimator largely available during higher-support learning and strengthens
-protection as effective support contracts.
-
-\paragraph{The timing principle extends beyond TIS.}
 Figure~\ref{fig:llm-noclip-gate} uses the unclipped trajectory diagnosed in
 Figure~\ref{fig:ess-predicts-performance} as the permissive reference.
 Conditional clipping preserves a comparable peak and raises step-200
@@ -731,7 +719,7 @@ degradation without relying on a particular truncation cap.
 \end{figure}
 \FloatBarrier
 
-\paragraph{The endpoint ordering remains at smaller scale.}
+\paragraph{Results on Dense models}
 Figure~\ref{fig:llm-8b-transfer} changes from the 30B mixture-of-experts model
 to dense Qwen3-8B while keeping math RLVR fixed. The ESS-conditioned
 construction finishes above its static counterpart in both
@@ -750,7 +738,7 @@ was first observed.
   \label{fig:llm-8b-transfer}
 \end{figure}
 
-\paragraph{The same ordering appears under learned-reward optimization.}
+\paragraph{Results on RLHF}
 We next change both the objective and the data, training
 Qwen3-4B-Instruct-2507 for 200 updates on Anthropic HH-RLHF
 \citep{bai2022hh} using Skywork-Reward-Llama-3.1-8B
