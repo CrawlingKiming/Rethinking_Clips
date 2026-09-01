@@ -12,12 +12,14 @@ check the high-probability IS reliability event and its adaptive-step
 improvement consequence.
 
 The reported setting is `N=32`, TIS cap `3`, PPO radius `0.20`, gradient signal
-`g=2`, and step size `eta=0.40`. The four panels instantiate the finite-moment
-IS error bound, the 90% adaptive-step guarantee, the full-certificate crossover
-for TIS and PPO, and exact fixed-step policy improvement. The displayed branch
-uses normalized population ESS from `0.9` down to `0.005`. Exact moments give
-the substantive IS--TIS3 crossover at `rho=0.105` and the pairwise IS--PPO
-crossover at `rho=0.0392`; TIS-3 is the global low-ESS oracle on this path.
+`g=2`, and step size `eta=0.40`. The first two-panel figure instantiates the
+finite-moment IS error bound and compares positive adaptive-step certification
+with realized policy improvement. The second two-panel figure shows the exact
+expected-gain crossover for TIS and PPO relative to IS and the corresponding
+fixed-step policy improvement. The displayed branch uses normalized population
+ESS from `0.9` down to `0.005`. Exact moments give the substantive IS--TIS3
+crossover at `rho=0.105` and the pairwise IS--PPO crossover at `rho=0.0392`;
+TIS-3 is the global low-ESS oracle on this path.
 
 Run from the repository root:
 
@@ -29,8 +31,10 @@ Outputs:
 
 - `simulation/results/gaussian_quadratic_one_step.csv`
 - `simulation/results/gaussian_quadratic_one_step_summary.json`
-- `figures/gaussian_quadratic_one_step.pdf`
-- `figures/gaussian_quadratic_one_step.png`
+- `figures/gaussian_is_reliability.pdf`
+- `figures/gaussian_is_reliability.png`
+- `figures/gaussian_estimator_choice.pdf`
+- `figures/gaussian_estimator_choice.png`
 
 ## Optdigits appendix validation
 

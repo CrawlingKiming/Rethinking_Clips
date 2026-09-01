@@ -16,7 +16,9 @@
     "seed": 20260901,
     "minimum_error_event_coverage": 0.98277,
     "minimum_theorem_inequality_coverage": 0.98277,
-    "maximum_positive_certificate_fraction": 0.62895
+    "maximum_positive_certificate_fraction": 0.62895,
+    "maximum_actual_improvement_fraction": 0.62895,
+    "maximum_certificate_improvement_gap": 0.008910000000000001
   },
   "displayed_branch": {
     "minimum_delta": 0.3245928459745012,

@@ -579,74 +579,110 @@ failure.
 \subsection{Policy optimization in a Gaussian bandit}
 \label{sec:gaussian-example}
 
-In this section, we validate our theory in the policy optimization in a Gaussain bandit cases, which allows the population gradient and realized improvement certificate available in closed form which makes it a perfect theroetical test bed;
-Appendix~\ref{app:gaussian} gives the exact calculations and protocol.
-
-In Figure 2 (a)(b), we first show the lemma 2 and theorem 3. the line is .. line is .. . we show that our theroy predicts the mse.. and further, the probablisitic bounds exactly matches our theoretical predictison..[final remark]
-
-in figure 3 (a)(b) we do .. gradient estimator choices and the cross overs.. as from our theroetical predcitions, the cross over region directly connects with the better gradient estimate choices in the policy learning.. 
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/gaussian_quadratic_one_step.pdf}
-  \caption{Theory validation in the Gaussian bandit.
- }
-  \label{fig:gaussian-one-step}
-\end{figure}
+The Gaussian bandit makes our two-stage argument fully observable. We hold the
+current policy fixed and move the rollout policy farther away, which creates a
+monotone path from high to low normalized ESS. A quadratic reward then makes
+the population gradient, estimator moments, and expected one-step improvement
+available in closed form. We can therefore test the complete chain: ESS first
+predicts when IS loses finite-sample reliability, and the gain comparison then
+selects the estimator that makes the best use of the remaining support.
+Appendix~\ref{app:gaussian} gives the calculations and protocol.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures/gaussian_quadratic_one_step.pdf}
-  \caption{Theory validation in the Gaussian bandit.
- }
-  \label{fig:gaussian-one-step}
+  \includegraphics[width=\linewidth]{figures/gaussian_is_reliability.pdf}
+  \caption{\textbf{Stage I: ESS predicts IS reliability and certified
+  improvement.} We use $g=2$, $N=32$, and $1-\delta=0.9$. (a) Exact IS
+  gradient MSE and the finite-moment upper bound in
+  Equation~\eqref{eq:rho-gradient-mse-bound}. (b) Positive
+  Theorem~\ref{thm:permissive-reliability} certificates and actual positive
+  improvement under the corresponding adaptive step.}
+  \label{fig:gaussian-is-reliability}
 \end{figure}
 
+The first stage asks when an IS update remains reliable.
+Figure~\ref{fig:gaussian-is-reliability}(a) answers this question at the
+estimator level: the exact IS MSE stays below the bound from
+Lemma~\ref{lem:rho-gradient-reliability}, and both rise sharply as ESS falls.
+Theorem~\ref{thm:permissive-reliability} uses this same error radius to build
+an adaptive step, so estimator reliability should translate directly into
+policy improvement. Panel (b) confirms that translation. Across the full ESS
+path, the probability of actual improvement tracks the probability of a
+positive certificate with a maximum gap of only $0.00891$. As support
+contracts, both probabilities fall together. ESS therefore identifies when a
+reliable IS update is available, but this first stage leaves one question
+open: which controlled estimator should be used after IS loses its advantage?
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/gaussian_estimator_choice.pdf}
+  \caption{\textbf{Stage II: the gain comparison selects the estimator.}
+  We compare IS, TIS with $c=3$, and PPO masking with $\epsilon=0.2$ at
+  $\eta=0.4$. (a) Exact expected gain relative to IS; positive values favor
+  the controlled estimator. (b) Exact expected gain around the two pairwise
+  crossovers. Vertical lines and open markers identify the intersections.}
+  \label{fig:gaussian-estimator-choice}
+\end{figure}
+
+The second stage resolves that choice through the estimator-selection
+criterion in Corollary~\ref{cor:certificate-crossover}.
+Figure~\ref{fig:gaussian-estimator-choice}(a) plots the resulting expected-gain
+difference relative to IS. TIS-3 has the lowest MSE throughout the path, yet
+IS retains more useful gradient alignment and therefore has the larger gain
+at high ESS. As ESS falls, the variance reduction from truncation becomes
+decisive, and TIS-3 overtakes IS at $\rho=0.105$. PPO removes still more
+alignment, so it crosses IS only at $\rho=0.0392$. Panel (b) makes both
+transitions visible as intersections of the exact policy-improvement curves.
+The resulting upper envelope selects IS in the high-support regime and TIS-3
+in the low-support regime, exactly as predicted by the gain criterion.
+
+Together, Figures~\ref{fig:gaussian-is-reliability} and
+\ref{fig:gaussian-estimator-choice} turn our theory into an operational
+principle. ESS determines when coefficient control becomes valuable, while
+the gain criterion determines which control preserves the strongest update.
+The remaining question is whether ESS provides this timing signal during
+large-model training, where the policy pair evolves after every update.
+\FloatBarrier
 
 \subsection{Policy optimization in large language models}
 
-The Gaussian comparison holds the policy state fixed. Large-model training
-adds a temporal question: does sample ESS expose the same loss of effective
-support when the permissive update is either fully unclipped or already
-truncated? We revisit the ungated TIS-3 trajectory from
-Figure~\ref{fig:llm-motivation} and compare it with an unclipped
-Qwen3-30B-A3B policy-gradient trajectory. Both are evaluated on AIME-2024
-using mean@16. Figure~\ref{fig:ess-predicts-performance} compares the trailing
-seven-update average of raw sequence ESS with held-out performance and
-gradient norm.
+Large-model training turns the fixed-policy comparison into a temporal one:
+ESS must fall early enough to trigger control before the permissive trajectory
+fails. We test this requirement on the ungated TIS-3 trajectory from
+Figure~\ref{fig:llm-motivation} and an unclipped Qwen3-30B-A3B trajectory.
+Both are evaluated on AIME-2024 using mean@16.
+Figure~\ref{fig:ess-predicts-performance} aligns raw sequence ESS, its trailing
+seven-update average, and held-out performance along each training path.
 
-\begin{figure}[H]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/result/q30ba3b/noclip/ess_predicts_val.pdf}
-  \caption{ESS exposes support loss under both an unclipped update and TIS 3
-  before major performance degradation, whereas gradient norm is episodic or
-  late. The top row pairs raw ESS (thin blue), its trailing seven-update
-  average (thick blue), and AIME-2024 mean@16 (green). The bottom row replaces
-  ESS with gradient norm (red). The post-step-77 TIS-3 ESS segment is gray: its
-  later numerical rebound occurs after the observed collapse and does not
-  represent recovered policy quality.}
+  \caption{\textbf{Sequence ESS provides an early training-time signal.}
+  Thin blue curves show raw ESS, thick blue curves show its trailing
+  seven-update average, and green curves show AIME-2024 mean@16. Blue dotted
+  lines mark the first sustained sub-$0.1$ ESS episode; green dashed lines mark
+  peak validation. The gray TIS-3 segment occurs after collapse.}
   \label{fig:ess-predicts-performance}
 \end{figure}
+
+Figure~\ref{fig:ess-predicts-performance} shows the same temporal ordering in
+both permissive updates. For the unclipped trajectory, the first sustained
+sub-$0.1$ ESS episode begins near step 103, 37 updates before validation
+reaches its peak. Under TIS 3, the corresponding episode begins near step 71,
+while validation remains close to its maximum and before the subsequent
+collapse. The later rebound in TIS-3 ESS occurs only after performance has
+vanished, which distinguishes renewed policy overlap from recovered policy
+quality. In both cases, sustained support contraction is visible before the
+failure that motivates intervention.
+
+These trajectories provide the training-time counterpart of the Gaussian
+reliability result. Sequence ESS supplies an observable trigger for the
+low-support regime, and the gain comparison supplies the rule used after that
+trigger. This combination yields our policy-optimization design: retain the
+permissive estimator while ESS is high, then activate a prespecified safeguard
+when ESS becomes low. Section~6 tests whether this timing rule preserves early
+learning while preventing late collapse.
 \FloatBarrier
-
-
-Figure~\ref{fig:ess-predicts-performance} gives the decisive temporal contrast.
-For the unclipped update, the first five-update episode in which trailing ESS
-remains below $0.1$ begins near step 103, 37 updates before validation peaks.
-Under TIS 3, the corresponding episode begins while performance remains near
-its peak and before the subsequent collapse. Gradient norm provides no
-comparable cross-trajectory ordering: its early spike under the unclipped
-update is followed by continued improvement and its maximum is post-peak,
-while under TIS 3 it rises mainly alongside the performance decline. The late
-TIS-3 ESS rebound occurs after collapse, underscoring that ESS measures overlap
-with the rollout policy rather than policy quality.
-
-Across these trajectories, complete-trajectory sample ESS provides a common
-warning that the rollout is entering a low-support regime. It is not the MSE
-of either factorwise estimator and does not determine the appropriate
-low-support update. Section~6 tests whether using this timing signal to
-activate a prespecified safeguard preserves permissive learning while
-preventing collapse.
 
 \section{ESS-conditioned policy optimization}
 
@@ -998,12 +1034,16 @@ Equation~\eqref{eq:weighted-contribution-scale} is
 Hence the exact IS MSE is
 $\{e^{\Delta^2}M_2(\Delta)-4\}/32$ and its
 Lemma~\ref{lem:rho-gradient-reliability} envelope is
-$e^{\Delta^2}M_2(\Delta)/32$. Panel (b) uses $10^5$ independent batches at
-each of 81 policy pairs and $\delta=0.1$ to evaluate the realized coverage of
-Lemma~\ref{lem:rho-gradient-reliability} and
-Theorem~\ref{thm:permissive-reliability}. Both $M_2(\Delta)$ and the adaptive
-step are evaluated from population quantities in this controlled theory
-validation; they are not proposed as an empirical gate.
+$e^{\Delta^2}M_2(\Delta)/32$.
+Figure~\ref{fig:gaussian-is-reliability}(b) uses $10^5$ independent batches at
+each of 81 policy pairs and $\delta=0.1$ to estimate the probability of a
+positive adaptive-step certificate and the probability of actual positive
+policy improvement. On the same draws, the minimum realized coverage of both
+the Lemma~\ref{lem:rho-gradient-reliability} event and the
+Theorem~\ref{thm:permissive-reliability} inequality is $0.98277$, above the
+required $0.9$. Both $M_2(\Delta)$ and the adaptive step are evaluated from
+population quantities in this controlled theory validation; they are not
+proposed as an empirical gate.
 
 The advantage changes sign at $g\pm\sqrt{g^2+1}$, and the PPO ratio boundaries
 are $(\log(1\pm\epsilon)-\Delta^2/2)/\Delta$. Equations

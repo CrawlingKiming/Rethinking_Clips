@@ -16,6 +16,7 @@ from pathlib import Path
 import sys
 
 import numpy as np
+from matplotlib.ticker import PercentFormatter
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,7 +25,7 @@ FIGURES_DIR = ROOT / "figures"
 sys.path.insert(0, str(ROOT / "figures" / "coding"))
 
 import matplotlib.pyplot as plt
-from paperstyle import FAM, FULL, format_sig, use_paper_style
+from paperstyle import FULL, format_sig, use_paper_style
 
 G = 2.0
 N = 32
@@ -40,11 +41,10 @@ MONTE_CARLO_BATCHES = 100_000
 MONTE_CARLO_CHUNK_SIZE = 25_000
 MONTE_CARLO_SEED = 20260901
 
-IS_COLOR = FAM[0]
-PPO_COLOR = FAM[1]
-TIS_COLOR = FAM[2]
-NEUTRAL_COLOR = "#59636E"
-ORACLE_COLOR = "#1F1F1F"
+IS_COLOR = "#3568B8"
+PPO_COLOR = "#E07A3F"
+TIS_COLOR = "#27966F"
+NEUTRAL_COLOR = "#4B5563"
 
 
 def normal_pdf(value: float) -> float:
@@ -437,6 +437,7 @@ def monte_carlo_reliability(
     error_event_count = 0
     theorem_inequality_count = 0
     positive_certificate_count = 0
+    actual_improvement_count = 0
     error_event_violations = 0
     batches_seen = 0
 
@@ -479,6 +480,7 @@ def monte_carlo_reliability(
         error_event_count += int(np.count_nonzero(error_events))
         theorem_inequality_count += int(np.count_nonzero(theorem_events))
         positive_certificate_count += int(np.count_nonzero(nonzero))
+        actual_improvement_count += int(np.count_nonzero(actual_gains > 0.0))
         error_event_violations += int(
             np.count_nonzero(error_events & ~theorem_events)
         )
@@ -498,6 +500,9 @@ def monte_carlo_reliability(
         ),
         "mc_positive_certificate_fraction": (
             positive_certificate_count / MONTE_CARLO_BATCHES
+        ),
+        "mc_actual_improvement_fraction": (
+            actual_improvement_count / MONTE_CARLO_BATCHES
         ),
         "mc_error_event_theorem_violations": float(error_event_violations),
     }
@@ -536,6 +541,21 @@ def validate_rows(rows: list[dict[str, float | str]]) -> None:
             raise AssertionError(
                 "theorem coverage fell below reliability-event coverage"
             )
+        if (
+            row["mc_actual_improvement_fraction"]
+            > row["mc_positive_certificate_fraction"] + 1e-12
+        ):
+            raise AssertionError(
+                "positive improvement occurred without a positive certificate"
+            )
+        if (
+            row["mc_positive_certificate_fraction"]
+            - row["mc_actual_improvement_fraction"]
+            > DELTA_CONFIDENCE + 0.005
+        ):
+            raise AssertionError(
+                "the empirical certificate-to-improvement gap exceeds delta"
+            )
 
     if not all(
         row["tis_mse"] <= min(row["is_mse"], row["ppo_mse"])
@@ -557,28 +577,43 @@ def make_figure(
     summary: dict[str, float],
 ) -> None:
     use_paper_style()
+    plt.rcParams.update(
+        {
+            "font.size": 10.5,
+            "axes.titlesize": 11.5,
+            "axes.labelsize": 10.5,
+            "xtick.labelsize": 9.5,
+            "ytick.labelsize": 9.5,
+            "legend.fontsize": 10.0,
+            "legend.handlelength": 2.35,
+            "legend.labelspacing": 0.38,
+            "legend.borderaxespad": 0.55,
+            "axes.linewidth": 0.85,
+            "grid.linewidth": 0.65,
+            "grid.alpha": 0.34,
+            "lines.linewidth": 2.2,
+            "lines.markersize": 4.6,
+            "xtick.major.size": 3.4,
+            "ytick.major.size": 3.4,
+        }
+    )
     ordered = sorted(rows, key=lambda item: item["rho"])
     rho = np.asarray([float(row["rho"]) for row in ordered])
     is_mse = np.asarray([float(row["is_mse"]) for row in ordered])
-    tis_mse = np.asarray([float(row["tis_mse"]) for row in ordered])
-    ppo_mse = np.asarray([float(row["ppo_mse"]) for row in ordered])
     is_mse_bound = np.asarray(
         [float(row["is_finite_moment_mse_bound"]) for row in ordered]
-    )
-    error_coverage = np.asarray(
-        [float(row["mc_error_event_coverage"]) for row in ordered]
-    )
-    theorem_coverage = np.asarray(
-        [float(row["mc_theorem_inequality_coverage"]) for row in ordered]
     )
     positive_fraction = np.asarray(
         [float(row["mc_positive_certificate_fraction"]) for row in ordered]
     )
-    tis_margin = np.asarray(
-        [float(row["tis_crossover_margin"]) for row in ordered]
+    improvement_fraction = np.asarray(
+        [float(row["mc_actual_improvement_fraction"]) for row in ordered]
     )
-    ppo_margin = np.asarray(
-        [float(row["ppo_crossover_margin"]) for row in ordered]
+    tis_gain_gap = np.asarray(
+        [float(row["tis_certificate_gap_vs_is"]) for row in ordered]
+    )
+    ppo_gain_gap = np.asarray(
+        [float(row["ppo_certificate_gap_vs_is"]) for row in ordered]
     )
     is_gain = np.asarray(
         [float(row["is_expected_gain"]) for row in ordered]
@@ -589,177 +624,256 @@ def make_figure(
     ppo_gain = np.asarray(
         [float(row["ppo_expected_gain"]) for row in ordered]
     )
-    oracle_gain = np.asarray(
-        [float(row["oracle_expected_gain"]) for row in ordered]
-    )
 
     rho_tis = summary["tis_certificate_crossover_rho"]
     rho_ppo = summary["certificate_crossover_rho"]
+    tis_root = estimator_moments(summary["tis_certificate_crossover_delta"])
+    ppo_root = estimator_moments(summary["certificate_crossover_delta"])
 
-    fig, axes = plt.subplots(
-        2,
-        2,
-        figsize=(FULL, 4.55),
+    reliability_figure, (risk_axis, improvement_axis) = plt.subplots(
+        1, 2, figsize=(FULL, 2.45)
     )
-    risk_axis, coverage_axis = axes[0]
-    crossover_axis, gain_axis = axes[1]
-
-    risk_axis.plot(rho, is_mse, color=IS_COLOR, label="IS")
     risk_axis.plot(
         rho,
-        tis_mse,
-        color=TIS_COLOR,
-        label=rf"TIS ($c={TIS_CAP:g}$)",
+        is_mse,
+        color=IS_COLOR,
+        marker="o",
+        markevery=(0, 9),
+        markerfacecolor="white",
+        markeredgewidth=1.2,
+        label="Exact IS MSE",
     )
-    risk_axis.plot(rho, ppo_mse, color=PPO_COLOR, label="PPO")
     risk_axis.plot(
         rho,
         is_mse_bound,
+        color=NEUTRAL_COLOR,
+        linestyle=(0, (5.0, 2.2)),
+        linewidth=2.0,
+        label="Finite-moment upper bound",
+    )
+    risk_axis.fill_between(
+        rho,
+        is_mse,
+        is_mse_bound,
         color=IS_COLOR,
-        linestyle="--",
-        linewidth=1.0,
-        label=r"IS finite-moment bound",
+        alpha=0.13,
+        linewidth=0.0,
     )
     risk_axis.set_xscale("log")
     risk_axis.set_yscale("log")
     risk_axis.set_xlim(MINIMUM_RHO, MAXIMUM_RHO)
-    risk_axis.set_xlabel(r"normalized ESS $\rho$")
-    risk_axis.set_ylabel("Gradient MSE")
-    risk_axis.set_title("(a) Exact estimator risk", loc="left")
-    risk_axis.legend(
-        loc="upper right",
-        frameon=False,
-        ncol=2,
-        columnspacing=0.8,
-    )
+    risk_axis.set_xlabel(r"ESS $\rho$")
+    risk_axis.set_ylabel("IS gradient MSE")
+    risk_axis.set_title("(a)", loc="left", fontweight="bold", pad=7)
+    risk_axis.legend(loc="lower left", frameon=False)
 
-    coverage_axis.plot(
+    improvement_axis.plot(
         rho,
-        error_coverage,
+        improvement_fraction,
         color=IS_COLOR,
-        label="Error event",
+        marker="o",
+        markevery=(0, 9),
+        markerfacecolor="white",
+        markeredgewidth=1.2,
+        label="Actual improvement",
     )
-    coverage_axis.plot(
-        rho,
-        theorem_coverage,
-        color=TIS_COLOR,
-        linestyle="--",
-        linewidth=1.1,
-        label="Improvement inequality",
-    )
-    coverage_axis.plot(
+    improvement_axis.plot(
         rho,
         positive_fraction,
         color=PPO_COLOR,
+        linestyle=(0, (5.0, 2.2)),
+        marker="D",
+        markevery=(4, 9),
+        markerfacecolor="white",
+        markeredgewidth=1.1,
         label="Positive certificate",
     )
-    coverage_axis.axhline(
-        1.0 - DELTA_CONFIDENCE,
+    improvement_axis.fill_between(
+        rho,
+        improvement_fraction,
+        positive_fraction,
+        where=positive_fraction >= improvement_fraction,
         color=NEUTRAL_COLOR,
-        linestyle=":",
-        linewidth=0.9,
-        label=rf"target $1-\delta={1.0 - DELTA_CONFIDENCE:g}$",
+        alpha=0.10,
+        linewidth=0.0,
     )
-    coverage_axis.set_xscale("log")
-    coverage_axis.set_xlim(MINIMUM_RHO, MAXIMUM_RHO)
-    coverage_axis.set_ylim(-0.03, 1.04)
-    coverage_axis.set_xlabel(r"normalized ESS $\rho$")
-    coverage_axis.set_ylabel("Fraction of batches")
-    coverage_axis.set_title("(b) Reliability and safe improvement", loc="left")
-    coverage_axis.legend(loc="center left", frameon=False)
+    improvement_axis.set_xscale("log")
+    improvement_axis.set_xlim(MINIMUM_RHO, MAXIMUM_RHO)
+    improvement_axis.set_ylim(0.0, 0.67)
+    improvement_axis.set_yticks([0.0, 0.2, 0.4, 0.6])
+    improvement_axis.yaxis.set_major_formatter(
+        PercentFormatter(1.0, decimals=0)
+    )
+    improvement_axis.set_xlabel(r"ESS $\rho$")
+    improvement_axis.set_ylabel("Fraction of batches")
+    improvement_axis.set_title("(b)", loc="left", fontweight="bold", pad=7)
+    improvement_axis.legend(loc="upper left", frameon=False)
 
-    crossover_axis.axhline(0.0, color=NEUTRAL_COLOR, linewidth=0.8)
-    crossover_axis.plot(
-        rho,
-        tis_margin,
-        color=TIS_COLOR,
-        label=rf"$C_{{\rm TIS{TIS_CAP:g}}}$",
+    for axis in (risk_axis, improvement_axis):
+        axis.grid(True, which="major", color="#C9D1D9", alpha=0.48)
+        axis.grid(False, which="minor")
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    reliability_base = FIGURES_DIR / "gaussian_is_reliability"
+    reliability_figure.savefig(reliability_base.with_suffix(".pdf"))
+    reliability_figure.savefig(reliability_base.with_suffix(".png"), dpi=300)
+    plt.close(reliability_figure)
+
+    choice_figure, (crossover_axis, gain_axis) = plt.subplots(
+        1, 2, figsize=(FULL, 2.55)
+    )
+    crossover_axis.axhline(
+        0.0,
+        color=NEUTRAL_COLOR,
+        linewidth=1.25,
+        zorder=1,
     )
     crossover_axis.plot(
         rho,
-        ppo_margin,
+        tis_gain_gap,
+        color=TIS_COLOR,
+        marker="D",
+        markevery=(0, 9),
+        markerfacecolor="white",
+        markeredgewidth=1.1,
+        label=f"TIS {TIS_CAP:g} vs. IS",
+    )
+    crossover_axis.plot(
+        rho,
+        ppo_gain_gap,
         color=PPO_COLOR,
-        label=r"$C_{\rm PPO}$",
+        linestyle=(0, (5.0, 2.2)),
+        marker="s",
+        markevery=(4, 9),
+        markerfacecolor="white",
+        markeredgewidth=1.1,
+        label="PPO vs. IS",
     )
     for crossover_rho, color, label, x_offset in (
-        (rho_tis, TIS_COLOR, r"$\rho_{\rm TIS}$", 4),
-        (rho_ppo, PPO_COLOR, r"$\rho_{\rm PPO}$", -4),
+        (rho_tis, TIS_COLOR, "TIS 3 = IS", 5),
+        (rho_ppo, PPO_COLOR, "PPO = IS", -5),
     ):
         crossover_axis.axvline(
             crossover_rho,
             color=color,
-            linestyle=":",
-            linewidth=0.9,
+            linestyle=(0, (1.2, 2.0)),
+            linewidth=1.55,
+            alpha=0.9,
         )
         crossover_axis.annotate(
-            rf"{label}$={format_sig(crossover_rho)}$",
-            xy=(crossover_rho, 0.97),
+            f"{label}\n{format_sig(crossover_rho)}",
+            xy=(crossover_rho, 0.96),
             xycoords=("data", "axes fraction"),
-            xytext=(x_offset, -2),
+            xytext=(x_offset, 0),
             textcoords="offset points",
             ha="left" if x_offset > 0 else "right",
             va="top",
             rotation=90,
-            fontsize=6.2,
+            fontsize=8.8,
+            fontweight="semibold",
             color=color,
+            bbox={
+                "boxstyle": "round,pad=0.18",
+                "facecolor": "white",
+                "edgecolor": "none",
+                "alpha": 0.88,
+            },
         )
     crossover_axis.set_xscale("log")
-    crossover_axis.set_yscale("symlog", linthresh=0.5, linscale=0.8)
+    crossover_axis.set_yscale("symlog", linthresh=0.1, linscale=1.45)
+    crossover_axis.set_yticks([-1.0, -0.1, 0.0, 0.1, 1.0, 10.0])
     crossover_axis.set_xlim(MINIMUM_RHO, MAXIMUM_RHO)
-    crossover_axis.set_xlabel(r"normalized ESS $\rho$")
-    crossover_axis.set_ylabel(r"Crossover margin $C_u$")
-    crossover_axis.set_title("(c) Full-certificate crossover", loc="left")
-    crossover_axis.legend(loc="upper right", frameon=False)
+    crossover_axis.set_xlabel(r"ESS $\rho$")
+    crossover_axis.set_ylabel("Expected gain relative to IS")
+    crossover_axis.set_title("(a)", loc="left", fontweight="bold", pad=7)
+    crossover_axis.legend(loc="lower left", frameon=False)
 
-    gain_axis.axhline(0.0, color=NEUTRAL_COLOR, linewidth=0.8)
+    gain_axis.axhline(
+        0.0,
+        color=NEUTRAL_COLOR,
+        linewidth=1.15,
+        zorder=1,
+    )
     gain_axis.plot(
         rho,
-        oracle_gain,
-        color=ORACLE_COLOR,
-        linestyle="--",
-        linewidth=2.2,
-        alpha=0.4,
-        zorder=1,
-        label="Certificate oracle",
+        is_gain,
+        color=IS_COLOR,
+        marker="o",
+        markevery=(0, 8),
+        markerfacecolor="white",
+        markeredgewidth=1.15,
+        label="IS",
     )
-    gain_axis.plot(rho, is_gain, color=IS_COLOR, label="IS")
     gain_axis.plot(
         rho,
         tis_gain,
         color=TIS_COLOR,
-        label=rf"TIS ($c={TIS_CAP:g}$)",
+        marker="D",
+        markevery=(3, 8),
+        markerfacecolor="white",
+        markeredgewidth=1.05,
+        label=f"TIS {TIS_CAP:g}",
     )
-    gain_axis.plot(rho, ppo_gain, color=PPO_COLOR, label="PPO")
-    gain_axis.axvline(
-        rho_tis,
-        color=TIS_COLOR,
-        linestyle=":",
-        linewidth=0.9,
-    )
-    gain_axis.axvline(
-        rho_ppo,
+    gain_axis.plot(
+        rho,
+        ppo_gain,
         color=PPO_COLOR,
-        linestyle=":",
-        linewidth=0.9,
+        linestyle=(0, (5.0, 2.2)),
+        marker="s",
+        markevery=(6, 8),
+        markerfacecolor="white",
+        markeredgewidth=1.05,
+        label="PPO",
     )
-    gain_axis.set_xscale("log")
-    gain_axis.set_yscale("symlog", linthresh=0.2, linscale=0.8)
-    gain_axis.set_xlim(MINIMUM_RHO, MAXIMUM_RHO)
-    gain_axis.set_xlabel(r"normalized ESS $\rho$")
-    gain_axis.set_ylabel(r"Exact expected gain $B_u(\eta)$")
-    gain_axis.set_title("(d) One-step policy improvement", loc="left")
+    for crossover_rho, color in (
+        (rho_ppo, PPO_COLOR),
+        (rho_tis, TIS_COLOR),
+    ):
+        gain_axis.axvline(
+            crossover_rho,
+            color=color,
+            linestyle=(0, (1.2, 2.0)),
+            linewidth=1.55,
+            alpha=0.9,
+        )
+    gain_axis.scatter(
+        [rho_ppo],
+        [ppo_root["is_expected_gain"]],
+        s=58,
+        facecolor="white",
+        edgecolor=PPO_COLOR,
+        linewidth=1.7,
+        zorder=6,
+    )
+    gain_axis.scatter(
+        [rho_tis],
+        [tis_root["is_expected_gain"]],
+        s=58,
+        facecolor="white",
+        edgecolor=TIS_COLOR,
+        linewidth=1.7,
+        zorder=6,
+    )
+    gain_axis.set_xlim(0.025, 0.16)
+    gain_axis.set_ylim(-0.35, 1.12)
+    gain_axis.set_xticks([0.04, 0.08, 0.12, 0.16])
+    gain_axis.set_xlabel(r"ESS $\rho$")
+    gain_axis.set_ylabel("Exact expected gain")
+    gain_axis.set_title("(b)", loc="left", fontweight="bold", pad=7)
     gain_axis.legend(
         loc="lower right",
         frameon=False,
-        ncol=2,
-        columnspacing=0.8,
+        ncol=1,
     )
 
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    figure_base = FIGURES_DIR / "gaussian_quadratic_one_step"
-    fig.savefig(figure_base.with_suffix(".pdf"))
-    fig.savefig(figure_base.with_suffix(".png"), dpi=300)
-    plt.close(fig)
+    for axis in (crossover_axis, gain_axis):
+        axis.grid(True, which="major", color="#C9D1D9", alpha=0.48)
+        axis.grid(False, which="minor")
+
+    choice_base = FIGURES_DIR / "gaussian_estimator_choice"
+    choice_figure.savefig(choice_base.with_suffix(".pdf"))
+    choice_figure.savefig(choice_base.with_suffix(".png"), dpi=300)
+    plt.close(choice_figure)
 
 
 def main() -> None:
@@ -832,6 +946,15 @@ def main() -> None:
                 float(row["mc_positive_certificate_fraction"])
                 for row in rows
             ),
+            "maximum_actual_improvement_fraction": max(
+                float(row["mc_actual_improvement_fraction"])
+                for row in rows
+            ),
+            "maximum_certificate_improvement_gap": max(
+                float(row["mc_positive_certificate_fraction"])
+                - float(row["mc_actual_improvement_fraction"])
+                for row in rows
+            ),
         },
         "displayed_branch": {
             "minimum_delta": minimum_delta,
@@ -864,7 +987,8 @@ def main() -> None:
         print(f"{name}: {value:.12g}")
     print(f"wrote {csv_path.relative_to(ROOT)}")
     print(f"wrote {json_path.relative_to(ROOT)}")
-    print("wrote figures/gaussian_quadratic_one_step.{pdf,png}")
+    print("wrote figures/gaussian_is_reliability.{pdf,png}")
+    print("wrote figures/gaussian_estimator_choice.{pdf,png}")
 
 
 if __name__ == "__main__":

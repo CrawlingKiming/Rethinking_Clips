@@ -32,21 +32,21 @@ PANELS = [
 ]
 
 
-def annotate_endpoint(ax, x, y, color, offset):
+def annotate_endpoint(ax, x, y, color, offset, compact=False):
     ax.annotate(
         f"{format_sig(100 * y)}%",
         xy=(x, 100 * y),
-        xytext=(5, offset),
+        xytext=(3 if compact else 5, offset),
         textcoords="offset points",
         color=color,
-        fontsize=6.5,
+        fontsize=5.9 if compact else 6.5,
         ha="left",
         va="center",
         clip_on=False,
     )
 
 
-def draw(ax, static_run, conditional_run, offsets):
+def draw(ax, static_run, conditional_run, offsets, compact=False):
     for run, color, linestyle, linewidth, offset in [
         (static_run, STATIC, "--", 1.2, offsets[0]),
         (conditional_run, CONDITIONAL, "-", 1.6, offsets[1]),
@@ -61,8 +61,8 @@ def draw(ax, static_run, conditional_run, offsets):
             marker="o",
             markersize=2.7,
         )
-        annotate_endpoint(ax, xs[-1], ys[-1], color, offset)
-    ax.set_xlim(-3, 222)
+        annotate_endpoint(ax, xs[-1], ys[-1], color, offset, compact)
+    ax.set_xlim(-3, 235 if compact else 222)
     ax.set_ylim(-1.5, 50)
 
 
@@ -75,16 +75,32 @@ handles = [
 ]
 
 use_paper_style()
-fig, axes = plt.subplots(2, 2, figsize=(FULL, 4.15), sharex=True, sharey=True)
+fig, axes = plt.subplots(1, 4, figsize=(FULL, 2.30), sharex=True, sharey=True)
 for index, (title, static_run, conditional_run, offsets, _slug) in enumerate(PANELS):
-    axis = axes.ravel()[index]
-    draw(axis, static_run, conditional_run, offsets)
-    axis.set_title(f"({'abcd'[index]}) {title}", loc="left")
-    if index % 2 == 0:
+    axis = axes[index]
+    draw(axis, static_run, conditional_run, offsets, compact=True)
+    axis.set_title(
+        f"({'abcd'[index]}) {title}",
+        loc="left",
+        fontsize=7.8,
+        fontweight="bold",
+    )
+    axis.set_xticks([0, 100, 200])
+    axis.set_yticks([0, 25, 50])
+    axis.tick_params(axis="both", labelsize=6.8)
+    axis.grid(True, which="major", alpha=0.26)
+    if index == 0:
         axis.set_ylabel("AIME-2024 mean@16 (%)")
-    if index >= 2:
-        axis.set_xlabel("training step")
-fig.legend(handles=handles, loc="outside lower center", ncol=2, frameon=False)
+        axis.yaxis.label.set_size(7.4)
+fig.supxlabel("training step", fontsize=7.4)
+fig.legend(
+    handles=handles,
+    loc="outside upper center",
+    ncol=2,
+    frameon=False,
+    fontsize=7.0,
+    handlelength=2.1,
+)
 save(fig, "result/q30ba3b/curves/overall")
 
 for title, static_run, conditional_run, offsets, slug in PANELS:
