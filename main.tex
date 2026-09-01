@@ -63,12 +63,15 @@ early learning while preventing late failure.
 
 \section{Introduction}
 
-Reinforcement learning with verifiable rewards repeatedly collects responses
-from a rollout policy and reuses each batch for one or more policy updates. A
-permissive update can work surprisingly well in this setting: performance rises quickly and
+Reinforcement learning (RL) is a foundational paradigm for
+fine-tuning Large Language Models (LLMs), enabling alignment with human preferences (Ouyang et al., 2022; Rafailov
+et al., 2023) and complex reasoning tasks (Guo et al., 2025;
+Qi et al., 2025a). now central. While Proximal Policy Optimization (PPO1) (Schulman et al.,
+2017) is the dominant algorithm in this setting the application on this LLM based on the trust region based understanding.  Their practical performance, however, is largely not very understood and see mismatch on the .. soething..
+
+Existing works such as TIS (CISPO) and grpo no-clip reports that permissive updates permissive update can work surprisingly well in this setting: performance rises quickly and
 remains stable, but then collapses abruptly. Figure~\ref{fig:llm-motivation}
-shows this delayed failure. Rollout data support useful learning for many
-updates before the same update rule becomes unstable.
+shows this delayed failure. not understood..
 
 \begin{figure}[htbp]
   \centering
@@ -80,36 +83,13 @@ updates before the same update rule becomes unstable.
   \label{fig:llm-motivation}
 \end{figure}
 
-Classical theory explains why moving too far from the rollout policy can be
-dangerous \citep{schulman2015trpo,schulman2017ppo,qi2026dppo}. That explanation
-is essential, but it does not explain why failure is delayed. A
-policy-deviation bound controls a population approximation; it does not track
-how much information a finite rollout still provides for the gradient of the
-current policy. The practical question raised by Figure~\ref{fig:llm-motivation}
+Classical theory explains why moving too far from the rollout policy can be dangerous \citep{schulman2015trpo,schulman2017ppo,qi2026dppo}, however under the low value of the learning rate, the explanation does not fully support why failure is delayed. A
+policy-deviation bound controls a population approximation; The practical question raised by Figure~\ref{fig:llm-motivation}
 is therefore statistical: when does the rollout cease to support a reliable
 next update?
 
-Our starting point is that nominal batch size can remain fixed while effective
-support contracts. Importance weights become increasingly uneven as the
-current policy moves away from the rollout policy, so fewer responses determine
-the update. Normalized ESS measures this contraction. We connect it first to
-gradient reliability and then to policy improvement.
-
-This separation leads to two ordered questions. First, when is the IS
-importance-weighted gradient reliable enough to improve the population
-objective? Second, if IS becomes unreliable, when is a controlled estimator
-actually better? The second question cannot be answered by ESS or MSE alone.
-Clipping may reduce variance and MSE while also removing useful
-population-gradient alignment. We therefore compare candidate estimators using
-the full fixed-step improvement certificate.
-
-An exactly solvable Gaussian bandit makes the distinction concrete. Every
-population moment and the expected one-step gain are available without Monte
-Carlo error, allowing us to separate the MSE crossover from the actual
-improvement crossover. We then test the resulting regime prediction in
-large-model training. These experiments use ESS as a diagnostic of effective
-support and test the predicted support-to-intervention ordering.
-
+Here, we provide a useful theoretical .... gradient estimator.. and show how reliablity can connect.. and ess as the practical criterion for this.. Normalized ESS measures this contraction. We connect it first to
+gradient reliability and then to policy improvement. we show the role of the .. estimators.. and .. 
 \subsection{Contributions}
 
 \begin{enumerate}
