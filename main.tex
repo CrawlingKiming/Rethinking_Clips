@@ -63,25 +63,12 @@ early learning while preventing late failure.
 
 \section{Introduction}
 
-Reinforcement learning has become central to post-training large language
-models for preference alignment and mathematical reasoning
-\citep{bai2022hh,shao2024deepseekmath,yu2025dapo}. In scalable training
-systems, a rollout policy generates responses that a trainer reuses for one or
-more gradient updates, so the current policy need not match the policy that
-produced the data \citep{qi2026dppo}. To limit the resulting policy deviation,
-PPO-style objectives, including GRPO, use ratio-based clipping or masking
-\citep{schulman2015trpo,schulman2017ppo,shao2024deepseekmath}. This control
-promotes stability, but it can also suppress informative gradient
-contributions and slow learning.
+Reinforcement learning has become central to post-training large language models \citep{bai2022hh,shao2024deepseekmath,yu2025dapo}. In scalable training systems, policy optimization is often off-policy, a rollout policy generates responses that a trainer reuses for one or more gradient updates, so the current policy need not match the policy that produced the data \citep{qi2026dppo}. 
 
-Permissive estimators expose the other side of this tradeoff. Truncated
-importance sampling (TIS), as used by CISPO, retains contributions that PPO
-would mask, while a fully unclipped update removes coefficient control
-altogether \citep{minimax2025m1,qi2026dppo}. These estimators can learn
-rapidly, yet their success need not persist. Figure~\ref{fig:llm-motivation}
-shows TIS caps 3 and 5 improving for many updates before abruptly collapsing.
-The central puzzle is temporal: why can the same estimator be productive early
-in training and unreliable later?
+Policy optimization in traditional applications require the control of the policy optimization, preventing from deviating too much from the exisiting methods. Proximal policy optimization has been central effective to limit the resulting policy deviation, PPO-style objectives, including GRPO, use ratio-based clipping or masking \citep{schulman2015trpo,schulman2017ppo,shao2024deepseekmath}. The theoretical understanding is baed on the trust-region guarantees.. Based on the population-level view, the too much policy deviation is not good..
+
+Despite the widespread use of the theoretical understanding of trust region, the practical observation in the application of the large language models often show no-collapse or even better performance in less clipping, even the permissive updates like TIS or no-clips have shown to work. However, these estimators can learn rapidly, yet their success need not persist. Figure~\ref{fig:llm-motivation}
+shows TIS caps 3 and 5 improving for many updates before abruptly collapsing. This provokes the centroal theoretical puzzle: why can the same estimator be productive and unreliable at the same time?
 
 \begin{figure}[htbp]
   \centering
@@ -93,6 +80,9 @@ in training and unreliable later?
   policy-gradient update.}
   \label{fig:llm-motivation}
 \end{figure}
+
+In this paper, we shift the 
+While classical trust-region theory predicts the policy to degrade rapidly, 
 
 Classical trust-region theory explains why moving too far from the rollout
 policy can be unsafe
@@ -589,71 +579,29 @@ failure.
 \subsection{Policy optimization in a Gaussian bandit}
 \label{sec:gaussian-example}
 
-Can the two-stage theory identify both when IS becomes unreliable and which
-controlled estimator should replace it? We answer this question in a scalar
-Gaussian bandit with a quadratic reward. We hold the current policy fixed and
-vary only its distance from the rollout policy, so normalized
-population ESS decreases monotonically along a controlled off-policy path.
-Lemma~\ref{lem:rho-gradient-reliability} first predicts the loss of IS
-reliability, and Theorem~\ref{thm:permissive-reliability} translates that loss
-into the availability of a certified IS step. We then compare IS with TIS-3
-and PPO using Corollary~\ref{cor:certificate-crossover}. Because the bandit has
-one decision, factorwise TIS is exactly full-weight truncation. All estimator
-moments are available in closed form; panel (b) alone uses simulated batches
-to evaluate realized coverage and certificate activation.
+In this section, we validate our theory in the policy optimization in a Gaussain bandit cases, which allows the population gradient and realized improvement certificate available in closed form which makes it a perfect theroetical test bed;
 Appendix~\ref{app:gaussian} gives the exact calculations and protocol.
 
-For each rule, let $s_u(\rho):=\E[\widehat g_u^2]$. For
-$u\in\{\mathrm{TIS3},\mathrm{PPO}\}$, specialize the crossover corollary as
-\begin{equation}
- C_u(\rho):=
- \{m_{\mathrm{IS}}(\rho)-m_u(\rho)\}
- -(1-L\eta)\{s_{\mathrm{IS}}(\rho)-s_u(\rho)\}
- =\frac{2}{\eta}\{B_u(\eta)-B_{\mathrm{IS}}(\eta)\}.
- \label{eq:gaussian-crossover-margin}
-\end{equation}
-By Corollary~\ref{cor:certificate-crossover}, $C_u(\rho)>0$ exactly when $u$
-has a stronger fixed-step certificate than IS.
+In Figure 2 (a)(b), we first show the lemma 2 and theorem 3. the line is .. line is .. . we show that our theroy predicts the mse.. and further, the probablisitic bounds exactly matches our theoretical predictison..[final remark]
+
+in figure 3 (a)(b) we do .. gradient estimator choices and the cross overs.. as from our theroetical predcitions, the cross over region directly connects with the better gradient estimate choices in the policy learning.. 
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/gaussian_quadratic_one_step.pdf}
-  \caption{Theory validation in the Gaussian bandit with $g=2$, $N=32$,
-  TIS cap $c=3$, PPO radius $\epsilon=0.2$, and fixed step $\eta=0.4$.
-  (a) Exact estimator MSE and the finite-moment IS MSE envelope in
-  Equation~\eqref{eq:rho-gradient-mse-bound}. (b) Empirical coverage of the
-  Lemma~\ref{lem:rho-gradient-reliability} event and
-  Theorem~\ref{thm:permissive-reliability} improvement inequality at confidence
-  $1-\delta=0.9$; the orange curve reports the fraction of batches with a
-  positive certified step. (c) The exact
-  crossover margins in Equation~\eqref{eq:gaussian-crossover-margin}; positive
-  values favor the controlled estimator. (d) Exact expected one-step policy
-  improvement at the common fixed step. Vertical lines carry the computed
-  IS--TIS3 and IS--PPO crossovers from (c) into (d).}
+  \caption{Theory validation in the Gaussian bandit.
+ }
   \label{fig:gaussian-one-step}
 \end{figure}
 
-Panels (a)--(b) check the first stage of the theory. The exact IS MSE
-remains below its finite-moment ESS envelope, the empirical events attain the
-prescribed $0.9$ coverage, and the frequency of a positive IS certificate
-falls sharply as support contracts. Panels (c)--(d) instantiate the second stage.
-TIS-3 has the lowest MSE throughout the displayed path, yet its
-full-certificate margin becomes positive only when $\rho<0.105$. PPO does not
-overtake IS until $\rho<0.0392$, reflecting the larger alignment loss induced
-by masking.
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/gaussian_quadratic_one_step.pdf}
+  \caption{Theory validation in the Gaussian bandit.
+ }
+  \label{fig:gaussian-one-step}
+\end{figure}
 
-Because the quadratic objective satisfies
-$B_u(\eta)=\E[J(\theta+\eta\widehat g_u)-J(\theta)]$, panel (d) turns the
-certificate comparison into an exact policy-improvement comparison: the roots
-of $C_u$ are the actual crossover points. The global certificate oracle is
-IS$\rightarrow$TIS-3 on this path; PPO never reaches the upper envelope.
-ESS identifies the reliability regime, while the full certificate determines
-which update is preferable.
-This ordering is specific to the one-decision construction, where TIS caps the
-complete importance weight. In sequence models, factorwise TIS does not cap
-the complete-trajectory weight, so TIS-3 need not remain the low-support
-oracle.
-\FloatBarrier
 
 \subsection{Policy optimization in large language models}
 
