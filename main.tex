@@ -604,7 +604,12 @@ the two permissive Qwen3-30B-A3B trajectories from
 Figure~\ref{fig:llm-motivation}, which use TIS caps 3 and 5, beside a third
 trajectory trained with GRPO without clipping. Each run is trained for up to
 200 policy updates and evaluated on AIME-2024 using mean@16.
-
+\begin{figure}
+    \centering
+    \includegraphics[width=0.5\linewidth]{figures/result/q30ba3b/noclip/ess_predicts_val.pdf}
+    \caption{Enter Caption}
+    \label{fig:placeholder}
+\end{figure}
 Persistent support loss accompanies the loss of further policy improvement in
 both TIS trajectories. After both trajectories peak at step 60, TIS 3 and TIS
 5 begin runs of at least five consecutive sub-$0.01$ ESS observations at steps
