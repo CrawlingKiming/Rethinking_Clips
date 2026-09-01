@@ -51,11 +51,11 @@ high-probability one-step improvement guarantee. Second, when does coefficient
 control provide a better update? Lower gradient-estimation MSE is not enough:
 the controlled estimator must also retain sufficient alignment with the
 population gradient. We capture this requirement with a full fixed-step
-improvement certificate. An exactly solvable Gaussian bandit shows that the two
-criteria can switch at different ESS levels: PPO can have lower MSE while IS
-still gives the larger exact expected improvement. Along the example's
-monotone off-policy path, the safe certificate oracle---IS, PPO, or no
-update---reduces exactly to two ESS thresholds.
+improvement certificate. A Gaussian bandit instantiates the finite-moment ESS
+reliability bound, estimator crossover, and one-step policy improvement.
+Although TIS-3 has the lowest MSE along the displayed path, IS gives the better
+update at high ESS; only after effective support contracts does TIS-3 overtake
+it, while the more aggressive PPO mask never reaches the oracle envelope.
 In the reported large-model trajectories, ESS-conditioned safeguards preserve
 early learning while preventing late failure.
 
@@ -118,12 +118,15 @@ variation and MSE while also removing useful population-gradient alignment. We
 therefore derive a full fixed-step certificate that determines when the risk
 reduction is sufficient to justify the signal removed by control.
 
-An exactly solvable Gaussian bandit separates these decisions without Monte
-Carlo error: PPO attains lower MSE before it attains the larger exact expected
-improvement, and the safe oracle follows an IS-to-PPO-to-stop ordering as
-effective support contracts. Large-model trajectories then establish the
-operational consequence. Sample ESS exposes support loss under both TIS 3 and
-an unclipped update, while ESS-conditioned safeguards preserve permissive
+An analytically tractable Gaussian bandit then follows the theory in order.
+It first checks the finite-moment ESS reliability bound and safe-step guarantee,
+then computes the pairwise certificate crossovers of TIS and PPO against IS.
+The result
+isolates the missing term in an MSE-only comparison: TIS-3 has the lowest MSE
+throughout the displayed path, yet IS remains the better update at high ESS
+because it retains more useful alignment. Large-model trajectories establish
+the operational consequence. Sample ESS exposes support loss under both TIS 3
+and an unclipped update, while ESS-conditioned safeguards preserve permissive
 learning and activate control only in the low-support regime. On
 Qwen3-30B-A3B, ungated TIS 3 collapses to $0.417\%$, whereas the
 ESS-conditioned TIS-3/Clip-Higher trajectory retains $44.8\%$ at step 200.
@@ -137,10 +140,11 @@ ESS-conditioned TIS-3/Clip-Higher trajectory retains $44.8\%$ at step 200.
   \item We derive a fixed-step certificate that separates MSE reduction from
   lost population-gradient alignment and identifies when coefficient control
   provides the stronger update.
-  \item We separate the MSE and update-quality crossovers exactly in a
-  Gaussian bandit, then show in large-model training that ESS supplies an
-  actionable timing signal for safeguards that preserve learning and prevent
-  late failure.
+  \item We instantiate the finite-moment ESS reliability bound in a Gaussian
+  bandit, followed by exact certificate comparisons among IS, TIS, and PPO and
+  one-step policy improvement; we then show in
+  large-model training that ESS supplies an actionable timing signal for
+  safeguards that prevent late failure.
 \end{enumerate}
 
 \section{Related work}
@@ -371,44 +375,55 @@ At update $k$, condition on the preceding updates and write
 $W_k:=W_{\theta_k}$, $f_k:=f_{\theta_k}$,
 $g_k:=g(\theta_k)$, $\widehat g_k:=\widehat g_N(\theta_k)$, and
 $\rho_k:=\rho_{\theta_k}$. Assume that the $N$ rollout samples are independent
-draws from $Q$ and that
-$\|f_k\|_\infty:=\sup_z\|f_k(z)\|_2<\infty$.
+draws from $Q$, $d_2(P_{\theta_k}\|Q)<\infty$, and
+$\E_Q[W_k^2\|f_k\|_2^2]<\infty$. Define the
+importance-weighted contribution scale
+\begin{equation}
+ M_{2,k}:=
+ \frac{\E_Q[W_k^2\|f_k\|_2^2]}{\E_Q[W_k^2]}
+ =\rho_k\E_Q[W_k^2\|f_k\|_2^2].
+ \label{eq:weighted-contribution-scale}
+\end{equation}
+This factorizes the weighted second moment as $M_{2,k}/\rho_k$: $\rho_k$
+records ratio dispersion, while $M_{2,k}$ also captures its coupling with the
+score--advantage magnitude.
 
 Because the IS estimator is unbiased, its exact mean-squared error is
 \begin{equation}
  \E\|\widehat g_k-g_k\|_2^2
- =\frac1N\left\{\E_Q[W_k^2\|f_k\|_2^2]-\|g_k\|_2^2\right\}.
+ =\frac1N\left\{\frac{M_{2,k}}{\rho_k}-\|g_k\|_2^2\right\}.
  \label{eq:rho-gradient-mse}
 \end{equation}
-Using $\|f_k(z)\|_2\le\|f_k\|_\infty$ and
-$\rho_k^{-1}=\E_Q[W_k^2]$ gives the interpretable upper bound
+Consequently,
 \begin{equation}
  \E\|\widehat g_k-g_k\|_2^2
  \le
- \frac{\|f_k\|_\infty^2}{N\rho_k}.
+ \frac{M_{2,k}}{N\rho_k}.
  \label{eq:rho-gradient-mse-bound}
 \end{equation}
 Likelihood-ratio dispersion therefore enters through the effective count
-$N\rho_k$, replacing the nominal sample size $N$.
+$N\rho_k$, replacing the nominal sample size $N$, while $M_{2,k}$ records the
+remaining contribution scale. If $f_k$ is bounded, then
+$M_{2,k}\le\|f_k\|_\infty^2$, recovering the familiar bounded-integrand form.
 Equation~\eqref{eq:rho-gradient-mse-bound} controls the mean-squared error; the
 next lemma converts this result into a high-probability error radius for the
 realized update.
 
 \begin{lemma}[Normalized ESS controls the gradient-error radius]
 \label{lem:rho-gradient-reliability}
-Under the preceding setup, suppose
-$d_2(P_{\theta_k}\|Q)<\infty$ and $\|f_k\|_\infty<\infty$. Then, for any
-$0<\delta\le1$, with probability at least $1-\delta$,
+Under the preceding setup, for any $0<\delta\le1$, with probability at least
+$1-\delta$,
 \begin{equation}
  \|\widehat g_k-g_k\|_2
  \le
- \frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}.
+ \sqrt{\frac{M_{2,k}}{\delta N\rho_k}}.
  \label{eq:rho-gradient-concentration}
 \end{equation}
 \end{lemma}
-The radius grows as $(N\rho_k)^{-1/2}$. Thus, low ESS weakens the reliability
-guarantee for the IS gradient, consistent with the motivating example in the
-introduction. We now combine this radius with
+Holding the contribution scale fixed, the radius grows as
+$(N\rho_k)^{-1/2}$. Thus, low ESS weakens the reliability guarantee for the IS
+gradient, consistent with the motivating example in the introduction. We now
+combine this radius with
 Lemma~\ref{lem:gradient-error-progress} to obtain an ESS-dependent improvement
 guarantee.
 
@@ -419,7 +434,7 @@ $J$ is $L_k$-smooth along the update segment for $L_k>0$. For any
 $0<\delta\le1$, define
 \begin{equation}
  \varepsilon_k(\delta):=
- \frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}},
+ \sqrt{\frac{M_{2,k}}{\delta N\rho_k}},
  \qquad
  \gamma_k:=\frac1{L_k}
  \left(1-\frac{\varepsilon_k(\delta)}{\|\widehat g_k\|_2}\right)_+,
@@ -443,7 +458,7 @@ lower bound is positive when
 \[
  \|\widehat g_k\|_2
  >
- \frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}.
+ \sqrt{\frac{M_{2,k}}{\delta N\rho_k}}.
 \]
 Thus, the IS update remains certifiably useful while effective support is
 sufficiently large relative to the observed gradient signal. Holding the other
@@ -566,50 +581,79 @@ intervention is worthwhile.
 \section{Policy optimization and ESS}
 
 This section makes the theoretical distinction observable in two settings.
-An exactly solvable Gaussian bandit first separates gradient-estimation MSE
-from one-step policy improvement. Large-model trajectories then show how
-observed effective support evolves around delayed optimization failure.
+An analytically tractable Gaussian bandit first instantiates IS reliability,
+estimator crossover, and one-step policy improvement. Large-model trajectories
+then show how observed effective support evolves around delayed optimization
+failure.
 
 \subsection{Policy optimization in a Gaussian bandit}
 \label{sec:gaussian-example}
 
-Does lower gradient-estimation MSE necessarily identify the better policy
-update? We answer this question in a scalar Gaussian bandit with a quadratic
-reward. We hold the current policy fixed and vary only its distance from the
-rollout policy, so exact population ESS decreases monotonically along a
-controlled off-policy path. All estimator moments are available in closed
-form, and the quadratic objective makes the fixed-step certificate equal to
-the exact expected one-step improvement. Thus, disagreement between the MSE
-and certificate oracles cannot be attributed to Monte Carlo error or a loose
-smoothness bound. At each policy state, the MSE oracle chooses between IS and
-PPO by gradient-estimation MSE, while the safe certificate oracle chooses the
-largest nonnegative certificate among IS, PPO, and a null update.
-Because the bandit contains a single decision, the complete-trajectory IS
-weight and the factorwise ratio coincide.
-Appendix~\ref{app:gaussian} gives the exact calculations.
+Can the two-stage theory identify both when IS becomes unreliable and which
+controlled estimator should replace it? We answer this question in a scalar
+Gaussian bandit with a quadratic reward. We hold the current policy fixed and
+vary only its distance from the rollout policy, so normalized
+population ESS decreases monotonically along a controlled off-policy path.
+Lemma~\ref{lem:rho-gradient-reliability} first predicts the loss of IS
+reliability, and Theorem~\ref{thm:permissive-reliability} translates that loss
+into the availability of a certified IS step. We then compare IS with TIS-3
+and PPO using Corollary~\ref{cor:certificate-crossover}. Because the bandit has
+one decision, factorwise TIS is exactly full-weight truncation. All estimator
+moments are available in closed form; panel (b) alone uses simulated batches
+to evaluate realized coverage and certificate activation.
+Appendix~\ref{app:gaussian} gives the exact calculations and protocol.
+
+For each rule, let $s_u(\rho):=\E[\widehat g_u^2]$. For
+$u\in\{\mathrm{TIS3},\mathrm{PPO}\}$, specialize the crossover corollary as
+\begin{equation}
+ C_u(\rho):=
+ \{m_{\mathrm{IS}}(\rho)-m_u(\rho)\}
+ -(1-L\eta)\{s_{\mathrm{IS}}(\rho)-s_u(\rho)\}
+ =\frac{2}{\eta}\{B_u(\eta)-B_{\mathrm{IS}}(\eta)\}.
+ \label{eq:gaussian-crossover-margin}
+\end{equation}
+By Corollary~\ref{cor:certificate-crossover}, $C_u(\rho)>0$ exactly when $u$
+has a stronger fixed-step certificate than IS.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/gaussian_quadratic_one_step.pdf}
-  \caption{Lower gradient MSE need not imply a better one-step update. In an
-  exact Gaussian bandit with $g=2$, $N=32$, $\epsilon=0.2$, and $\eta=0.4$,
-  PPO attains lower MSE below $\rho_{\mathrm{MSE}}=0.123$ (a), but its loss of
-  population-gradient alignment (b) delays the improvement crossover until
-  $\rho_B=0.0392$ (c). Below $\rho_{\mathrm{stop}}=0.0109$, the safe oracle
-  selects no update.}
+  \caption{Theory validation in the Gaussian bandit with $g=2$, $N=32$,
+  TIS cap $c=3$, PPO radius $\epsilon=0.2$, and fixed step $\eta=0.4$.
+  (a) Exact estimator MSE and the finite-moment IS MSE envelope in
+  Equation~\eqref{eq:rho-gradient-mse-bound}. (b) Empirical coverage of the
+  Lemma~\ref{lem:rho-gradient-reliability} event and
+  Theorem~\ref{thm:permissive-reliability} improvement inequality at confidence
+  $1-\delta=0.9$; the orange curve reports the fraction of batches with a
+  positive certified step. (c) The exact
+  crossover margins in Equation~\eqref{eq:gaussian-crossover-margin}; positive
+  values favor the controlled estimator. (d) Exact expected one-step policy
+  improvement at the common fixed step. Vertical lines carry the computed
+  IS--TIS3 and IS--PPO crossovers from (c) into (d).}
   \label{fig:gaussian-one-step}
 \end{figure}
-\FloatBarrier
 
-Figure~\ref{fig:gaussian-one-step} gives a direct counterexample to choosing an
-update by MSE alone. For $0.0392<\rho<0.123$, PPO has lower MSE, yet IS gives
-the larger exact improvement because the alignment removed by masking
-outweighs the reduction in the quadratic expected-update penalty. Below
-$\rho_B=0.0392$, control becomes preferable; below
-$\rho_{\mathrm{stop}}=0.0109$, the safe oracle abstains. The resulting rule is
-IS$\rightarrow$PPO$\rightarrow$no update as support contracts. These
-boundaries are configuration-specific: ESS locates the support regime, whereas
-the full certificate determines the action.
+Panels (a)--(b) check the first stage of the theory. The exact IS MSE
+remains below its finite-moment ESS envelope, the empirical events attain the
+prescribed $0.9$ coverage, and the frequency of a positive IS certificate
+falls sharply as support contracts. Panels (c)--(d) instantiate the second stage.
+TIS-3 has the lowest MSE throughout the displayed path, yet its
+full-certificate margin becomes positive only when $\rho<0.105$. PPO does not
+overtake IS until $\rho<0.0392$, reflecting the larger alignment loss induced
+by masking.
+
+Because the quadratic objective satisfies
+$B_u(\eta)=\E[J(\theta+\eta\widehat g_u)-J(\theta)]$, panel (d) turns the
+certificate comparison into an exact policy-improvement comparison: the roots
+of $C_u$ are the actual crossover points. The global certificate oracle is
+IS$\rightarrow$TIS-3 on this path; PPO never reaches the upper envelope.
+ESS identifies the reliability regime, while the full certificate determines
+which update is preferable.
+This ordering is specific to the one-decision construction, where TIS caps the
+complete importance weight. In sequence models, factorwise TIS does not cap
+the complete-trajectory weight, so TIS-3 need not remain the low-support
+oracle.
+\FloatBarrier
 
 \subsection{Policy optimization in large language models}
 
@@ -854,8 +898,9 @@ error from the useful update retained after control: reducing MSE improves the
 fixed-step certificate only when that gain compensates for the signal removed
 by clipping. This distinction makes IS preferable while effective support is
 broad and explains why controlled estimators become attractive as mismatch
-grows. The exact Gaussian construction exhibits separate MSE and update
-crossovers. The reported language-model trajectories then show that sequence
+grows. The Gaussian construction instantiates these comparisons and shows why mild
+truncation can dominate more aggressive masking. The reported language-model
+trajectories then show that sequence
 ESS can reveal support contraction and time a prespecified safeguard without
 serving as the oracle itself. In the RLVR and RLHF examples, the resulting
 conditional constructions retain permissive learning in the higher-support
@@ -878,9 +923,9 @@ Section~\ref{sec:gaussian-example}.
 
 
 
-We compare IS and the PPO-style rule
-in Equation~\eqref{eq:ppo-coefficient-rule}, using the exact current-policy
-value baseline.
+We compare IS, TIS with cap $c=3$, and the PPO-style rule in
+Equation~\eqref{eq:ppo-coefficient-rule}, using the exact current-policy value
+baseline.
 
 Because the score contribution is polynomial and each mask
 boundary is linear in $z$, the means, MSEs, and update second moments are finite
@@ -929,9 +974,9 @@ fixed-step certificate is exact:
  =B_u(\eta).
  \label{eq:gaussian-exact-gain}
 \end{equation}
-We use $N=32$, the standard PPO radius $\epsilon=0.2$, and
-choose $g=2$ and $\eta=0.4$ so that the MSE, improvement, and abstention
-regimes are all visible on one monotone ESS path.
+We use $N=32$, the standard PPO radius $\epsilon=0.2$, TIS cap $c=3$, and
+choose $g=2$ and $\eta=0.4$ so that the reliability and estimator-crossover
+regimes are visible on one monotone ESS path.
 
 \paragraph{Exact Closed Form Computations}
 Let $z=a-\theta$. Under the current policy,
@@ -944,9 +989,10 @@ baseline gives
  \label{eq:gaussian-advantage-contribution}
 \end{equation}
 Although $f_g$ is unbounded, all polynomial Gaussian moments used below are
-finite. The example therefore uses the finite-moment fixed-step certificate;
-the bounded-integrand IS theorem addresses a separate reliability question.
-IS uses $W_\Delta f_g$. The PPO-style candidate uses
+finite, so the finite-moment conditions of
+Lemma~\ref{lem:rho-gradient-reliability} and
+Theorem~\ref{thm:permissive-reliability} hold. IS uses $W_\Delta f_g$ and TIS
+uses $\min\{W_\Delta,c\}f_g$. The PPO-style candidate uses
 $W_\Delta f_gM_{\epsilon,\Delta}$, where
 \begin{equation}
  M_{\epsilon,\Delta}(z)
@@ -967,6 +1013,22 @@ per-sample moments
  \qquad u\in\{\mathrm{IS},\mathrm{P}\}.
  \label{eq:gaussian-exact-moments}
 \end{align}
+For TIS, define
+$b_c(\Delta):=(\log c-\Delta^2/2)/\Delta$. Its exact moments are
+\begin{align}
+ \mu_{\mathrm{T}}(\Delta)
+ &=\E_{U\sim\mathcal N(0,1)}
+ [f_g(U)\mathbf 1\{U\le b_c\}]
+ +c\E_{U\sim\mathcal N(-\Delta,1)}
+ [f_g(U)\mathbf 1\{U>b_c\}],
+ \nonumber\\
+ h_{\mathrm{T}}(\Delta)
+ &=e^{\Delta^2}\E_{V\sim\mathcal N(\Delta,1)}
+ [f_g(V)^2\mathbf 1\{V\le b_c\}]
+ +c^2\E_{V\sim\mathcal N(-\Delta,1)}
+ [f_g(V)^2\mathbf 1\{V>b_c\}].
+ \label{eq:gaussian-tis-moments}
+\end{align}
 In particular, $\mu_{\mathrm{IS}}=g$. For an iid estimator with batch size $N$,
 \begin{equation}
  m_u=(\mu_u-g)^2+\frac{h_u-\mu_u^2}{N},
@@ -975,9 +1037,30 @@ In particular, $\mu_{\mathrm{IS}}=g$. For an iid estimator with batch size $N$,
  \label{eq:gaussian-risk-second-moment}
 \end{equation}
 
-The advantage changes sign at $g\pm\sqrt{g^2+1}$, and the ratio boundaries are
-$(\log(1\pm\epsilon)-\Delta^2/2)/\Delta$. Equation~\eqref{eq:gaussian-exact-moments}
-is therefore a finite sum of truncated normal polynomial moments. With
+For $g=2$, the IS weighted-contribution scale in
+Equation~\eqref{eq:weighted-contribution-scale} is
+\begin{align}
+ M_2(\Delta)
+ &=\rho(\Delta)h_{\mathrm{IS}}(\Delta)
+ \nonumber\\
+ &=\frac{\Delta^6}{4}-2\Delta^5+\frac{29\Delta^4}{4}
+ -18\Delta^3+\frac{65\Delta^2}{2}-24\Delta+\frac{29}{2}.
+ \label{eq:gaussian-weighted-contribution-scale}
+\end{align}
+Hence the exact IS MSE is
+$\{e^{\Delta^2}M_2(\Delta)-4\}/32$ and its
+Lemma~\ref{lem:rho-gradient-reliability} envelope is
+$e^{\Delta^2}M_2(\Delta)/32$. Panel (b) uses $10^5$ independent batches at
+each of 81 policy pairs and $\delta=0.1$ to evaluate the realized coverage of
+Lemma~\ref{lem:rho-gradient-reliability} and
+Theorem~\ref{thm:permissive-reliability}. Both $M_2(\Delta)$ and the adaptive
+step are evaluated from population quantities in this controlled theory
+validation; they are not proposed as an empirical gate.
+
+The advantage changes sign at $g\pm\sqrt{g^2+1}$, and the PPO ratio boundaries
+are $(\log(1\pm\epsilon)-\Delta^2/2)/\Delta$. Equations
+\eqref{eq:gaussian-exact-moments} and \eqref{eq:gaussian-tis-moments} are
+therefore finite sums of truncated normal polynomial moments. With
 $I_j(a,b):=\int_a^bz^j\phi(z)\,dz$, integration by parts gives
 \begin{equation}
  I_j(a,b)
@@ -992,21 +1075,30 @@ in Equation~\eqref{eq:gaussian-exact-gain} gives the reported boundaries.
 
 \paragraph{Results}
 We evaluate
-$0.2\le\Delta\le\sqrt{-\log(0.005)}$. Numerical evaluation of the closed-form
-moments gives three substantive boundaries on this branch:
+$\sqrt{-\log(0.9)}\le\Delta\le\sqrt{-\log(0.005)}$. For each
+$u\in\{\mathrm{T},\mathrm{P}\}$, substitution into
+Corollary~\ref{cor:certificate-crossover} gives
 \begin{equation}
- \rho_{\mathrm{MSE}}=0.123,
+ C_u(\rho)
+ =\{m_{\mathrm{IS}}-m_u\}
+ -(1-\eta)\{s_{\mathrm{IS}}-s_u\}
+ =\frac{2}{\eta}\{B_u-B_{\mathrm{IS}}\}.
+ \label{eq:gaussian-crossover-calculation}
+\end{equation}
+Numerical evaluation of the closed-form moments gives
+\begin{equation}
+ \rho_{\mathrm{IS,TIS3}}=0.105,
  \qquad
- \rho_B=0.0392,
- \qquad
- \rho_{\mathrm{stop}}=0.0109.
+ \rho_{\mathrm{IS,PPO}}=0.0392.
  \label{eq:gaussian-thresholds}
 \end{equation}
-The MSE oracle over $\mathcal U=\{u_{\mathrm{IS}},u_{\mathrm{P}}\}$ selects IS
-above $\rho_{\mathrm{MSE}}$ and PPO below it. The safe certificate oracle adds
-the null update and instead selects IS for $\rho>\rho_B$, PPO for
-$\rho_{\mathrm{stop}}<\rho<\rho_B$, and no update for
-$\rho<\rho_{\mathrm{stop}}$. Adjacent choices tie at each boundary.
+At the TIS-3 root, the MSE reduction and discounted second-moment reduction
+both equal $3.94$; at the PPO root, both equal $11.0$. TIS-3 has lower
+MSE than both IS and PPO throughout the displayed branch, yet IS has the
+larger certificate for $\rho>0.105$. Below that point TIS-3 forms the upper
+certificate envelope. PPO crosses IS at $0.0392$ only pairwise: it remains
+below TIS-3 throughout the branch. Equation~\eqref{eq:gaussian-exact-gain}
+makes the same ordering exact for expected one-step policy improvement.
 
 \section{Additional coefficient-rule details}
 \label{app:coefficient-rules}
@@ -1161,35 +1253,35 @@ where the last equality uses Equation~\eqref{eq:conditional-gradient-identity}. 
  =\frac1N\left\{\E_Q[W_k^2\|f_k\|_2^2]-\|g_k\|_2^2\right\}.
  \label{eq:rho-gradient-mse-proof}
 \end{equation}
-Finally, $\|f_k(z)\|_2\le\|f_k\|_\infty$ and $\E_Q[W_k^2]=\rho_k^{-1}$ imply
+Finally, Equation~\eqref{eq:weighted-contribution-scale} implies
 \begin{align}
  \E\|\widehat g_k-g_k\|_2^2
  &\le\frac1N\E_Q[W_k^2\|f_k\|_2^2]
  \nonumber\\
- &\le\frac{\|f_k\|_\infty^2}{N}\E_Q[W_k^2]
- \nonumber\\
- &=\frac{\|f_k\|_\infty^2}{N\rho_k},
+ &=\frac{M_{2,k}}{N\rho_k},
  \label{eq:mse-rho-bound-proof}
 \end{align}
 which proves Equation~\eqref{eq:rho-gradient-mse-bound}.
 
 \subsection{Proof of Lemma~\ref{lem:rho-gradient-reliability}}
 
-Apply Markov's inequality to the nonnegative random variable $\|\widehat g_k-g_k\|_2^2$:
+If $M_{2,k}=0$, Equation~\eqref{eq:rho-gradient-mse-bound} makes the claim
+immediate. Otherwise, apply Markov's inequality to the nonnegative random
+variable $\|\widehat g_k-g_k\|_2^2$:
 \begin{align}
  &\Pr\left(
  \|\widehat g_k-g_k\|_2
- >\frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}
+ >\sqrt{\frac{M_{2,k}}{\delta N\rho_k}}
  \right)
  \nonumber\\
  &\quad=
  \Pr\left(
  \|\widehat g_k-g_k\|_2^2
- >\frac{\|f_k\|_\infty^2}{\delta N\rho_k}
+ >\frac{M_{2,k}}{\delta N\rho_k}
  \right)
  \nonumber\\
  &\quad\le
- \frac{\E\|\widehat g_k-g_k\|_2^2}{\|f_k\|_\infty^2/(\delta N\rho_k)}
+ \frac{\E\|\widehat g_k-g_k\|_2^2}{M_{2,k}/(\delta N\rho_k)}
  \nonumber\\
  &\quad\le\delta,
  \label{eq:markov-rho-proof}
@@ -1242,10 +1334,14 @@ Lemma~\ref{lem:rho-gradient-reliability} shows that the event
 \begin{equation}
  \|\widehat g_k-g_k\|_2
  \le
- \frac{\|f_k\|_\infty}{\sqrt{\delta N\rho_k}}
+ \sqrt{\frac{M_{2,k}}{\delta N\rho_k}}
  \label{eq:theorem-reliability-event}
 \end{equation}
-has probability at least $1-\delta$. On this event, apply Lemma~\ref{lem:gradient-error-progress} with $\theta=\theta_k$, $\widehat g=\widehat g_k$, $\varepsilon=\|f_k\|_\infty/\sqrt{\delta N\rho_k}$, and $L=L_k$. The resulting inequality is exactly Equation~\eqref{eq:permissive-reliability}.
+has probability at least $1-\delta$. On this event, apply
+Lemma~\ref{lem:gradient-error-progress} with $\theta=\theta_k$,
+$\widehat g=\widehat g_k$,
+$\varepsilon=\sqrt{M_{2,k}/(\delta N\rho_k)}$, and $L=L_k$. The resulting
+inequality is exactly Equation~\eqref{eq:permissive-reliability}.
 
 \subsection{Risk and certificate comparisons for coefficient rules}
 
@@ -1354,11 +1450,16 @@ Repeating the sample-mean calculation across the $M$ independent prompt groups g
  &\le\frac{\|f_k\|_\infty^2}{M\rho_k}.
  \label{eq:group-rho-bound}
 \end{align}
-Markov's inequality then gives the same form as Lemma~\ref{lem:rho-gradient-reliability} with the number of independent prompts $M$ in place of the number of responses $N$.
+Markov's inequality then gives the bounded-contribution specialization of
+Lemma~\ref{lem:rho-gradient-reliability} with the number of independent prompts
+$M$ in place of the number of responses $N$.
 
-\subsection{Finite-moment relaxation}
+\subsection{Bounded-contribution specialization}
 
-The exact equality in Equation~\eqref{eq:rho-gradient-mse} requires only $\E_Q[W_k^2\|f_k\|_2^2]<\infty$. The bounded-contribution condition is used solely to obtain the standard form $\|f_k\|_\infty^2/(N\rho_k)$. More generally, define $M_{2,k}:=\E_Q[W_k^2\|f_k\|_2^2]/\E_Q[W_k^2]$. The same calculation gives $\E\|\widehat g_k-g_k\|_2^2\le M_{2,k}/(N\rho_k)$. We use the bounded form in the main text to match conventional importance-sampling notation and make the role of normalized ESS explicit.
+If $\|f_k\|_\infty<\infty$, then
+$M_{2,k}\le\|f_k\|_\infty^2$. Lemma~\ref{lem:rho-gradient-reliability}
+therefore recovers the conventional radius
+$\|f_k\|_\infty/\sqrt{\delta N\rho_k}$ as a direct special case.
 
 \bibliographystyle{plainnat}
 \bibliography{references}

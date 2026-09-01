@@ -3,17 +3,21 @@
 ## Exactly solvable Gaussian one-step example
 
 `gaussian_quadratic_one_step.py` generates the main-text theoretical
-IS/PPO example.
+IS/TIS/PPO example.
 The current policy is `Normal(theta, 1)`, the rollout policy is
 `Normal(theta - delta, 1)`, and the reward is quadratic. The script evaluates
-the IS and PPO-style masked estimators from closed-form truncated Gaussian
-polynomial moments. It uses no Monte Carlo samples.
+the IS, TIS-3, and PPO-style masked estimators from closed-form truncated
+Gaussian polynomial moments. It also uses a fixed-seed coverage experiment to
+check the high-probability IS reliability event and its adaptive-step
+improvement consequence.
 
-The reported setting is `N=32`, PPO radius `0.20`, gradient signal `g=2`, and
-step size `eta=0.40`. It distinguishes the persistent estimator-risk crossover
-from the exact one-step improvement crossover and records the point below which
-neither update has a positive certificate. The displayed branch uses
-`delta >= 0.20`, corresponding to normalized population ESS at most `0.961`.
+The reported setting is `N=32`, TIS cap `3`, PPO radius `0.20`, gradient signal
+`g=2`, and step size `eta=0.40`. The four panels instantiate the finite-moment
+IS error bound, the 90% adaptive-step guarantee, the full-certificate crossover
+for TIS and PPO, and exact fixed-step policy improvement. The displayed branch
+uses normalized population ESS from `0.9` down to `0.005`. Exact moments give
+the substantive IS--TIS3 crossover at `rho=0.105` and the pairwise IS--PPO
+crossover at `rho=0.0392`; TIS-3 is the global low-ESS oracle on this path.
 
 Run from the repository root:
 

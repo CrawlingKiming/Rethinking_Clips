@@ -1,8 +1,10 @@
-"""Exactly solvable one-step IS/PPO comparison for a Gaussian bandit.
+"""Exact IS/TIS/PPO one-step comparison for a Gaussian bandit.
 
 The rollout and current policies are unit-variance Gaussians separated by
-``delta``.  All estimator moments are evaluated from truncated Gaussian
-polynomial moments, so the reported curves contain no Monte Carlo error.
+``delta``. Estimator moments, crossover margins, and expected policy gains are
+evaluated from truncated Gaussian polynomial moments. A fixed-seed Monte Carlo
+experiment separately checks the finite-moment reliability event and its
+adaptive-step policy-improvement consequence.
 """
 
 from __future__ import annotations
@@ -27,14 +29,22 @@ from paperstyle import FAM, FULL, format_sig, use_paper_style
 G = 2.0
 N = 32
 EPSILON = 0.2
+TIS_CAP = 3.0
 ETA = 0.4
 SMOOTHNESS = 1.0
-MINIMUM_DELTA = 0.2
 MINIMUM_RHO = 0.005
+MAXIMUM_RHO = 0.9
+DELTA_CONFIDENCE = 0.1
+MONTE_CARLO_POINTS = 81
+MONTE_CARLO_BATCHES = 100_000
+MONTE_CARLO_CHUNK_SIZE = 25_000
+MONTE_CARLO_SEED = 20260901
 
 IS_COLOR = FAM[0]
 PPO_COLOR = FAM[1]
+TIS_COLOR = FAM[2]
 NEUTRAL_COLOR = "#59636E"
+ORACLE_COLOR = "#1F1F1F"
 
 
 def normal_pdf(value: float) -> float:
@@ -166,11 +176,43 @@ def estimator_moments(delta: float) -> dict[str, float]:
         polynomial_normal_integral(F_COEFFICIENTS, lower, upper)
         for lower, upper in intervals
     )
-    raw_single_second = math.exp(delta * delta) * polynomial_normal_integral(
+    tis_boundary = (
+        (math.log(TIS_CAP) - 0.5 * delta * delta) / delta
+        if delta > 0.0
+        else math.inf
+    )
+    tis_mean = polynomial_normal_integral(
+        F_COEFFICIENTS,
+        -math.inf,
+        tis_boundary,
+    ) + TIS_CAP * polynomial_normal_integral(
+        F_COEFFICIENTS,
+        tis_boundary,
+        math.inf,
+        mean=-delta,
+    )
+    is_tilted_second_moment = polynomial_normal_integral(
         F_SQUARED_COEFFICIENTS,
         -math.inf,
         math.inf,
         mean=delta,
+    )
+    is_single_second = math.exp(delta * delta) * is_tilted_second_moment
+    tis_single_second = (
+        math.exp(delta * delta)
+        * polynomial_normal_integral(
+            F_SQUARED_COEFFICIENTS,
+            -math.inf,
+            tis_boundary,
+            mean=delta,
+        )
+        + TIS_CAP * TIS_CAP
+        * polynomial_normal_integral(
+            F_SQUARED_COEFFICIENTS,
+            tis_boundary,
+            math.inf,
+            mean=-delta,
+        )
     )
     ppo_single_second = math.exp(delta * delta) * sum(
         polynomial_normal_integral(
@@ -185,12 +227,15 @@ def estimator_moments(delta: float) -> dict[str, float]:
     row: dict[str, float] = {
         "delta": delta,
         "rho": math.exp(-delta * delta),
-        "raw_mean": G,
+        "is_mean": G,
+        "tis_mean": tis_mean,
         "ppo_mean": ppo_mean,
-        "raw_single_second_moment": raw_single_second,
+        "is_tilted_second_moment_M2": is_tilted_second_moment,
+        "is_single_second_moment": is_single_second,
+        "tis_single_second_moment": tis_single_second,
         "ppo_single_second_moment": ppo_single_second,
     }
-    for rule in ("raw", "ppo"):
+    for rule in ("is", "tis", "ppo"):
         mean = row[f"{rule}_mean"]
         single_second = row[f"{rule}_single_second_moment"]
         variance = max(single_second - mean * mean, 0.0) / N
@@ -206,6 +251,60 @@ def estimator_moments(delta: float) -> dict[str, float]:
         row[f"{rule}_certificate"] = certificate
         # The smoothness certificate is exact for this quadratic objective.
         row[f"{rule}_expected_gain"] = certificate
+
+    # This finite-moment specialization replaces a uniform bound on f by the
+    # exact tilted second moment M2(delta). It yields
+    #   MSE(IS) <= M2(delta) / (N rho(delta))
+    # and the corresponding Markov error radius at confidence 1-delta.
+    row["is_finite_moment_mse_bound"] = (
+        is_tilted_second_moment / (N * row["rho"])
+    )
+    row["is_finite_moment_error_radius"] = math.sqrt(
+        row["is_finite_moment_mse_bound"] / DELTA_CONFIDENCE
+    )
+
+    for rule in ("tis", "ppo"):
+        mse_reduction = row["is_mse"] - row[f"{rule}_mse"]
+        second_moment_reduction = (
+            row["is_second_moment"] - row[f"{rule}_second_moment"]
+        )
+        discounted_reduction = (
+            1.0 - SMOOTHNESS * ETA
+        ) * second_moment_reduction
+        crossover_margin = mse_reduction - discounted_reduction
+        certificate_gap = (
+            row[f"{rule}_certificate"] - row["is_certificate"]
+        )
+        row[f"{rule}_mse_reduction_vs_is"] = mse_reduction
+        row[f"{rule}_second_moment_reduction_vs_is"] = (
+            second_moment_reduction
+        )
+        row[
+            f"{rule}_discounted_second_moment_reduction_vs_is"
+        ] = discounted_reduction
+        row[f"{rule}_crossover_margin"] = crossover_margin
+        row[f"{rule}_certificate_gap_vs_is"] = certificate_gap
+        row[f"{rule}_certificate_identity_error"] = certificate_gap - (
+            0.5 * ETA * crossover_margin
+        )
+        row[f"{rule}_alignment_loss_vs_is"] = (
+            G * G - G * row[f"{rule}_mean"]
+        )
+        row[f"{rule}_smoothness_penalty_reduction_vs_is"] = (
+            0.5
+            * SMOOTHNESS
+            * ETA
+            * second_moment_reduction
+        )
+
+    candidates = {
+        "no update": 0.0,
+        "IS": row["is_certificate"],
+        f"TIS {TIS_CAP:g}": row["tis_certificate"],
+        "PPO": row["ppo_certificate"],
+    }
+    row["oracle_expected_gain"] = max(candidates.values())
+    row["oracle_rule"] = max(candidates, key=candidates.get)
     return row
 
 
@@ -232,7 +331,7 @@ def crossover_summary() -> dict[str, float]:
     mse_delta = bisect_root(
         lambda delta: (
             estimator_moments(delta)["ppo_mse"]
-            - estimator_moments(delta)["raw_mse"]
+            - estimator_moments(delta)["is_mse"]
         ),
         1.2,
         1.7,
@@ -240,13 +339,18 @@ def crossover_summary() -> dict[str, float]:
     certificate_delta = bisect_root(
         lambda delta: (
             estimator_moments(delta)["ppo_certificate"]
-            - estimator_moments(delta)["raw_certificate"]
+            - estimator_moments(delta)["is_certificate"]
         ),
         1.6,
         2.0,
     )
-    raw_zero_delta = bisect_root(
-        lambda delta: estimator_moments(delta)["raw_certificate"],
+    tis_certificate_delta = bisect_root(
+        lambda delta: estimator_moments(delta)["tis_crossover_margin"],
+        1.3,
+        1.7,
+    )
+    is_zero_delta = bisect_root(
+        lambda delta: estimator_moments(delta)["is_certificate"],
         1.6,
         2.0,
     )
@@ -262,8 +366,12 @@ def crossover_summary() -> dict[str, float]:
         "certificate_crossover_rho": math.exp(
             -certificate_delta * certificate_delta
         ),
-        "raw_zero_delta": raw_zero_delta,
-        "raw_zero_rho": math.exp(-raw_zero_delta * raw_zero_delta),
+        "tis_certificate_crossover_delta": tis_certificate_delta,
+        "tis_certificate_crossover_rho": math.exp(
+            -tis_certificate_delta * tis_certificate_delta
+        ),
+        "is_zero_delta": is_zero_delta,
+        "is_zero_rho": math.exp(-is_zero_delta * is_zero_delta),
         "ppo_zero_delta": ppo_zero_delta,
         "ppo_zero_rho": math.exp(-ppo_zero_delta * ppo_zero_delta),
     }
@@ -274,12 +382,23 @@ def validate_crossovers(summary: dict[str, float]) -> None:
     certificate_state = estimator_moments(
         summary["certificate_crossover_delta"]
     )
+    tis_state = estimator_moments(
+        summary["tis_certificate_crossover_delta"]
+    )
     stop_state = estimator_moments(summary["ppo_zero_delta"])
     residuals = {
-        "MSE crossover": abs(mse_state["raw_mse"] - mse_state["ppo_mse"]),
-        "certificate crossover": abs(
-            certificate_state["raw_certificate"]
+        "IS-PPO MSE crossover": abs(
+            mse_state["is_mse"] - mse_state["ppo_mse"]
+        ),
+        "IS-PPO certificate crossover": abs(
+            certificate_state["is_certificate"]
             - certificate_state["ppo_certificate"]
+        ),
+        "IS-TIS certificate crossover": abs(
+            tis_state["is_certificate"] - tis_state["tis_certificate"]
+        ),
+        "IS-TIS corollary crossover": abs(
+            tis_state["tis_crossover_margin"]
         ),
         "PPO zero certificate": abs(stop_state["ppo_certificate"]),
     }
@@ -289,129 +408,351 @@ def validate_crossovers(summary: dict[str, float]) -> None:
 
     intermediate = estimator_moments(1.6)
     if not (
-        intermediate["ppo_mse"] < intermediate["raw_mse"]
-        and intermediate["raw_certificate"]
+        intermediate["ppo_mse"] < intermediate["is_mse"]
+        and intermediate["is_certificate"]
         > intermediate["ppo_certificate"]
     ):
         raise AssertionError("the intermediate oracle-separation regime failed")
     low_support = estimator_moments(2.1)
     if not (
-        low_support["ppo_certificate"] > low_support["raw_certificate"]
+        low_support["ppo_certificate"] > low_support["is_certificate"]
         and low_support["ppo_certificate"] > 0.0
     ):
         raise AssertionError("the low-support PPO regime failed")
 
+    for state in (mse_state, certificate_state, tis_state, stop_state):
+        for rule in ("tis", "ppo"):
+            if abs(state[f"{rule}_certificate_identity_error"]) > 1e-10:
+                raise FloatingPointError(
+                    f"{rule.upper()} certificate identity failed"
+                )
 
-def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None:
+
+def monte_carlo_reliability(
+    delta: float,
+    error_radius: float,
+    rng: np.random.Generator,
+) -> dict[str, float]:
+    """Check the finite-moment reliability event and adaptive-step guarantee."""
+    error_event_count = 0
+    theorem_inequality_count = 0
+    positive_certificate_count = 0
+    error_event_violations = 0
+    batches_seen = 0
+
+    while batches_seen < MONTE_CARLO_BATCHES:
+        chunk_size = min(
+            MONTE_CARLO_CHUNK_SIZE,
+            MONTE_CARLO_BATCHES - batches_seen,
+        )
+        z_values = rng.normal(
+            loc=-delta,
+            scale=1.0,
+            size=(chunk_size, N),
+        )
+        weights = np.exp(delta * z_values + 0.5 * delta * delta)
+        contributions = weights * (
+            G * z_values * z_values
+            + 0.5 * (z_values - z_values * z_values * z_values)
+        )
+        estimates = np.mean(contributions, axis=1)
+        absolute_estimates = np.abs(estimates)
+        errors = np.abs(estimates - G)
+        error_events = errors <= error_radius
+
+        positive_parts = np.maximum(absolute_estimates - error_radius, 0.0)
+        gammas = np.zeros_like(estimates)
+        nonzero = absolute_estimates > error_radius
+        gammas[nonzero] = (
+            1.0 - error_radius / absolute_estimates[nonzero]
+        ) / SMOOTHNESS
+        actual_gains = (
+            G * gammas * estimates
+            - 0.5 * SMOOTHNESS * gammas * gammas * estimates * estimates
+        )
+        theorem_bounds = 0.5 * positive_parts * positive_parts / SMOOTHNESS
+        tolerance = 1e-12 * (
+            1.0 + np.abs(actual_gains) + np.abs(theorem_bounds)
+        )
+        theorem_events = actual_gains + tolerance >= theorem_bounds
+
+        error_event_count += int(np.count_nonzero(error_events))
+        theorem_inequality_count += int(np.count_nonzero(theorem_events))
+        positive_certificate_count += int(np.count_nonzero(nonzero))
+        error_event_violations += int(
+            np.count_nonzero(error_events & ~theorem_events)
+        )
+        batches_seen += chunk_size
+
+    if error_event_violations:
+        raise AssertionError(
+            "the adaptive-step inequality failed on the reliability event"
+        )
+
+    return {
+        "mc_error_event_coverage": (
+            error_event_count / MONTE_CARLO_BATCHES
+        ),
+        "mc_theorem_inequality_coverage": (
+            theorem_inequality_count / MONTE_CARLO_BATCHES
+        ),
+        "mc_positive_certificate_fraction": (
+            positive_certificate_count / MONTE_CARLO_BATCHES
+        ),
+        "mc_error_event_theorem_violations": float(error_event_violations),
+    }
+
+
+def validate_rows(rows: list[dict[str, float | str]]) -> None:
+    tolerance = 2e-10
+    for row in rows:
+        finite_moment_gap = (
+            row["is_finite_moment_mse_bound"] - row["is_mse"]
+        )
+        if abs(finite_moment_gap - G * G / N) > tolerance:
+            raise FloatingPointError("the finite-moment MSE identity failed")
+        for rule in ("tis", "ppo"):
+            if abs(row[f"{rule}_certificate_identity_error"]) > tolerance:
+                raise FloatingPointError(
+                    f"{rule.upper()} certificate identity failed on the grid"
+                )
+            if abs(
+                row[f"{rule}_expected_gain"]
+                - row[f"{rule}_certificate"]
+            ) > tolerance:
+                raise FloatingPointError(
+                    f"{rule.upper()} exact-gain identity failed"
+                )
+        if abs(row["is_expected_gain"] - row["is_certificate"]) > tolerance:
+            raise FloatingPointError("IS exact-gain identity failed")
+        if row["mc_error_event_coverage"] < 0.895:
+            raise AssertionError(
+                "Monte Carlo reliability-event coverage fell below tolerance"
+            )
+        if (
+            row["mc_theorem_inequality_coverage"] + 1e-12
+            < row["mc_error_event_coverage"]
+        ):
+            raise AssertionError(
+                "theorem coverage fell below reliability-event coverage"
+            )
+
+    if not all(
+        row["tis_mse"] <= min(row["is_mse"], row["ppo_mse"])
+        for row in rows
+    ):
+        raise AssertionError("TIS 3 is not the MSE oracle on the displayed path")
+    if not all(
+        row["tis_certificate"] >= row["ppo_certificate"]
+        for row in rows
+    ):
+        raise AssertionError("TIS 3 does not dominate PPO on the displayed path")
+    observed_oracles = {str(row["oracle_rule"]) for row in rows}
+    if observed_oracles != {"IS", f"TIS {TIS_CAP:g}"}:
+        raise AssertionError(f"unexpected oracle rules: {observed_oracles}")
+
+
+def make_figure(
+    rows: list[dict[str, float | str]],
+    summary: dict[str, float],
+) -> None:
     use_paper_style()
     ordered = sorted(rows, key=lambda item: item["rho"])
-    rho = np.asarray([row["rho"] for row in ordered])
-    raw_mse = np.asarray([row["raw_mse"] for row in ordered])
-    ppo_mse = np.asarray([row["ppo_mse"] for row in ordered])
-    raw_alignment = np.asarray([row["raw_mean"] / G for row in ordered])
-    ppo_alignment = np.asarray([row["ppo_mean"] / G for row in ordered])
-    raw_gain = np.asarray([row["raw_expected_gain"] for row in ordered])
-    ppo_gain = np.asarray([row["ppo_expected_gain"] for row in ordered])
+    rho = np.asarray([float(row["rho"]) for row in ordered])
+    is_mse = np.asarray([float(row["is_mse"]) for row in ordered])
+    tis_mse = np.asarray([float(row["tis_mse"]) for row in ordered])
+    ppo_mse = np.asarray([float(row["ppo_mse"]) for row in ordered])
+    is_mse_bound = np.asarray(
+        [float(row["is_finite_moment_mse_bound"]) for row in ordered]
+    )
+    error_coverage = np.asarray(
+        [float(row["mc_error_event_coverage"]) for row in ordered]
+    )
+    theorem_coverage = np.asarray(
+        [float(row["mc_theorem_inequality_coverage"]) for row in ordered]
+    )
+    positive_fraction = np.asarray(
+        [float(row["mc_positive_certificate_fraction"]) for row in ordered]
+    )
+    tis_margin = np.asarray(
+        [float(row["tis_crossover_margin"]) for row in ordered]
+    )
+    ppo_margin = np.asarray(
+        [float(row["ppo_crossover_margin"]) for row in ordered]
+    )
+    is_gain = np.asarray(
+        [float(row["is_expected_gain"]) for row in ordered]
+    )
+    tis_gain = np.asarray(
+        [float(row["tis_expected_gain"]) for row in ordered]
+    )
+    ppo_gain = np.asarray(
+        [float(row["ppo_expected_gain"]) for row in ordered]
+    )
+    oracle_gain = np.asarray(
+        [float(row["oracle_expected_gain"]) for row in ordered]
+    )
 
-    rho_mse = summary["mse_crossover_rho"]
-    rho_certificate = summary["certificate_crossover_rho"]
-    rho_stop = summary["ppo_zero_rho"]
-    maximum_rho = math.exp(-MINIMUM_DELTA * MINIMUM_DELTA)
+    rho_tis = summary["tis_certificate_crossover_rho"]
+    rho_ppo = summary["certificate_crossover_rho"]
 
     fig, axes = plt.subplots(
-        1,
-        3,
-        figsize=(FULL, 2.55),
+        2,
+        2,
+        figsize=(FULL, 4.55),
     )
-    risk_axis, alignment_axis, gain_axis = axes
+    risk_axis, coverage_axis = axes[0]
+    crossover_axis, gain_axis = axes[1]
 
-    lines = [
-        ("IS", IS_COLOR, raw_mse, raw_alignment, raw_gain),
-        ("PPO", PPO_COLOR, ppo_mse, ppo_alignment, ppo_gain),
-    ]
-    for label, color, risk, alignment, gain in lines:
-        risk_axis.plot(rho, risk, color=color, label=label)
-        alignment_axis.plot(rho, alignment, color=color, label=label)
-        gain_axis.plot(rho, gain, color=color, label=label)
-
-    risk_axis.axvline(rho_mse, color=NEUTRAL_COLOR, linestyle=":", linewidth=0.9)
+    risk_axis.plot(rho, is_mse, color=IS_COLOR, label="IS")
+    risk_axis.plot(
+        rho,
+        tis_mse,
+        color=TIS_COLOR,
+        label=rf"TIS ($c={TIS_CAP:g}$)",
+    )
+    risk_axis.plot(rho, ppo_mse, color=PPO_COLOR, label="PPO")
+    risk_axis.plot(
+        rho,
+        is_mse_bound,
+        color=IS_COLOR,
+        linestyle="--",
+        linewidth=1.0,
+        label=r"IS finite-moment bound",
+    )
     risk_axis.set_xscale("log")
     risk_axis.set_yscale("log")
-    risk_axis.set_xlim(MINIMUM_RHO, maximum_rho)
+    risk_axis.set_xlim(MINIMUM_RHO, MAXIMUM_RHO)
     risk_axis.set_xlabel(r"normalized ESS $\rho$")
     risk_axis.set_ylabel("Gradient MSE")
-    risk_axis.set_title("(a) Estimation error", loc="left")
-    risk_axis.annotate(
-        rf"$\rho_{{\rm MSE}}={format_sig(rho_mse)}$",
-        xy=(rho_mse, 0.97),
-        xycoords=("data", "axes fraction"),
-        xytext=(-3, -2),
-        textcoords="offset points",
-        ha="right",
-        va="top",
-        rotation=90,
-        fontsize=6.2,
-        color=NEUTRAL_COLOR,
+    risk_axis.set_title("(a) Exact estimator risk", loc="left")
+    risk_axis.legend(
+        loc="upper right",
+        frameon=False,
+        ncol=2,
+        columnspacing=0.8,
     )
 
-    alignment_axis.set_xscale("log")
-    alignment_axis.set_xlim(MINIMUM_RHO, maximum_rho)
-    alignment_axis.set_ylim(-0.02, 1.05)
-    alignment_axis.set_xlabel(r"normalized ESS $\rho$")
-    alignment_axis.set_ylabel(r"Retained alignment $\mu_u/g$")
-    alignment_axis.set_title("(b) Signal retained", loc="left")
+    coverage_axis.plot(
+        rho,
+        error_coverage,
+        color=IS_COLOR,
+        label="Error event",
+    )
+    coverage_axis.plot(
+        rho,
+        theorem_coverage,
+        color=TIS_COLOR,
+        linestyle="--",
+        linewidth=1.1,
+        label="Improvement inequality",
+    )
+    coverage_axis.plot(
+        rho,
+        positive_fraction,
+        color=PPO_COLOR,
+        label="Positive certificate",
+    )
+    coverage_axis.axhline(
+        1.0 - DELTA_CONFIDENCE,
+        color=NEUTRAL_COLOR,
+        linestyle=":",
+        linewidth=0.9,
+        label=rf"target $1-\delta={1.0 - DELTA_CONFIDENCE:g}$",
+    )
+    coverage_axis.set_xscale("log")
+    coverage_axis.set_xlim(MINIMUM_RHO, MAXIMUM_RHO)
+    coverage_axis.set_ylim(-0.03, 1.04)
+    coverage_axis.set_xlabel(r"normalized ESS $\rho$")
+    coverage_axis.set_ylabel("Fraction of batches")
+    coverage_axis.set_title("(b) Reliability and safe improvement", loc="left")
+    coverage_axis.legend(loc="center left", frameon=False)
+
+    crossover_axis.axhline(0.0, color=NEUTRAL_COLOR, linewidth=0.8)
+    crossover_axis.plot(
+        rho,
+        tis_margin,
+        color=TIS_COLOR,
+        label=rf"$C_{{\rm TIS{TIS_CAP:g}}}$",
+    )
+    crossover_axis.plot(
+        rho,
+        ppo_margin,
+        color=PPO_COLOR,
+        label=r"$C_{\rm PPO}$",
+    )
+    for crossover_rho, color, label, x_offset in (
+        (rho_tis, TIS_COLOR, r"$\rho_{\rm TIS}$", 4),
+        (rho_ppo, PPO_COLOR, r"$\rho_{\rm PPO}$", -4),
+    ):
+        crossover_axis.axvline(
+            crossover_rho,
+            color=color,
+            linestyle=":",
+            linewidth=0.9,
+        )
+        crossover_axis.annotate(
+            rf"{label}$={format_sig(crossover_rho)}$",
+            xy=(crossover_rho, 0.97),
+            xycoords=("data", "axes fraction"),
+            xytext=(x_offset, -2),
+            textcoords="offset points",
+            ha="left" if x_offset > 0 else "right",
+            va="top",
+            rotation=90,
+            fontsize=6.2,
+            color=color,
+        )
+    crossover_axis.set_xscale("log")
+    crossover_axis.set_yscale("symlog", linthresh=0.5, linscale=0.8)
+    crossover_axis.set_xlim(MINIMUM_RHO, MAXIMUM_RHO)
+    crossover_axis.set_xlabel(r"normalized ESS $\rho$")
+    crossover_axis.set_ylabel(r"Crossover margin $C_u$")
+    crossover_axis.set_title("(c) Full-certificate crossover", loc="left")
+    crossover_axis.legend(loc="upper right", frameon=False)
 
     gain_axis.axhline(0.0, color=NEUTRAL_COLOR, linewidth=0.8)
-    gain_axis.axvline(
-        rho_certificate,
-        color=NEUTRAL_COLOR,
+    gain_axis.plot(
+        rho,
+        oracle_gain,
+        color=ORACLE_COLOR,
         linestyle="--",
+        linewidth=2.2,
+        alpha=0.4,
+        zorder=1,
+        label="Certificate oracle",
+    )
+    gain_axis.plot(rho, is_gain, color=IS_COLOR, label="IS")
+    gain_axis.plot(
+        rho,
+        tis_gain,
+        color=TIS_COLOR,
+        label=rf"TIS ($c={TIS_CAP:g}$)",
+    )
+    gain_axis.plot(rho, ppo_gain, color=PPO_COLOR, label="PPO")
+    gain_axis.axvline(
+        rho_tis,
+        color=TIS_COLOR,
+        linestyle=":",
         linewidth=0.9,
     )
     gain_axis.axvline(
-        rho_stop,
-        color=NEUTRAL_COLOR,
-        linestyle="-.",
+        rho_ppo,
+        color=PPO_COLOR,
+        linestyle=":",
         linewidth=0.9,
     )
     gain_axis.set_xscale("log")
-    gain_axis.set_xlim(MINIMUM_RHO, maximum_rho)
-    gain_axis.set_ylim(-4.3, 1.45)
+    gain_axis.set_yscale("symlog", linthresh=0.2, linscale=0.8)
+    gain_axis.set_xlim(MINIMUM_RHO, MAXIMUM_RHO)
     gain_axis.set_xlabel(r"normalized ESS $\rho$")
-    gain_axis.set_ylabel(r"Exact gain $B_u(\eta)$")
-    gain_axis.set_title("(c) One-step improvement", loc="left")
-    gain_axis.annotate(
-        rf"$\rho_B={format_sig(rho_certificate)}$",
-        xy=(rho_certificate, 0.97),
-        xycoords=("data", "axes fraction"),
-        xytext=(-3, -2),
-        textcoords="offset points",
-        ha="right",
-        va="top",
-        rotation=90,
-        fontsize=6.2,
-        color=NEUTRAL_COLOR,
-    )
-    gain_axis.annotate(
-        rf"$\rho_{{\rm stop}}={format_sig(rho_stop)}$",
-        xy=(rho_stop, 0.97),
-        xycoords=("data", "axes fraction"),
-        xytext=(-2, -3),
-        textcoords="offset points",
-        ha="right",
-        va="top",
-        rotation=90,
-        fontsize=6.5,
-        color=NEUTRAL_COLOR,
-    )
-
-    handles, labels = risk_axis.get_legend_handles_labels()
-    fig.legend(
-        handles,
-        labels,
-        loc="outside lower center",
-        ncol=2,
+    gain_axis.set_ylabel(r"Exact expected gain $B_u(\eta)$")
+    gain_axis.set_title("(d) One-step policy improvement", loc="left")
+    gain_axis.legend(
+        loc="lower right",
         frameon=False,
+        ncol=2,
+        columnspacing=0.8,
     )
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -424,12 +765,29 @@ def make_figure(rows: list[dict[str, float]], summary: dict[str, float]) -> None
 def main() -> None:
     summary = crossover_summary()
     validate_crossovers(summary)
+    minimum_delta = math.sqrt(-math.log(MAXIMUM_RHO))
     maximum_delta = math.sqrt(-math.log(MINIMUM_RHO))
-    rows = [
-        estimator_moments(float(delta))
-        for delta in np.linspace(MINIMUM_DELTA, maximum_delta, 801)
-    ]
-    representative_rhos = (0.9607894392, 0.0773047404, 0.0121551783)
+    displayed_rhos = np.geomspace(
+        MINIMUM_RHO,
+        MAXIMUM_RHO,
+        MONTE_CARLO_POINTS,
+    )
+    rows: list[dict[str, float | str]] = []
+    rng = np.random.default_rng(MONTE_CARLO_SEED)
+    for rho in displayed_rhos:
+        delta = math.sqrt(-math.log(float(rho)))
+        row = estimator_moments(delta)
+        row.update(
+            monte_carlo_reliability(
+                delta,
+                float(row["is_finite_moment_error_radius"]),
+                rng,
+            )
+        )
+        rows.append(row)
+    validate_rows(rows)
+
+    representative_rhos = (0.9, 0.1, 0.01)
     representative = [
         estimator_moments(math.sqrt(-math.log(rho)))
         for rho in representative_rhos
@@ -452,19 +810,52 @@ def main() -> None:
             "gradient": G,
             "batch_size": N,
             "ppo_epsilon": EPSILON,
+            "tis_cap": TIS_CAP,
             "step_size": ETA,
             "smoothness": SMOOTHNESS,
         },
+        "finite_moment_reliability": {
+            "delta_confidence": DELTA_CONFIDENCE,
+            "target_coverage": 1.0 - DELTA_CONFIDENCE,
+            "monte_carlo_points": MONTE_CARLO_POINTS,
+            "batches_per_point": MONTE_CARLO_BATCHES,
+            "batch_size": N,
+            "seed": MONTE_CARLO_SEED,
+            "minimum_error_event_coverage": min(
+                float(row["mc_error_event_coverage"]) for row in rows
+            ),
+            "minimum_theorem_inequality_coverage": min(
+                float(row["mc_theorem_inequality_coverage"])
+                for row in rows
+            ),
+            "maximum_positive_certificate_fraction": max(
+                float(row["mc_positive_certificate_fraction"])
+                for row in rows
+            ),
+        },
         "displayed_branch": {
-            "minimum_delta": MINIMUM_DELTA,
+            "minimum_delta": minimum_delta,
             "maximum_delta": maximum_delta,
             "minimum_rho": MINIMUM_RHO,
-            "maximum_rho": math.exp(-MINIMUM_DELTA * MINIMUM_DELTA),
+            "maximum_rho": MAXIMUM_RHO,
         },
         "crossovers": summary,
+        "oracle": {
+            "mse_oracle_on_displayed_branch": f"TIS {TIS_CAP:g}",
+            "certificate_oracle_high_ess": "IS",
+            "certificate_oracle_low_ess": f"TIS {TIS_CAP:g}",
+            "certificate_crossover_rho": summary[
+                "tis_certificate_crossover_rho"
+            ],
+            "ppo_is_never_global": True,
+            "no_update_is_never_global": True,
+        },
         "representative_states": representative,
-        "calculation": "closed-form truncated Gaussian polynomial moments",
-        "monte_carlo_replications": 0,
+        "calculation": (
+            "closed-form truncated Gaussian polynomial moments plus "
+            "fixed-seed Monte Carlo reliability diagnostics"
+        ),
+        "monte_carlo_replications_per_rho": MONTE_CARLO_BATCHES,
     }
     json_path.write_text(json.dumps(payload, indent=2) + "\n")
     make_figure(rows, summary)
