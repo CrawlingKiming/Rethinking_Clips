@@ -39,103 +39,76 @@
 \maketitle
 
 \begin{abstract}
-Permissive policy optimization can learn rapidly from rollout data and then
-fail abruptly after many successful updates. Policy-deviation bounds explain
-why a large change can be unsafe, but they do not say when a finite rollout
-stops supporting an accurate update for the current policy. We study this
-transition through two ordered questions. First, when is the ordinary
-full-trajectory importance-sampling (IS) estimator still reliable? We show
-that normalized effective sample size (ESS) controls the policy-mismatch
-component of its finite-sample error and, through smoothness, yields a
-high-probability one-step improvement guarantee. Second, when does coefficient
-control provide a better update? Lower gradient-estimation MSE is not enough:
-the controlled estimator must also retain sufficient alignment with the
-population gradient. We capture this requirement with a full fixed-step
-improvement certificate. A Gaussian bandit instantiates the finite-moment ESS
-reliability bound, estimator crossover, and one-step policy improvement.
-Although TIS-3 has the lowest MSE along the displayed path, IS gives the better
-update at high ESS; only after effective support contracts does TIS-3 overtake
-it, while the more aggressive PPO mask never reaches the oracle envelope.
-In the reported large-model trajectories, ESS-conditioned safeguards preserve
-early learning while preventing late failure.
+
 
 \end{abstract}
 
 \section{Introduction}
+Reinforcement learning has become central to the post-training of large language
+models (LLMs) \citep{bai2022hh,shao2024deepseekmath,yu2025dapo}. In scalable
+training systems, policy optimization is often effectively off-policy: a rollout
+policy generates responses, while a trainer reuses the collected data for one or
+more gradient updates. Consequently, the current policy need not coincide with
+the policy that generated the data \citep{qi2026dppo}. This mismatch makes it
+important to control how far policy optimization moves from the rollout policy.
 
-Reinforcement learning has become central to post-training large language models \citep{bai2022hh,shao2024deepseekmath,yu2025dapo}. In scalable training systems, policy optimization is often off-policy, a rollout policy generates responses that a trainer reuses for one or more gradient updates, so the current policy need not match the policy that produced the data \citep{qi2026dppo}. 
+Controlling such policy deviation has long been a central principle in policy
+optimization. Trust Region Policy Optimization (TRPO) formalizes this principle
+through population-level policy improvement guarantees, while Proximal Policy
+Optimization (PPO) provides a simple and scalable approximation through
+ratio-based clipping \citep{schulman2015trpo,schulman2017ppo}. PPO-style
+objectives, including GRPO, inherit this intuition by clipping or masking updates
+when sampled likelihood ratios move too far from one
+\citep{shao2024deepseekmath}. The resulting theoretical picture is clear under population view: if the population gradient estimators available, keeping the updated policy sufficiently close to the rollout policy controls the error of the surrogate objective and thereby protects policy improvement.
 
-Policy optimization in traditional applications require the control of the policy optimization, preventing from deviating too much from the exisiting methods. Proximal policy optimization has been central effective to limit the resulting policy deviation, PPO-style objectives, including GRPO, use ratio-based clipping or masking \citep{schulman2015trpo,schulman2017ppo,shao2024deepseekmath}. The theoretical understanding is baed on the trust-region guarantees.. Based on the population-level view, the too much policy deviation is not good..
-
-Despite the widespread use of the theoretical understanding of trust region, the practical observation in the application of the large language models often show no-collapse or even better performance in less clipping, even the permissive updates like TIS or no-clips have shown to work. However, these estimators can learn rapidly, yet their success need not persist. Figure~\ref{fig:llm-motivation}
-shows TIS caps 3 and 5 improving for many updates before abruptly collapsing. This provokes the centroal theoretical puzzle: why can the same estimator be productive and unreliable at the same time?
+LLM training, however, presents a striking tension with this population-level view. Empirically, permissive estimators-including truncated importance sampling (TIS) with
+large caps or even unclipped updates-can remain stable and learn considerably faster. Yet this success need not persist. Figure~\ref{fig:llm-motivation} illustrates this phenomenon: TIS with caps 3 and 5 improves steadily for many
+updates before abruptly collapsing. The same update rule can therefore be highly
+effective for a long period and suddenly become unreliable. This raises the
+central question of this paper: \emph{when does a permissive policy-gradient
+estimator cease to provide a reliable update?}
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/motivation/overall.pdf}
   \caption{Delayed failure under permissive TIS updates on Qwen3-30B-A3B.
-  Both TIS 3 and TIS 5 improve AIME-2024 mean@16 for many updates, an ESS
-  collapse emerges, and performance subsequently fails. This ordering
-  motivates the question of when a finite rollout stops supporting a reliable
-  policy-gradient update.}
+  TIS with caps 3 and 5 improves AIME-2024 mean@16 for many updates before
+  effective sample size (ESS) deteriorates and performance subsequently
+  collapses. The delayed transition motivates our central question: when does a
+  finite rollout cease to support a reliable policy-gradient update?}
   \label{fig:llm-motivation}
 \end{figure}
 
-In this paper, we shift the 
-While classical trust-region theory predicts the policy to degrade rapidly, 
+Classical trust-region theory explains why moving too far from the rollout policy
+can be unsafe \citep{schulman2015trpo,schulman2017ppo,qi2026dppo}. It does not,
+however, explain the delayed transition in Figure~\ref{fig:llm-motivation},
+where failure follows many apparently successful updates rather than a single
+conspicuous policy shift. Repeated updates can progressively concentrate
+complete-trajectory importance weights, reducing the effective support provided
+by a finite rollout even when the empirical objective is constructed from
+factorwise coefficients. A population-level bound controls policy deviation,
+but it does not characterize whether the available rollout still contains
+enough effective information to estimate the next update reliably. The relevant
+question is therefore not only \emph{how far the policy has moved}, but also
+\emph{whether the finite rollout still supports a reliable gradient estimate}.
 
-Classical trust-region theory explains why moving too far from the rollout
-policy can be unsafe
-\citep{schulman2015trpo,schulman2017ppo,qi2026dppo}. It does not, however,
-resolve the delayed transition in Figure~\ref{fig:llm-motivation}: failure
-follows many apparently successful steps rather than one conspicuous move.
-Repeated updates can progressively concentrate complete-trajectory likelihood
-weights, reducing the effective support provided by the rollout even when the
-empirical update uses factorwise coefficients. A policy-deviation bound
-controls a population approximation; it does not track the statistical
-adequacy of the available rollout. The practical question is therefore: when
-does a finite rollout cease to support a reliable next update?
+In this paper, we resolve this tension by shifting the analysis from
+population-level policy deviation to finite-sample update reliability. We show
+that the reliability of the policy-gradient estimator plays a central role in
+determining whether an empirical update translates into policy improvement.
+This perspective recasts clipping as a form of estimator control: permissive
+estimators can preserve more of the learning signal when the rollout provides
+sufficient effective support, whereas controlling the estimator becomes
+increasingly valuable as that support deteriorates. We make this connection
+explicit through effective sample size (ESS), which quantifies the concentration
+of the importance weights underlying the finite-sample estimator. We then
+validate this prediction empirically and use it to derive a simple optimization
+rule that preserves permissive updates while they remain reliable and
+intervenes when the rollout ceases to support them.
 
-We answer this question in two stages. We first analyze the ordinary
-full-trajectory importance-sampling (IS) estimator, for which normalized
-effective sample size (ESS) replaces the nominal batch size $N$ with the
-effective count $N\rho$ in the finite-sample error bound. Combined with
-smoothness, this yields an ESS-dependent one-step improvement guarantee. We
-then compare the factorwise coefficient-controlled estimators used in practice.
-Low ESS indicates when the IS guarantee weakens, but it does not determine
-which alternative update is better. Clipping or truncation can reduce sampling
-variation and MSE while also removing useful population-gradient alignment. We
-therefore derive a full fixed-step certificate that determines when the risk
-reduction is sufficient to justify the signal removed by control.
+In this work, we develop a finite-sample perspective on policy optimization that explains when permissive updates remain reliable and when stronger control becomes necessary. Our contributions are threefold. \textbf{Finite-Sample Policy Improvement:} We derive a policy-improvement analysis that explicitly accounts for the reliability of the empirical gradient estimator, complementing the population-level view of policy deviation with the statistical adequacy of the available rollout. \textbf{Estimator Reliability and ESS:} We interpret clipping and truncation as forms of estimator control and establish a direct connection between gradient-estimator reliability and effective sample size (ESS), explaining why permissive updates can learn rapidly when effective support is sufficient but become unstable as importance weights concentrate. \textbf{Reliability-Aware Optimization:} Guided by this analysis, we propose a simple optimization rule that preserves permissive updates while the rollout remains reliable and increases control only when reliability deteriorates. Controlled simulations and large-scale LLM reasoning experiments validate these predictions and demonstrate an improved stability-learning tradeoff over fixed clipping strategies.
 
-An analytically tractable Gaussian bandit then follows the theory in order.
-It first checks the finite-moment ESS reliability bound and safe-step guarantee,
-then computes the pairwise certificate crossovers of TIS and PPO against IS.
-The result
-isolates the missing term in an MSE-only comparison: TIS-3 has the lowest MSE
-throughout the displayed path, yet IS remains the better update at high ESS
-because it retains more useful alignment. Large-model trajectories establish
-the operational consequence. Sample ESS exposes support loss under both TIS 3
-and an unclipped update, while ESS-conditioned safeguards preserve permissive
-learning and activate control only in the low-support regime. On
-Qwen3-30B-A3B, ungated TIS 3 collapses to $0.417\%$, whereas the
-ESS-conditioned TIS-3/Clip-Higher trajectory retains $44.8\%$ at step 200.
 
-\subsection{Contributions}
-
-\begin{enumerate}
-  \item We show that normalized ESS controls the policy-mismatch component of
-  the finite-sample error of the full-trajectory IS gradient estimator and
-  yields an ESS-dependent one-step population-improvement guarantee.
-  \item We derive a fixed-step certificate that separates MSE reduction from
-  lost population-gradient alignment and identifies when coefficient control
-  provides the stronger update.
-  \item We instantiate the finite-moment ESS reliability bound in a Gaussian
-  bandit, followed by exact certificate comparisons among IS, TIS, and PPO and
-  one-step policy improvement; we then show in
-  large-model training that ESS supplies an actionable timing signal for
-  safeguards that prevent late failure.
-\end{enumerate}
 
 \section{Related work}
 
@@ -174,163 +147,196 @@ and then ask when an intervention can recover reliability.
 \section{Preliminaries}
 \label{sec:setting}
 
-This section provides the background and notation used in the following
-analysis.
+This section develops the estimator formulation used throughout our analysis.
+For a fixed rollout policy, change of measure expresses the off-policy policy
+gradient as an importance-weighted population mean. This formulation places
+importance sampling (IS) and truncated importance sampling (TIS) within the
+class of importance-weighted estimators, while distinguishing PPO/GRPO
+clipping, which masks selected gradient contributions. We then introduce
+effective sample size (ESS) as the second-moment quantity used to characterize
+the finite-sample reliability of importance weighting.
 
-\subsection{Policy-gradient estimators from a fixed rollout}
+\subsection{Policy gradients as importance-weighted estimators}
 
-\paragraph{Problem formulation.}
 Let $X\sim\nu$ denote a context, $Q(\cdot\mid X)$ the rollout policy, and
 $P_\theta(\cdot\mid X)$ the current policy. A complete sample is $Z=(X,Y)$,
 where $Y=(Y_1,\ldots,Y_T)$ and $R(Z)$ is its reward. For each factor $t$,
 define the likelihood ratio and score
 \begin{equation}
  r_{\theta,t}(Z)
- :=\frac{P_\theta(Y_t\mid X,Y_{<t})}{Q(Y_t\mid X,Y_{<t})},
+ :=
+ \frac{P_\theta(Y_t\mid X,Y_{<t})}
+ {Q(Y_t\mid X,Y_{<t})},
  \qquad
- \ell_{\theta,t}(Z):=\nabla_\theta\log P_\theta(Y_t\mid X,Y_{<t}).
+ \ell_{\theta,t}(Z)
+ :=
+ \nabla_\theta\log P_\theta(Y_t\mid X,Y_{<t}).
  \label{eq:factor-ratio-score}
 \end{equation}
-Here $t$ indexes a policy factor, such as a token or decision step. Because
-both policies factorize along the trajectory, the complete-sample likelihood
-ratio is
+Here $t$ indexes a policy factor, such as a token or decision step. Since both
+policies factorize along the trajectory, the complete-sample likelihood ratio
+is
 \begin{equation}
- W_\theta(Z):=\frac{P_\theta(Y\mid X)}{Q(Y\mid X)}
- =\prod_{t=1}^T r_{\theta,t}(Z).
+ W_\theta(Z)
+ :=
+ \frac{P_\theta(Y\mid X)}{Q(Y\mid X)}
+ =
+ \prod_{t=1}^T r_{\theta,t}(Z).
  \label{eq:sequence-ratio}
 \end{equation}
 
 The learning objective is to maximize the expected reward
-$J(\theta):=\E_{P_\theta}[R]$. Let $A(Z):=R(Z)-b(X)$ be a baseline-centered
-reward, where $b(X)$ does not depend on $Y$. Under
+$J(\theta):=\E_{P_\theta}[R]$. Let $A(Z):=R(Z)-b(X)$ denote a
+baseline-centered reward, where $b(X)$ does not depend on $Y$. Under
 $P_\theta(\cdot\mid X)\ll Q(\cdot\mid X)$, change of measure expresses the
 population gradient under the rollout distribution:
 \begin{equation}
- g(\theta):=\nabla J(\theta)=\E_Q[W_\theta f_\theta],
+ g(\theta)
+ :=
+ \nabla J(\theta)
+ =
+ \E_Q[W_\theta f_\theta],
  \qquad
- f_\theta(Z):=A(Z)\sum_{t=1}^T \ell_{\theta,t}(Z)
- =A(Z)\nabla_\theta\log P_\theta(Y\mid X).
+ f_\theta(Z)
+ :=
+ A(Z)\sum_{t=1}^T\ell_{\theta,t}(Z)
+ =
+ A(Z)\nabla_\theta\log P_\theta(Y\mid X).
  \label{eq:true-gradient}
 \end{equation}
-While trust-region arguments motivate safeguards such as TRPO and PPO-style clipping \citep{schulman2015trpo,schulman2017ppo}, these arguments are typically made
-at the population level. Practical algorithms, however, do not observe
-$g(\theta)$ and must rely on its finite-sample counterpart. Given i.i.d.
-rollout samples $Z_i\sim\nu(dx)Q(dy\mid x)$, $i=1,\ldots,N$, the ordinary
-full-trajectory importance-sampling (IS) policy-gradient estimator is
+
+Equation~\eqref{eq:true-gradient} identifies off-policy policy-gradient
+estimation as an importance-weighted mean-estimation problem. The population
+quantity $g(\theta)$ is not observed directly. Given i.i.d.\ rollout samples
+$Z_i\sim\nu(dx)Q(dy\mid x)$, $i=1,\ldots,N$, its full-trajectory IS estimator
+is
 \begin{equation}
  \widehat g_N(\theta)
- :=\frac1N\sum_{i=1}^N W_{\theta,i}f_{\theta,i}.
+ :=
+ \frac1N\sum_{i=1}^N W_{\theta,i}f_{\theta,i}.
  \label{eq:is-gradient-estimator}
 \end{equation}
-The importance-weighted nature of this estimator can produce poor agreement
-between the finite-sample update and the population gradient
-\citep{metelli2018pois,metelli2020is}. This exposes an important but often
-overlooked question: when is the finite-sample gradient reliable?
+The policy update therefore depends on how accurately this finite
+importance-weighted mean estimates its population target.
 
-\paragraph{Choice of gradient estimator.}
-To formalize this comparison, write
+Practical policy-gradient methods differ in how they modify the coefficients
+entering this empirical mean. To represent these choices in a common form,
+write
 $\mathbf r_\theta=(r_{\theta,1},\ldots,r_{\theta,T})$ and let
 $u=(u_1,\ldots,u_T)$ be a collection of coefficient rules, with
 $u_t:\mathbb R_+^T\times\mathbb R\to\mathbb R$. Define
 \begin{equation}
  \psi_\theta(u;Z)
- :=A(Z)\sum_{t=1}^T
+ :=
+ A(Z)\sum_{t=1}^T
  u_t(\mathbf r_\theta,A(Z))\ell_{\theta,t}(Z),
  \qquad
- \widehat g_N(u;\theta):=\frac1N\sum_{i=1}^N\psi_\theta(u;Z_i).
+ \widehat g_N(u;\theta)
+ :=
+ \frac1N\sum_{i=1}^N\psi_\theta(u;Z_i).
  \label{eq:coefficient-rule-estimator}
 \end{equation}
 
-Existing ratio-based policy-gradient estimators can be represented by
-particular choices of $u$. The IS estimator sets
-$u_{\mathrm{IS},t}=W_\theta$ for every factor. One popular alternative is PPO/GRPO
-ratio clipping, whose clipped surrogate induces the following gradient-masking
-rule with radius $0<\epsilon<1$
-\citep{schulman2017ppo,shao2024deepseekmath}:
+Full-trajectory IS uses
+\begin{equation}
+ u_{\mathrm{IS},t}=W_\theta
+ \qquad\text{for every }t.
+ \label{eq:is-coefficient-rule}
+\end{equation}
+A factorwise TIS rule instead caps the importance coefficient,
+\begin{equation}
+ u_{\mathrm{T},t}(\mathbf r,A)
+ :=
+ \min\{r_t,c\},
+ \label{eq:tis-coefficient-rule}
+\end{equation}
+while retaining the corresponding score contribution. PPO/GRPO ratio
+clipping operates differently: the clipped surrogate induces the
+advantage-dependent gradient-masking rule
+\citep{schulman2017ppo,shao2024deepseekmath}
 \begin{equation}
  u_{\mathrm{P},t}(\mathbf r,A)
- :=r_t\left[
+ :=
+ r_t\left[
  \mathbf 1\{A\ge0,\ r_t\le1+\epsilon\}
- +\mathbf 1\{A<0,\ r_t\ge1-\epsilon\}
- \right].
+ +
+ \mathbf 1\{A<0,\ r_t\ge1-\epsilon\}
+ \right],
+ \qquad 0<\epsilon<1.
  \label{eq:ppo-coefficient-rule}
 \end{equation}
 
-Such clipping rules create a conventional bias--variance tradeoff. More
-aggressive clipping can reduce sampling variation, but it can also increase
-bias by removing gradient terms. This raises the natural question: what governs
-the reliability of a gradient estimator, and when is clipping worth the signal
-it removes? We answer the first part by introducing R\'enyi divergence and
-effective sample size (ESS).
+IS and TIS are both importance-weighted estimators: truncation changes the
+magnitude of selected importance coefficients while retaining their gradient
+contributions. PPO/GRPO clipping instead removes selected contributions once
+the clipping condition is active. This distinction leads to two questions that
+motivate the theoretical analysis. First, when is an importance-weighted
+policy-gradient estimator reliable at finite sample size? Second, when does
+the reduction in sampling variation from clipping compensate for the gradient
+signal removed by masking?
 
-\subsection{Gradient estimators and R\'enyi divergence}
+\subsection{Importance-weight concentration and effective sample size}
 
-The dispersion of the importance weights indicates how dissimilar $P_\theta$
-and $Q$ are. R\'enyi divergence formalizes this notion as an
-information-theoretic dissimilarity between probability measures
-\citep{renyi1961entropy,vanerven2014renyi}, while importance-sampling analyses
-connect it to the finite-sample behavior of importance-weighted means
-\citep{metelli2018pois,metelli2020is}.
-
-R\'enyi divergence is a family of measures indexed by a moment order
-$\alpha>1$. For the current and rollout policies, define
+The finite-sample behavior of an importance-weighted mean depends on the
+dispersion of its likelihood weights
+\citep{metelli2018pois,metelli2020is}. R\'enyi divergence provides a
+second-moment characterization of this dispersion. For $\alpha>1$, define
 \begin{equation}
  D_\alpha(P_\theta\|Q)
- :=\frac{1}{\alpha-1}\log\E_Q[W_\theta^\alpha],
+ :=
+ \frac{1}{\alpha-1}\log\E_Q[W_\theta^\alpha],
  \qquad
- d_\alpha(P_\theta\|Q):=\exp\{D_\alpha(P_\theta\|Q)\}.
+ d_\alpha(P_\theta\|Q)
+ :=
+ \exp\{D_\alpha(P_\theta\|Q)\}.
  \label{eq:renyi-divergence}
 \end{equation}
-Larger values of $\alpha$ place progressively more emphasis on rare, large
-likelihood ratios. The order-two case is central because
-$\E_Q[W_\theta^2]$ controls standard MSE bounds for bounded
-importance-weighted contributions. Importantly, its reciprocal is the
-normalized effective sample size \citep{metelli2018pois,metelli2020is}:
+The order-two case is central to our analysis because
+$\E_Q[W_\theta^2]$ enters directly into the second-moment error of
+importance-weighted estimators. Its reciprocal defines the population
+normalized effective sample size
+\citep{renyi1961entropy,vanerven2014renyi,metelli2018pois,metelli2020is}:
 \begin{equation}
  \rho_\theta
- :=\frac{1}{d_2(P_\theta\|Q)}
- =\frac{1}{\E_Q[W_\theta^2]}
- =\exp\{-D_2(P_\theta\|Q)\}.
+ :=
+ \frac{1}{d_2(P_\theta\|Q)}
+ =
+ \frac{1}{\E_Q[W_\theta^2]}
+ =
+ \exp\{-D_2(P_\theta\|Q)\}.
  \label{eq:population-ess}
 \end{equation}
-Its observable normalized sample analogue is
-\begin{equation}
- \widehat\rho_\theta
- :=\frac{\left(\sum_{i=1}^N W_{\theta,i}\right)^2}
- {N\sum_{i=1}^N W_{\theta,i}^2}.
- \label{eq:sample-ess}
-\end{equation}
-It lies in $[1/N,1]$ and is computed directly from the complete-trajectory
-weights in the batch used for the update.
-When $\E_Q[W_\theta^2]<\infty$, Jensen's inequality and
-$\E_Q[W_\theta]=1$ give $\rho_\theta\in(0,1]$, and $N\rho_\theta$ is the
-effective sample count corresponding to nominal batch size $N$. As the second
-moment of the likelihood ratio grows, both $\rho_\theta$ and this effective
-count contract. The identity
-$\E_Q[(W_\theta-1)^2]=\rho_\theta^{-1}-1$ shows that $\rho_\theta$ is exactly
-the inverse second-moment measure of ratio dispersion.
+We denote its sample analogue by $\widehat\rho_\theta$.
 
-Importance-sampling theory makes this quantity operational. If
-$\|f_\theta\|_\infty:=\sup_z\|f_\theta(z)\|_2<\infty$, the MSE of the IS estimator is at
-most $\|f_\theta\|_\infty^2/(N\rho_\theta)$. Normalized ESS therefore captures
-the policy-mismatch component of IS reliability. The next section
-determines when that reliability is sufficient for improvement and then asks
-whether coefficient control offers a better update.
+When $\E_Q[W_\theta^2]<\infty$, Jensen's inequality together with
+$\E_Q[W_\theta]=1$ gives $\rho_\theta\in(0,1]$, and $N\rho_\theta$
+is the corresponding population effective sample count for a nominal sample
+size $N$. Moreover,
+\begin{equation}
+ \E_Q[(W_\theta-1)^2]
+ =
+ \rho_\theta^{-1}-1.
+ \label{eq:ess-ratio-dispersion}
+\end{equation}
+Thus, normalized ESS is directly determined by the second-moment dispersion of
+the complete-trajectory likelihood ratio. The next section shows how this same
+second moment enters gradient-estimation error and, through that error, policy
+improvement.
+
 
 \section{Theoretical Analysis}
 \label{sec:theory}
 
-This section answers the preceding questions in order. We first connect
-gradient-estimator reliability to policy improvement, then use normalized ESS
-to control the reliability of the IS estimator, and finally ask when clipping
-provides the stronger update.
+The estimator formulation above leaves two questions. The first is how
+finite-sample gradient error affects policy improvement and how ESS enters this
+error for importance weighting. The second is when modifying the estimator
+through clipping produces a stronger update despite removing gradient
+contributions. We address these questions in turn.
 
 \subsection{Gradient-estimator reliability and policy improvement}
 
-The preceding section distinguishes the finite-sample IS estimate from the
-population gradient it targets. Here, we connect estimator reliability to a
-lower bound on policy improvement. The following lemma formalizes this
-connection for an arbitrary gradient estimator.
+We first establish the optimization consequence of gradient-estimation error.
+The following result applies to an arbitrary gradient estimator.
 
 \begin{lemma}[A reliable gradient estimate yields policy improvement]
 \label{lem:gradient-error-progress}
@@ -348,40 +354,49 @@ $\widehat g=0$. Then
 \end{equation}
 \end{lemma}
 
-This deterministic lemma uses the same smoothness mechanism as existing
-policy-gradient analyses
-\citep{pirotta2013adaptive,papini2022smoothing}. Its implication is direct:
-the error radius measures how far the finite-sample direction can lie from the
-population gradient. When this radius is smaller than
-$\|\widehat g\|_2$, the estimator yields a positive lower bound on policy
-improvement.
+Lemma~\ref{lem:gradient-error-progress} uses the same smoothness mechanism as
+existing policy-gradient analyses
+\citep{pirotta2013adaptive,papini2022smoothing}. It makes gradient-estimator
+reliability directly relevant to optimization: whenever the error radius is
+smaller than $\|\widehat g\|_2$, the resulting direction admits a positive
+one-step improvement certificate.
 
-\paragraph{ESS and the IS update.}
-However, the population gradient is unknown, so this reliability cannot be
-evaluated directly. Normalized ESS provides the bridge: for the IS estimator,
-it converts likelihood-ratio dispersion into a bound on gradient-estimation
-error.
-At update $k$, condition on the preceding updates and write
-$W_k:=W_{\theta_k}$, $f_k:=f_{\theta_k}$,
-$g_k:=g(\theta_k)$, $\widehat g_k:=\widehat g_N(\theta_k)$, and
+\paragraph{ESS and the IS estimator.}
+For IS, the estimation error can be expressed explicitly in terms of the same
+weight second moment that defines ESS. At update $k$, condition on the
+preceding updates and write
+$W_k:=W_{\theta_k}$,
+$f_k:=f_{\theta_k}$,
+$g_k:=g(\theta_k)$,
+$\widehat g_k:=\widehat g_N(\theta_k)$, and
 $\rho_k:=\rho_{\theta_k}$. Assume that the $N$ rollout samples are independent
-draws from $Q$, $d_2(P_{\theta_k}\|Q)<\infty$, and
-$\E_Q[W_k^2\|f_k\|_2^2]<\infty$. Define the
-importance-weighted contribution scale
+draws from $Q$, that $d_2(P_{\theta_k}\|Q)<\infty$, and that
+$\E_Q[W_k^2\|f_k\|_2^2]<\infty$. Define the importance-weighted contribution
+scale
 \begin{equation}
- M_{2,k}:=
- \frac{\E_Q[W_k^2\|f_k\|_2^2]}{\E_Q[W_k^2]}
- =\rho_k\E_Q[W_k^2\|f_k\|_2^2].
+ M_{2,k}
+ :=
+ \frac{\E_Q[W_k^2\|f_k\|_2^2]}
+ {\E_Q[W_k^2]}
+ =
+ \rho_k\E_Q[W_k^2\|f_k\|_2^2].
  \label{eq:weighted-contribution-scale}
 \end{equation}
-This factorizes the weighted second moment as $M_{2,k}/\rho_k$: $\rho_k$
-records ratio dispersion, while $M_{2,k}$ also captures its coupling with the
-score--advantage magnitude.
+This factorizes the weighted second moment as $M_{2,k}/\rho_k$:
+$\rho_k^{-1}$ captures the concentration of the importance weights, while
+$M_{2,k}$ captures the magnitude of the associated score--advantage
+contributions under the squared-weight tilt.
 
 Because the IS estimator is unbiased, its exact mean-squared error is
 \begin{equation}
  \E\|\widehat g_k-g_k\|_2^2
- =\frac1N\left\{\frac{M_{2,k}}{\rho_k}-\|g_k\|_2^2\right\}.
+ =
+ \frac1N
+ \left\{
+ \frac{M_{2,k}}{\rho_k}
+ -
+ \|g_k\|_2^2
+ \right\}.
  \label{eq:rho-gradient-mse}
 \end{equation}
 Consequently,
@@ -391,13 +406,14 @@ Consequently,
  \frac{M_{2,k}}{N\rho_k}.
  \label{eq:rho-gradient-mse-bound}
 \end{equation}
-Likelihood-ratio dispersion therefore enters through the effective count
-$N\rho_k$, replacing the nominal sample size $N$, while $M_{2,k}$ records the
-remaining contribution scale. If $f_k$ is bounded, then
-$M_{2,k}\le\|f_k\|_\infty^2$, recovering the familiar bounded-integrand form.
-Equation~\eqref{eq:rho-gradient-mse-bound} controls the mean-squared error; the
-next lemma converts this result into a high-probability error radius for the
-realized update.
+Equation~\eqref{eq:rho-gradient-mse} separates the contribution of
+importance-weight concentration from the magnitude of the gradient
+contributions attached to those weights. At fixed $M_{2,k}$, decreasing ESS
+increases the finite-sample error through the factor $\rho_k^{-1}$. If $f_k$
+is bounded, then $M_{2,k}\le\|f_k\|_\infty^2$, recovering the familiar
+bounded-integrand form.
+
+The MSE bound yields a high-probability error radius for the realized gradient.
 
 \begin{lemma}[Normalized ESS controls the gradient-error radius]
 \label{lem:rho-gradient-reliability}
@@ -410,12 +426,11 @@ $1-\delta$,
  \label{eq:rho-gradient-concentration}
 \end{equation}
 \end{lemma}
-Holding the contribution scale fixed, the radius grows as
-$(N\rho_k)^{-1/2}$. Thus, low ESS weakens the reliability guarantee for the IS
-gradient, consistent with the motivating example in the introduction. We now
-combine this radius with
-Lemma~\ref{lem:gradient-error-progress} to obtain an ESS-dependent improvement
-guarantee.
+
+Holding the contribution scale fixed, the reliability radius therefore grows
+as $(N\rho_k)^{-1/2}$. Combining this result with
+Lemma~\ref{lem:gradient-error-progress} yields the corresponding
+ESS-dependent policy-improvement guarantee.
 
 \begin{theorem}[ESS-dependent improvement for the IS estimator]
 \label{thm:permissive-reliability}
@@ -423,11 +438,17 @@ Under the conditions of Lemma~\ref{lem:rho-gradient-reliability}, suppose that
 $J$ is $L_k$-smooth along the update segment for $L_k>0$. For any
 $0<\delta\le1$, define
 \begin{equation}
- \varepsilon_k(\delta):=
+ \varepsilon_k(\delta)
+ :=
  \sqrt{\frac{M_{2,k}}{\delta N\rho_k}},
  \qquad
- \gamma_k:=\frac1{L_k}
- \left(1-\frac{\varepsilon_k(\delta)}{\|\widehat g_k\|_2}\right)_+,
+ \gamma_k
+ :=
+ \frac1{L_k}
+ \left(
+ 1-\frac{\varepsilon_k(\delta)}
+ {\|\widehat g_k\|_2}
+ \right)_+,
  \label{eq:is-safe-step}
 \end{equation}
 with $\gamma_k=0$ when $\widehat g_k=0$. Then, with probability at least
@@ -443,58 +464,71 @@ $1-\delta$,
 \end{equation}
 \end{theorem}
 
-Theorem~\ref{thm:permissive-reliability} makes the role of ESS explicit. Its
-lower bound is positive when
-\[
+Theorem~\ref{thm:permissive-reliability} makes the optimization consequence of
+the finite-sample IS error explicit. The certificate is positive whenever
+\begin{equation}
  \|\widehat g_k\|_2
  >
  \sqrt{\frac{M_{2,k}}{\delta N\rho_k}}.
-\]
-Thus, the IS update remains certifiably useful while effective support is
-sufficiently large relative to the observed gradient signal. Holding the other
-terms fixed, both the admissible step and the certified improvement shrink as
-ESS falls. This complements population policy-deviation guarantees, which
-characterize the consequences of changing the policy, by controlling the
-finite-rollout direction used to make that change. Having established when the
-IS update is reliable, we next ask when an alternative gradient estimator
-provides the stronger one-step certificate.
+ \label{eq:positive-is-certificate}
+\end{equation}
+Hence the usefulness of the importance-weighted update depends on the
+estimated gradient signal relative to its finite-sample error. Holding
+$M_{2,k}$ and the observed gradient magnitude fixed, decreasing ESS enlarges
+the error radius, contracts the admissible step, and weakens the certified
+improvement. This provides the finite-sample link between importance-weight
+concentration, gradient reliability, and policy improvement.
 
-\subsection{Choosing an alternative gradient estimator}
+\subsection{When does clipping improve the update?}
 \label{sec:clipping-recovery}
 
-The preceding result connects the reliability of the IS estimator to policy
-improvement. When this guarantee weakens, one may instead use a controlled
-coefficient rule, such as truncated IS or PPO-style masking. We compare a
-general rule $u$ with IS in two steps: first as a question of gradient
-estimation, and then as a question of policy improvement at a common fixed
-step. Write
-$\widehat g_k(u):=\widehat g_N(u;\theta_k)$. For a rule $u$, adding and
-subtracting the estimator mean gives the MSE decomposition
+The preceding result characterizes the reliability of importance-weighted
+gradient estimation. Determining whether clipping is beneficial requires a
+separate comparison because clipping changes the gradient estimator itself.
+The statistical comparison is between the sampling variation removed by the
+modification and the bias introduced by changing or masking gradient
+contributions.
+
+Write
+$\widehat g_k(u):=\widehat g_N(u;\theta_k)$. For an arbitrary coefficient
+rule $u$, adding and subtracting the estimator mean gives
 \begin{equation}
  \begin{aligned}
- m_k(u)&:=\E\|\widehat g_k(u)-g_k\|_2^2\\
- &=\|\E[\widehat g_k(u)]-g_k\|_2^2
- +\E\|\widehat g_k(u)-\E[\widehat g_k(u)]\|_2^2.
+ m_k(u)
+ &:=
+ \E\|\widehat g_k(u)-g_k\|_2^2\\
+ &=
+ \|\E[\widehat g_k(u)]-g_k\|_2^2
+ +
+ \E\|\widehat g_k(u)-\E[\widehat g_k(u)]\|_2^2.
  \end{aligned}
  \label{eq:clipping-risk-decomposition}
 \end{equation}
 The two terms are squared bias and sampling variation. Since the IS estimator
-is unbiased, a controlled rule has lower MSE exactly when its reduction in
-sampling variation exceeds the squared bias introduced by changing the
-coefficients. We call this the estimator-level bias--variance crossover. The
-next theorem gives the expected-improvement certificate used to compare such
-estimators at a common fixed step.
+is unbiased, an alternative estimator has lower MSE exactly when its reduction
+in sampling variation exceeds the squared bias introduced by modifying the
+coefficients. This gives the estimator-level bias--variance crossover.
+
+Lower MSE alone, however, does not determine the ordering of policy
+improvement: modifying the estimator can also remove components aligned with
+the population gradient. To compare estimators rather than step-size rules, we
+therefore hold the optimization step fixed. The following theorem gives the
+corresponding expected-improvement certificate.
 
 \begin{theorem}[Improvement certificate]
 \label{thm:fixed-step-certificate}
 Suppose that $J$ is $L_k$-smooth on every update segment generated by a
-coefficient rule $u$ almost surely, for a constant $L_k>0$, and
-that $\E\|\widehat g_k(u)\|_2^2<\infty$. For any step size $\eta_k>0$,
+coefficient rule $u$ almost surely, for a constant $L_k>0$, and that
+$\E\|\widehat g_k(u)\|_2^2<\infty$. For any step size $\eta_k>0$,
 \begin{equation}
- \E\left[J(\theta_k+\eta_k\widehat g_k(u))-J(\theta_k)\right]
+ \E\left[
+ J(\theta_k+\eta_k\widehat g_k(u))-J(\theta_k)
+ \right]
  \ge
  \eta_k g_k^\top\E[\widehat g_k(u)]
- -\frac{L_k\eta_k^2}{2}\E\|\widehat g_k(u)\|_2^2.
+ -
+ \frac{L_k\eta_k^2}{2}
+ \E\|\widehat g_k(u)\|_2^2.
  \label{eq:full-token-rule-progress}
 \end{equation}
 \end{theorem}
@@ -502,17 +536,22 @@ that $\E\|\widehat g_k(u)\|_2^2<\infty$. For any step size $\eta_k>0$,
 Denote the right-hand side by
 \begin{equation}
  B_k(u;\eta_k)
- :=\eta_k g_k^\top\E[\widehat g_k(u)]
- -\frac{L_k\eta_k^2}{2}\E\|\widehat g_k(u)\|_2^2.
+ :=
+ \eta_k g_k^\top\E[\widehat g_k(u)]
+ -
+ \frac{L_k\eta_k^2}{2}
+ \E\|\widehat g_k(u)\|_2^2.
  \label{eq:full-certificate}
 \end{equation}
-The certificate has two parts. The first rewards alignment with the population
-gradient; the second penalizes the expected squared update under smoothness.
-Coefficient control improves the certificate only when the penalty it removes
-outweighs the useful alignment it removes. The next corollary states this
-crossover directly.
+The first term measures alignment with the population gradient, while the
+second is the quadratic penalty induced by smoothness. Modifying the estimator
+therefore improves the certificate only when the reduction in the second-moment
+penalty compensates for the useful gradient alignment removed by the
+modification.
 
-\begin{corollary}[IS-to-controlled-estimator crossover]
+The resulting crossover can be stated exactly.
+
+\begin{corollary}[Estimator crossover relative to IS]
 \label{cor:certificate-crossover}
 Let $u_{\mathrm{IS}}$ denote the IS coefficient rule and let $u$ be any
 alternative rule. Suppose the same deterministic $L_k$ is valid almost surely
@@ -523,49 +562,55 @@ only if
  B_k(u;\eta_k)>B_k(u_{\mathrm{IS}};\eta_k)
  \quad\Longleftrightarrow\quad
  m_k(u_{\mathrm{IS}})-m_k(u)
- >(1-L_k\eta_k)
+ >
+ (1-L_k\eta_k)
  \left\{
  \E\|\widehat g_k(u_{\mathrm{IS}})\|_2^2
- -\E\|\widehat g_k(u)\|_2^2
+ -
+ \E\|\widehat g_k(u)\|_2^2
  \right\}.
  \label{eq:is-controlled-certificate-crossover}
 \end{equation}
 \end{corollary}
 
-When the alternative lowers the update second moment, the right-hand side of
-Equation~\eqref{eq:is-controlled-certificate-crossover} is its discounted
-reduction. Its MSE gain must exceed this amount. Since the IS estimator is
-unbiased, the same condition has the equivalent alignment form
+Since IS is unbiased, the same crossover has the equivalent alignment form
 \begin{equation}
- \|g_k\|_2^2-g_k^\top\E[\widehat g_k(u)]
- <\frac{L_k\eta_k}{2}
+ \|g_k\|_2^2
+ -
+ g_k^\top\E[\widehat g_k(u)]
+ <
+ \frac{L_k\eta_k}{2}
  \left\{
  \E\|\widehat g_k(u_{\mathrm{IS}})\|_2^2
- -\E\|\widehat g_k(u)\|_2^2
+ -
+ \E\|\widehat g_k(u)\|_2^2
  \right\}.
  \label{eq:is-controlled-alignment-crossover}
 \end{equation}
-The left-hand side is the population-gradient alignment lost by changing the
-estimator; the right-hand side is the reduction in the quadratic smoothness
-penalty.
+The left-hand side measures the population-gradient alignment lost by
+modifying the estimator, while the right-hand side measures the reduction in
+the quadratic second-moment penalty. This is the optimization-level
+crossover: clipping is beneficial when the reduction in update variation is
+large enough to compensate for the gradient signal removed by masking.
 
-\begin{remark}[Truncated importance sampling]
-Upper truncation, $u_{\mathrm{T},t}=\min\{r_t,c\}$, caps each selected ratio
-without deleting its tail contribution. It is therefore a cheap variance
-safeguard with comparatively mild bias intervention. Its control is also
-limited: it acts only on the chosen upper tail, so the reduction in the update
-second moment can be modest under sequence-level mismatch.
-\end{remark}
+\paragraph{Truncation and masking.}
+TIS and PPO-style clipping instantiate different modifications within this
+comparison. TIS changes the magnitude of an importance coefficient while
+retaining the corresponding score contribution. PPO-style clipping instead
+sets selected score contributions to zero according to the
+advantage-dependent clipping condition. Both alter the bias and second moment
+of the resulting gradient estimator, and
+Corollary~\ref{cor:certificate-crossover} compares their optimization
+consequences through the same alignment--second-moment criterion.
 
-\begin{remark}[PPO-style masking]
-The PPO rule in Equation~\eqref{eq:ppo-coefficient-rule} removes saturated
-positive-advantage terms and low-ratio negative-advantage terms. It can reduce
-the update second moment more aggressively than upper truncation, but it also
-discards more population-gradient alignment. Equations
-\eqref{eq:is-controlled-certificate-crossover} and
-\eqref{eq:is-controlled-alignment-crossover} state when that stronger
-intervention is worthwhile.
-\end{remark}
+Taken together, the analysis establishes the two links needed for the
+remainder of the paper. For importance-weighted estimation, ESS enters the
+finite-sample gradient error through the second moment of the likelihood
+weights, and gradient reliability in turn determines the policy-improvement
+certificate. For clipping, the relevant comparison is whether the resulting
+reduction in estimator variation compensates for the population-gradient
+alignment removed by masking. The next section examines these predictions in
+controlled and large-model policy-optimization settings.
 
 
 \section{Policy optimization and ESS}
