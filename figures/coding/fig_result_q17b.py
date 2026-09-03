@@ -8,6 +8,7 @@ name; display labels use the paper terminology.
 Outputs:
   figures_mains/result/q17b/aime.pdf
   figures_mains/result/q17b/ess.pdf
+  figures_mains/result/q17b/aime_ess_comparison.pdf
   figures_mains/result/q17b/overall.pdf
 """
 import os
@@ -27,6 +28,9 @@ RUNS = [
     ("GRPO", "q17b_grpo_lr1e6", "#4d4d4d", "--", -7),
     ("TIS-3 + Clip", "q17b_cispo3_essdppo_lr1e6", C["ours"], "-", 7),
 ]
+FOCUS_RUN = "q17b_cispo3_essdppo_lr1e6"
+
+
 def trailing_mean(values, window=7):
     return [
         sum(values[max(0, index - window + 1): index + 1])
@@ -93,7 +97,7 @@ def make_ess():
     return fig
 
 
-def make_overall():
+def make_comparison():
     fig, axes = plt.subplots(1, 2, figsize=(FULL, 2.45), sharex=True)
     aime_axis, ess_axis = axes
 
@@ -135,10 +139,73 @@ def make_overall():
     return fig
 
 
+def make_overall():
+    """Overlay evaluation and ESS for the selected TIS-3 + Clip run."""
+    fig, aime_axis = plt.subplots(figsize=(COL, 2.48))
+    eval_x, eval_y = series(FOCUS_RUN, "eval")
+    ess_x, ess_y = series(FOCUS_RUN, "ess")
+    eval_values = [100 * value for value in eval_y]
+    ess_values = trailing_mean(ess_y)
+
+    aime_line = aime_axis.plot(
+        eval_x,
+        eval_values,
+        color=C["eval"],
+        linewidth=1.65,
+        marker="o",
+        markersize=2.7,
+        label="AIME-2024",
+    )[0]
+    aime_axis.set_xlim(-5, 515)
+    aime_axis.set_ylim(2, 13.5)
+    aime_axis.set_xlabel("training step")
+    aime_axis.set_ylabel("AIME-2024 mean@16 (%)")
+    aime_axis.set_title("TIS-3 + Clip", loc="left", fontweight="bold")
+    annotate_endpoint(
+        aime_axis, eval_x[-1], eval_values[-1], C["eval"], 0, "%"
+    )
+
+    ess_axis = aime_axis.twinx()
+    ess_axis.plot(
+        ess_x,
+        ess_y,
+        color=C["ours"],
+        linewidth=0.5,
+        alpha=0.16,
+    )
+    ess_line = ess_axis.plot(
+        ess_x,
+        ess_values,
+        color=C["ours"],
+        linewidth=1.45,
+        label="ESS",
+    )[0]
+    ess_axis.set_ylim(0.24, 0.68)
+    ess_axis.set_ylabel("ESS", color=C["ours"])
+    ess_axis.grid(False)
+    ess_axis.spines["right"].set_visible(True)
+    ess_axis.spines["right"].set_color(C["ours"])
+    ess_axis.tick_params(axis="y", colors=C["ours"])
+    annotate_endpoint(
+        ess_axis, ess_x[-1], ess_values[-1], C["ours"], 0
+    )
+
+    fig.legend(
+        handles=[aime_line, ess_line],
+        loc="outside lower center",
+        ncol=2,
+        frameon=False,
+        fontsize=8.2,
+        handlelength=2.3,
+    )
+    return fig
+
+
 use_paper_style()
 save(make_aime(), "result/q17b/aime")
 # Keep the legacy path synchronized with the new two-run AIME plot.
 save(make_aime(), "result/q17b/curve")
 save(make_ess(), "result/q17b/ess")
+save(make_comparison(), "result/q17b/aime_ess_comparison")
 save(make_overall(), "result/q17b/overall")
 print("q17b figures done")

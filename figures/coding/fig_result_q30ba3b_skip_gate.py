@@ -50,7 +50,6 @@ axis.set_xlim(-3, 203)
 axis.set_ylim(-1.5, 50)
 axis.set_xlabel("training step")
 axis.set_ylabel("AIME-2024 mean@16 (%)")
-axis.set_title("Unclipped update", loc="left", fontweight="bold")
 
 handles = [
     Line2D([0], [0], color=color, linestyle=linestyle, linewidth=linewidth,

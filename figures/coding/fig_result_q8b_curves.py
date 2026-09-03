@@ -1,8 +1,9 @@
 #!/usr/bin/env python
-"""Aggregation-matched Qwen3-8B comparisons for Section 6.
+"""Qwen3-8B recipe comparisons for Section 6.
 
-The GRPO pair is omitted because its static and gated runs use different loss
-aggregation. The two displayed pairs keep aggregation fixed.
+The two panels use the same visual grammar as the primary Qwen3-30B-A3B
+result: an always-clipped recipe in dashed gray and its ESS-conditioned
+counterpart in solid red.
 
 Output:
   figures_mains/result/8b/curves/overall.pdf
@@ -23,8 +24,8 @@ paperstyle.FIGDIR = os.path.join(ROOT, "figures_mains")
 STATIC = "#4d4d4d"
 CONDITIONAL = C["ours"]
 PANELS = [
+    ("GRPO", "q8b_grpo_base", "q8b_grpo_ess", (-6, 7)),
     ("Clip-Higher", "q8b_dapo_base", "q8b_dapo_ess_nonorm", (-5, 6)),
-    ("DPPO", "q8b_dppo_alwayslatch", "q8b_dppo_ess", (-7, 7)),
 ]
 
 
@@ -60,15 +61,25 @@ def draw(ax, static_run, conditional_run, offsets):
         annotate_endpoint(ax, xs[-1], ys[-1], color, offset)
     ax.set_xlim(-3, 222)
     ax.set_ylim(10, 36)
-    ax.set_xlabel("training step")
 
 
 use_paper_style()
-fig, axes = plt.subplots(1, 2, figsize=(FULL, 2.25), sharex=True, sharey=True)
+fig, axes = plt.subplots(1, 2, figsize=(FULL, 2.42), sharex=True, sharey=True)
 for index, (title, static_run, conditional_run, offsets) in enumerate(PANELS):
     draw(axes[index], static_run, conditional_run, offsets)
-    axes[index].set_title(f"({'ab'[index]}) {title}", loc="left")
+    axes[index].set_title(
+        f"({'ab'[index]}) {title}",
+        loc="left",
+        fontsize=8.4,
+        fontweight="bold",
+    )
+    axes[index].set_xticks([0, 100, 200])
+    axes[index].set_yticks([10, 20, 30])
+    axes[index].tick_params(axis="both", labelsize=7.2)
+    axes[index].grid(True, which="major", alpha=0.26)
 axes[0].set_ylabel("AIME-2024 mean@16 (%)")
+axes[0].yaxis.label.set_size(8.0)
+fig.supxlabel("training step", fontsize=8.0)
 
 handles = [
     Line2D([0], [0], color=STATIC, linestyle="--", linewidth=1.2,
@@ -77,7 +88,7 @@ handles = [
            marker="o", markersize=2.7, label="ESS-conditioned"),
 ]
 fig.legend(
-    handles=handles, loc="outside lower center", ncol=2, frameon=False,
-    fontsize=8.0, handlelength=2.2,
+    handles=handles, loc="outside upper center", ncol=2, frameon=False,
+    fontsize=8.2, handlelength=2.3,
 )
 save(fig, "result/8b/curves/overall")
