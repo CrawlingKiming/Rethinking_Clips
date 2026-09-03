@@ -128,7 +128,7 @@ Importance-sampling policy optimization uses likelihood-ratio moments and
 R\'enyi divergence to quantify the reliability of off-policy estimators
 \citep{metelli2018pois,metelli2020is}. In these results, effective rather than
 nominal sample size controls estimation error. We apply the same principle
-directly to the vector-valued policy-gradient estimator and use normalized ESS
+directly to the vector-valued policy-gradient estimator and use ESS
 as the regime coordinate.
 
 \paragraph{Reliable policy-gradient updates.}
@@ -319,7 +319,7 @@ size $N$. Moreover,
  \rho_\theta^{-1}-1.
  \label{eq:ess-ratio-dispersion}
 \end{equation}
-Thus, normalized ESS is directly determined by the second-moment dispersion of
+Thus, ESS is directly determined by the second-moment dispersion of
 the complete-trajectory likelihood ratio. The next section shows how this same
 second moment enters gradient-estimation error and, through that error, policy
 improvement.
@@ -627,7 +627,7 @@ failure.
 
 The Gaussian bandit makes our two-stage argument fully observable. We hold the
 current policy fixed and move the rollout policy farther away, which creates a
-monotone path from high to low normalized ESS. A quadratic reward then makes
+monotone path from high to low ESS. A quadratic reward then makes
 the population gradient, estimator moments, and expected one-step improvement
 available in closed form. We can therefore test the complete chain: ESS first
 predicts when IS loses finite-sample reliability, and the gain comparison then
@@ -742,7 +742,7 @@ additional estimator control has become valuable.
 \section{ESS-conditioned policy optimization}
 \label{sec:ess-conditioned-optimization}
 
-The preceding experiments show that decreasing sequence ESS accompanies a loss
+The preceding experiments show that decreasing ESS accompanies a loss
 of reliable subsequent improvement under importance-weighted updates. We now
 ask whether this reliability signal can be used to time clipping. Rather than
 applying clipping throughout training, we retain the importance-weighted
@@ -808,7 +808,7 @@ the same importance-weighted update.
   {figures_mains/result/q30ba3b/curves/overall.pdf}
   \caption{Qwen3-30B-A3B math RLVR over 200 policy updates. Dashed curves
   apply clipping throughout training. Solid curves begin with TIS-3 and
-  switch to the corresponding clipped update when normalized sequence ESS
+  switch to the corresponding clipped update when ESS
   falls below $0.1$. (a) GRPO clipping. (b) Clip-Higher. (c) DPPO. End labels
   report the final observed AIME-2024 mean@16.}
   \label{fig:llm-main}
@@ -821,7 +821,7 @@ the same importance-weighted update.
   \includegraphics[width=\linewidth]
   {figures_mains/result/q30ba3b/noclip/overall.pdf}
   \caption{Qwen3-30B-A3B math RLVR with an unclipped update. Dashed: unclipped
-  throughout. Solid: clipping below normalized sequence ESS $0.1$. End labels
+  throughout. Solid: clipping below ESS $0.1$. End labels
   report step-200 AIME-2024 mean@16.}
   \label{fig:llm-noclip-gate}
   \vspace{-0.6\baselineskip}
@@ -859,24 +859,34 @@ ordering persists across both update rules.
   \label{fig:llm-8b-transfer}
 \end{figure}
 
-\clearpage
+We then reduce the model to Qwen3-1.7B while retaining the mathematical-
+reasoning objective. Figure~\ref{fig:llm-17b-transfer} reports evaluation
+performance and ESS in separate panels for the two matched learning-rate
+recipes. TIS-3 + Clip reaches a final AIME score of $12.1\%$, compared with
+$10.2\%$ for GRPO. The ESS panel tracks the finite-rollout support available
+to the same updates throughout training.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{figures_mains/result/q17b/overall.pdf}
+  \caption{Qwen3-1.7B math RLVR at learning rate $10^{-6}$. (a) AIME-2024
+  mean@16. (b) ESS, shown as raw observations (faint) and trailing seven-step
+  means (thick). Dashed: GRPO. Solid: TIS-3 + Clip.}
+  \label{fig:llm-17b-transfer}
+\end{figure}
+
 \begin{wrapfigure}{r}{0.49\textwidth}
   \vspace{-0.7\baselineskip}
   \centering
-  \includegraphics[width=\linewidth]{figures_mains/result/q17b/overall.pdf}
-  \caption{Qwen3-1.7B math RLVR at learning rate $10^{-6}$. Black (left):
-  AIME-2024 mean@16. Blue (right): seven-step mean normalized sequence ESS.
-  Dashed: GRPO. Solid: TIS-3 + Clip.}
-  \label{fig:llm-17b-transfer}
+  \includegraphics[width=\linewidth]
+  {figures_mains/result/rlhf_4b/overall.pdf}
+  \caption{RLHF on Qwen3-4B-Instruct-2507 using
+  Skywork-Reward-Llama-3.1-8B as the reward model. Thin curves show per-step
+  scores and thick curves show trailing seven-step means. End labels report
+  the step-200 observations.}
+  \label{fig:llm-rlhf-transfer}
   \vspace{-0.6\baselineskip}
 \end{wrapfigure}
-We then reduce the model to Qwen3-1.7B while retaining the mathematical-
-reasoning objective. Figure~\ref{fig:llm-17b-transfer} overlays evaluation
-performance and finite-rollout support for the two matched learning-rate
-recipes. TIS-3 + Clip reaches a final AIME score of $12.1\%$, compared with
-$10.2\%$ for GRPO. Placing sequence ESS on the same training-step axis makes
-the support available to each update visible alongside its learning curve.
-
 We further change both the objective and the data by training
 Qwen3-4B-Instruct-2507 on Anthropic HH-RLHF \citep{bai2022hh}, using
 Skywork-Reward-Llama-3.1-8B \citep{liu2024skywork} as the reward model.
@@ -885,19 +895,7 @@ learned-reward optimization. The TIS-3-plus-ESS recipe reaches a final
 reward-model score of $60.7$, compared with $43.0$ for GRPO. This experiment
 evaluates optimization of the specified reward model rather than human
 preference directly.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.72\linewidth]
-  {figures_mains/result/rlhf_4b/overall.pdf}
-  \caption{RLHF on Qwen3-4B-Instruct-2507 using
-  Skywork-Reward-Llama-3.1-8B as the reward model. Thin curves show per-step
-  reward-model scores and thick curves show their trailing seven-step means.
-  The dashed curve is the clipped baseline and the solid curve is the
-  ESS-conditioned update. End labels report the step-200 observations.}
-  \label{fig:llm-rlhf-transfer}
-\end{figure}
-\FloatBarrier
+\clearpage
 
 
 \subsection{Ablations}
@@ -917,12 +915,11 @@ range.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.58\linewidth]
+  \includegraphics[width=0.52\linewidth]
   {figures_mains/result/q30ba3b/cispo3_ess_threshold/eval.pdf}
   \caption{Sensitivity to the ESS threshold for TIS-3 with GRPO clipping on
   Qwen3-30B-A3B. Curves use $\tau\in\{0.05,0.1,0.2\}$; clipping is activated
-  when normalized sequence ESS falls below the corresponding threshold.
-  Legend entries report peak and final AIME-2024 mean@16.}
+  when ESS falls below the corresponding threshold.}
   \label{fig:ess-threshold-ablation}
 \end{figure}
 
@@ -950,7 +947,7 @@ after that transition.
   {figures_mains/result/q30ba3b/skip_gate/overall.pdf}
   \caption{ESS-conditioned update skipping on the unclipped
   Qwen3-30B-A3B trajectory. The dashed curve applies every update, and the
-  solid curve skips the update when normalized sequence ESS falls below
+  solid curve skips the update when ESS falls below
   $0.1$. End labels report the final observed AIME-2024 mean@16.}
   \label{fig:skip-variants}
 \end{figure}
@@ -1051,7 +1048,7 @@ A direct calculation gives
     =e^{-\Delta^2}.
     \label{eq:gaussian-ratio-ess}
 \end{equation}
-Hence $\Delta$ and normalized ESS are in one-to-one correspondence:
+Hence $\Delta$ and ESS are in one-to-one correspondence:
 \begin{equation}
     \Delta=\sqrt{-\log\rho}.
     \label{eq:gaussian-delta-rho}
@@ -1554,7 +1551,7 @@ conditional rule intervenes and the accompanying training dynamics.
   \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/gate/overall.pdf}
   \caption{Realized ESS-conditioned intervention schedules. Each panel pairs
   the per-step intervention fraction (thin black) and its trailing seven-step
-  mean (thick black) with normalized ESS (red). GRPO and DPPO use raw ESS;
+  mean (thick black) with ESS (red). GRPO and DPPO use raw ESS;
   Clip-Higher uses shaped ESS after the coefficient cap. The dotted line marks
   the threshold $0.1$.}
   \label{fig:llm-gate-action}

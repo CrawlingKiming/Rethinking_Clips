@@ -27,8 +27,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import matplotlib.pyplot as plt
+import paperstyle
 from paperstyle import COL, FULL, C, use_paper_style, save
 from runlog import series, ess_cut, gate_fraction
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+paperstyle.FIGDIR = os.path.join(ROOT, "figures_mains")
 
 FLOOR = 0.01
 XMAX = 203
@@ -38,7 +42,7 @@ RUNS_ = [("cispo3_nogate", "TIS 3, no gate", C["baseline2"], "--", 1.2),
 PANELS = [
     ("length",  "mean response length (tokens)", "(a) response length", "length",  (700, 8400), False),
     ("entropy", "policy entropy",                "(b) entropy",         "entropy", (0, 5.1),    False),
-    ("ess",     "ESS (normalized)",              "(c) ESS",             "ess",     (0, 0.68),   True),
+    ("ess",     "ESS",                           "(c) ESS",             "ess",     (0, 0.68),   True),
     ("clipped", "fraction of updates clipped",   "(d) gate action",     "gate",    (-0.03, 1.03), False),
 ]
 

@@ -55,7 +55,7 @@ def draw(a, run, show_right_label=True):
     cut = ess_cut(run, FLOOR)
     ex_, ey = series(run, "ess", cut=cut)
     a2 = a.twinx()
-    a2.plot(ex_, ey, color=C["ours"], lw=1.1, label="ESS (right)")
+    a2.plot(ex_, ey, color=C["ours"], lw=1.1, label="ESS")
     a2.axhline(
         ESS_REFERENCE,
         color=C["ours"],
@@ -69,7 +69,7 @@ def draw(a, run, show_right_label=True):
     a2.spines["right"].set_color(C["ours"])
     a2.tick_params(axis="y", colors=C["ours"], labelright=show_right_label)
     if show_right_label:
-        a2.set_ylabel("ESS (normalized)", color=C["ours"])
+        a2.set_ylabel("ESS", color=C["ours"])
     if cut is not None:
         a2.axvline(cut, color=C["ours"], ls=":", lw=0.9)
         a2.axvspan(cut, XMAX, color=C["ours"], alpha=0.06, lw=0)

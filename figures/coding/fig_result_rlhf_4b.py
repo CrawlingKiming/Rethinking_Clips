@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Open-ended RLHF transfer on Qwen3-4B-Instruct-2507.
+"""RLHF transfer on Qwen3-4B-Instruct-2507.
 
 The main figure reports only the optimized reward-model score. Thin curves are
 per-step observations; thick curves are trailing seven-step means.
@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import paperstyle
-from paperstyle import FULL, C, format_sig, use_paper_style, save
+from paperstyle import COL, C, format_sig, use_paper_style, save
 from runlog import series
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -67,9 +67,9 @@ def draw(ax, metric, ylim, ylabel):
 
 
 use_paper_style()
-fig, axis = plt.subplots(figsize=(0.72 * FULL, 2.35))
+fig, axis = plt.subplots(figsize=(COL, 2.45))
 draw(axis, "reward", (0, 66), "reward-model score")
-axis.set_title("Open-ended RLHF", loc="left")
+axis.set_title("RLHF", loc="left", fontweight="bold")
 
 handles = [
     Line2D([0], [0], color="#4d4d4d", linestyle="--", linewidth=1.25,
@@ -79,6 +79,6 @@ handles = [
 ]
 fig.legend(
     handles=handles, loc="outside lower center", ncol=2, frameon=False,
-    fontsize=8.0, handlelength=2.2,
+    fontsize=8.5, handlelength=2.4,
 )
 save(fig, "result/rlhf_4b/overall")

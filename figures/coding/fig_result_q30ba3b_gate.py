@@ -63,7 +63,7 @@ def draw(ax, run, ess_metric, show_left, show_right):
         labelright=show_right,
     )
     if show_right:
-        right.set_ylabel("ESS (normalized)", color=C["ours"])
+        right.set_ylabel("ESS", color=C["ours"])
 
 
 use_paper_style()
