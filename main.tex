@@ -859,19 +859,19 @@ across model scale and across the two clipping rules.
 \end{figure}
 
 We then reduce the model to Qwen3-1.7B while retaining the mathematical-
-reasoning objective. Figure~\ref{fig:llm-17b-transfer} overlays evaluation
-performance and ESS for the TIS-3 + Clip trajectory on the same training-step
-axis. The run reaches an AIME score of $12.1\%$ at step 500, while the overlay
-makes the finite-rollout support available to the corresponding updates
-visible throughout training.
+reasoning objective. Figure~\ref{fig:llm-17b-transfer} reports evaluation
+performance for the two matched learning-rate recipes and overlays ESS for
+TIS-3 + Clip. TIS-3 + Clip reaches a final AIME score of $12.1\%$, compared
+with $10.2\%$ for GRPO. The ESS curve tracks the finite-rollout support
+available to the TIS-3 + Clip updates throughout training.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.52\linewidth]{figures_mains/result/q17b/overall.pdf}
-  \caption{Qwen3-1.7B math RLVR with TIS-3 + Clip at learning rate $10^{-6}$.
-  Black, left axis: AIME-2024 mean@16. Red, right axis: ESS, shown as raw
-  observations (faint) and a trailing seven-step mean (thick). End labels
-  report the step-500 values.}
+  \caption{Qwen3-1.7B math RLVR at learning rate $10^{-6}$. AIME-2024
+  mean@16 is shown for GRPO (dashed) and TIS-3 + Clip (solid). Blue: ESS for
+  TIS-3 + Clip, shown as raw observations (faint) and a trailing seven-step
+  mean (thick).}
   \label{fig:llm-17b-transfer}
 \end{figure}
 

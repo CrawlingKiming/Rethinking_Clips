@@ -140,63 +140,67 @@ def make_comparison():
 
 
 def make_overall():
-    """Overlay evaluation and ESS for the selected TIS-3 + Clip run."""
+    """Overlay TIS-3 + Clip ESS on the two-method evaluation plot."""
     fig, aime_axis = plt.subplots(figsize=(COL, 2.48))
-    eval_x, eval_y = series(FOCUS_RUN, "eval")
-    ess_x, ess_y = series(FOCUS_RUN, "ess")
-    eval_values = [100 * value for value in eval_y]
-    ess_values = trailing_mean(ess_y)
+    evaluation_lines = []
+    for label, key, color, linestyle, offset in RUNS:
+        eval_x, eval_y = series(key, "eval")
+        eval_values = [100 * value for value in eval_y]
+        line = aime_axis.plot(
+            eval_x,
+            eval_values,
+            color=color,
+            linestyle=linestyle,
+            linewidth=1.65,
+            marker="o",
+            markersize=2.7,
+            label=label,
+        )[0]
+        evaluation_lines.append(line)
+        annotate_endpoint(
+            aime_axis, eval_x[-1], eval_values[-1], color, offset, "%"
+        )
 
-    aime_line = aime_axis.plot(
-        eval_x,
-        eval_values,
-        color=C["eval"],
-        linewidth=1.65,
-        marker="o",
-        markersize=2.7,
-        label="AIME-2024",
-    )[0]
     aime_axis.set_xlim(-5, 515)
     aime_axis.set_ylim(2, 13.5)
     aime_axis.set_xlabel("training step")
     aime_axis.set_ylabel("AIME-2024 mean@16 (%)")
-    aime_axis.set_title("TIS-3 + Clip", loc="left", fontweight="bold")
-    annotate_endpoint(
-        aime_axis, eval_x[-1], eval_values[-1], C["eval"], 0, "%"
-    )
+    aime_axis.set_title("AIME", loc="left", fontweight="bold")
 
+    ess_x, ess_y = series(FOCUS_RUN, "ess")
+    ess_values = trailing_mean(ess_y)
+    ess_color = C["gated"]
     ess_axis = aime_axis.twinx()
     ess_axis.plot(
         ess_x,
         ess_y,
-        color=C["ours"],
+        color=ess_color,
         linewidth=0.5,
         alpha=0.16,
     )
     ess_line = ess_axis.plot(
         ess_x,
         ess_values,
-        color=C["ours"],
+        color=ess_color,
         linewidth=1.45,
         label="ESS",
     )[0]
     ess_axis.set_ylim(0.24, 0.68)
-    ess_axis.set_ylabel("ESS", color=C["ours"])
+    ess_axis.set_ylabel("ESS", color=ess_color)
     ess_axis.grid(False)
     ess_axis.spines["right"].set_visible(True)
-    ess_axis.spines["right"].set_color(C["ours"])
-    ess_axis.tick_params(axis="y", colors=C["ours"])
-    annotate_endpoint(
-        ess_axis, ess_x[-1], ess_values[-1], C["ours"], 0
-    )
+    ess_axis.spines["right"].set_color(ess_color)
+    ess_axis.tick_params(axis="y", colors=ess_color)
+    annotate_endpoint(ess_axis, ess_x[-1], ess_values[-1], ess_color, 0)
 
     fig.legend(
-        handles=[aime_line, ess_line],
+        handles=[*evaluation_lines, ess_line],
         loc="outside lower center",
-        ncol=2,
+        ncol=3,
         frameon=False,
-        fontsize=8.2,
-        handlelength=2.3,
+        fontsize=7.8,
+        handlelength=2.0,
+        columnspacing=1.2,
     )
     return fig
 
