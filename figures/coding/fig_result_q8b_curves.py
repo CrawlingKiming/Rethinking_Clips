@@ -72,9 +72,12 @@ axes[0].set_ylabel("AIME-2024 mean@16 (%)")
 
 handles = [
     Line2D([0], [0], color=STATIC, linestyle="--", linewidth=1.2,
-           marker="o", markersize=2.7, label="static update"),
+           marker="o", markersize=2.7, label="Clipped"),
     Line2D([0], [0], color=CONDITIONAL, linestyle="-", linewidth=1.6,
-           marker="o", markersize=2.7, label="ESS-conditioned update"),
+           marker="o", markersize=2.7, label="ESS-conditioned"),
 ]
-fig.legend(handles=handles, loc="outside lower center", ncol=2, frameon=False)
+fig.legend(
+    handles=handles, loc="outside lower center", ncol=2, frameon=False,
+    fontsize=8.0, handlelength=2.2,
+)
 save(fig, "result/8b/curves/overall")

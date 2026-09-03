@@ -6,6 +6,7 @@
 \usepackage{graphicx}
 \usepackage{float}
 \usepackage{placeins}
+\usepackage{wrapfig}
 \IfFileExists{microtype.sty}{\usepackage{microtype}}{}
 \usepackage{xcolor}
 \usepackage[numbers,sort&compress]{natbib}
@@ -793,46 +794,45 @@ to $12.3$ percentage points. The common behavior is that TIS-3 preserves rapid
 learning early in training, while the clipping rule becomes active only after
 ESS enters the low-reliability regime identified in Section~5.
 
-The final comparison in Figure~\ref{fig:llm-main} places this improvement
-against the failure mode that motivated the paper. Ungated TIS-3 initially
-improves but eventually collapses, reaching a final AIME score of $0.417\%$.
-The TIS-3-to-Clip-Higher trajectory from Figure~\ref{fig:llm-main}(b), by
-contrast, reaches $47.3\%$ and retains $44.8\%$ at the end of training.
-Selective clipping therefore retains the early learning of TIS while avoiding
-the late failure produced by continuing the same importance-weighted update.
+The collapse comparison is separated in
+Figure~\ref{fig:llm-tis3-collapse}. Ungated TIS-3 initially improves but
+eventually reaches a final AIME score of $0.417\%$. The ESS-conditioned
+trajectory from Figure~\ref{fig:llm-main}(b) instead reaches $47.3\%$ and
+retains $44.8\%$ at the end of training. Conditioning therefore retains the
+early learning of TIS while avoiding the late failure produced by continuing
+the same importance-weighted update.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]
   {figures_mains/result/q30ba3b/curves/overall.pdf}
   \caption{Qwen3-30B-A3B math RLVR over 200 policy updates. Dashed curves
-  denote the static comparison, and solid curves use TIS-3 while
-  $\widehat\rho\ge0.1$ and activate the indicated clipping rule below the
-  threshold. (a) GRPO clipping. (b) Clip-Higher. (c) DPPO.
-  (d) Ungated TIS-3 compared with the TIS-3-to-Clip-Higher trajectory from
-  (b), highlighting the late collapse avoided by ESS-conditioned clipping.
-  End labels report the final observed AIME-2024 mean@16.}
+  apply clipping throughout training. Solid curves begin with TIS-3 and
+  switch to the corresponding clipped update when normalized sequence ESS
+  falls below $0.1$. (a) GRPO clipping. (b) Clip-Higher. (c) DPPO. End labels
+  report the final observed AIME-2024 mean@16.}
   \label{fig:llm-main}
 \end{figure}
 
-We next remove truncation from the importance-weighted branch.
-Figure~\ref{fig:llm-noclip-gate} compares an unclipped trajectory with the
-same update followed by conventional clipping when ESS falls below $0.1$.
-Both trajectories attain similar peak performance, but continued unclipped
-optimization subsequently degrades to $34.6\%$, whereas ESS-conditioned
-clipping retains $38.1\%$ at step 200. The benefit of conditioning is therefore
-not tied to the particular TIS cap used in the primary experiment.
-
-\begin{figure}[htbp]
+\clearpage
+\begin{wrapfigure}{r}{0.49\textwidth}
+  \vspace{-0.7\baselineskip}
   \centering
-  \includegraphics[width=0.72\linewidth]
+  \includegraphics[width=\linewidth]
   {figures_mains/result/q30ba3b/noclip/overall.pdf}
-  \caption{Qwen3-30B-A3B math RLVR with an unclipped importance-weighted
-  update. The dashed curve continues the unclipped update throughout training;
-  the solid curve activates conventional clipping when
-  $\widehat\rho<0.1$. End labels report the step-200 AIME-2024 mean@16.}
+  \caption{Qwen3-30B-A3B math RLVR with an unclipped update. Dashed: unclipped
+  throughout. Solid: clipping below normalized sequence ESS $0.1$. End labels
+  report step-200 AIME-2024 mean@16.}
   \label{fig:llm-noclip-gate}
-\end{figure}
+  \vspace{-0.6\baselineskip}
+\end{wrapfigure}
+We next test whether conditioning depends on the TIS cap. Both runs start from
+the same unclipped update. Figure~\ref{fig:llm-noclip-gate} leaves one run
+unchanged and introduces conventional clipping in the other when ESS falls
+below $0.1$. The two trajectories attain similar peak performance, but the
+unclipped run subsequently degrades to $34.6\%$, whereas ESS-conditioned
+clipping retains $38.1\%$ at step 200. The timing principle therefore extends
+beyond the TIS-3 branch used in the primary experiment.
 \FloatBarrier
 
 
@@ -852,10 +852,30 @@ ordering persists across both update rules.
   \centering
   \includegraphics[width=\linewidth]
   {figures_mains/result/8b/curves/overall.pdf}
-  \caption{Qwen3-8B math RLVR over 200 policy updates. Dashed curves use the
-  static update and solid curves use its ESS-conditioned counterpart. (a) Clip-Higher. (b) DPPO. End labels report the step-200 AIME-2024 mean@16.}
+  \caption{Qwen3-8B math RLVR over 200 policy updates. Dashed curves apply
+  clipping throughout training, and solid curves use the ESS-conditioned
+  counterpart. (a) Clip-Higher. (b) DPPO. End labels report the step-200
+  AIME-2024 mean@16.}
   \label{fig:llm-8b-transfer}
 \end{figure}
+
+\clearpage
+\begin{wrapfigure}{r}{0.49\textwidth}
+  \vspace{-0.7\baselineskip}
+  \centering
+  \includegraphics[width=\linewidth]{figures_mains/result/q17b/overall.pdf}
+  \caption{Qwen3-1.7B math RLVR at learning rate $10^{-6}$. Black (left):
+  AIME-2024 mean@16. Blue (right): seven-step mean normalized sequence ESS.
+  Dashed: GRPO. Solid: TIS-3 + Clip.}
+  \label{fig:llm-17b-transfer}
+  \vspace{-0.6\baselineskip}
+\end{wrapfigure}
+We then reduce the model to Qwen3-1.7B while retaining the mathematical-
+reasoning objective. Figure~\ref{fig:llm-17b-transfer} overlays evaluation
+performance and finite-rollout support for the two matched learning-rate
+recipes. TIS-3 + Clip reaches a final AIME score of $12.1\%$, compared with
+$10.2\%$ for GRPO. Placing sequence ESS on the same training-step axis makes
+the support available to each update visible alongside its learning curve.
 
 We further change both the objective and the data by training
 Qwen3-4B-Instruct-2507 on Anthropic HH-RLHF \citep{bai2022hh}, using
@@ -873,8 +893,8 @@ preference directly.
   \caption{RLHF on Qwen3-4B-Instruct-2507 using
   Skywork-Reward-Llama-3.1-8B as the reward model. Thin curves show per-step
   reward-model scores and thick curves show their trailing seven-step means.
-  The dashed curve is GRPO and the solid curve is TIS-3 with ESS-conditioned
-  clipping. End labels report the step-200 observations.}
+  The dashed curve is the clipped baseline and the solid curve is the
+  ESS-conditioned update. End labels report the step-200 observations.}
   \label{fig:llm-rlhf-transfer}
 \end{figure}
 \FloatBarrier
@@ -911,24 +931,27 @@ ESS determines when to intervene but does not prescribe the intervention
 itself. We therefore replace clipping with a complete update veto while
 keeping the same ESS threshold.
 
-Figure~\ref{fig:skip-variants} shows two distinct outcomes. For TIS-5,
-skipping prevents the complete collapse of the ungated trajectory, improving
-the final AIME score from $0.00\%$ to $39.4\%$. For the unclipped update,
-however, skipping sacrifices substantially more learning: its peak and final
-performance remain below those obtained with ESS-conditioned clipping.
-Detection and control are therefore separate decisions. ESS determines when
-the importance-weighted update becomes unreliable, while the intervention
-determines how much gradient signal is retained after that transition.
+Figure~\ref{fig:skip-variants} isolates a complete update veto on the
+unclipped branch. Skipping raises the final score only slightly, from $34.6\%$
+to $35.6\%$, while reducing the peak from $44.4\%$ to $35.6\%$. By contrast,
+ESS-conditioned clipping in Figure~\ref{fig:llm-noclip-gate} reaches a
+$43.3\%$ peak and retains $38.1\%$. The intervention must therefore preserve
+useful gradient signal after ESS identifies an unreliable minibatch.
+
+The separate TIS-5 comparison in Figure~\ref{fig:tis5-skip} shows the
+complementary regime. Here skipping prevents complete collapse and raises the
+final AIME score from $0.00\%$ to $39.4\%$. Together, the two comparisons
+separate the timing decision supplied by ESS from the estimator choice made
+after that transition.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]
+  \includegraphics[width=0.52\linewidth]
   {figures_mains/result/q30ba3b/skip_gate/overall.pdf}
-  \caption{ESS-conditioned update skipping on Qwen3-30B-A3B. Dashed curves
-  apply no ESS action, and solid curves skip the update when
-  $\widehat\rho<0.1$. (a) Unclipped importance-weighted update.
-  (b) TIS with cap 5. End labels report the final observed AIME-2024
-  mean@16.}
+  \caption{ESS-conditioned update skipping on the unclipped
+  Qwen3-30B-A3B trajectory. The dashed curve applies every update, and the
+  solid curve skips the update when normalized sequence ESS falls below
+  $0.1$. End labels report the final observed AIME-2024 mean@16.}
   \label{fig:skip-variants}
 \end{figure}
 \FloatBarrier
@@ -1500,6 +1523,25 @@ interchangeable.
 \section{Additional RLVR diagnostics}
 \label{app:llm-diagnostics}
 
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.54\linewidth]
+  {figures_mains/result/q30ba3b/curves/tis3.pdf}
+  \caption{Separated TIS-3 collapse comparison from the main 30B experiment.
+  Ungated TIS-3 is shown against the ESS-conditioned Clip-Higher trajectory
+  used in Figure~\ref{fig:llm-main}(b).}
+  \label{fig:llm-tis3-collapse}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.54\linewidth]
+  {figures_mains/result/q30ba3b/tis5/overall.pdf}
+  \caption{Separated TIS-5 skipping comparison on Qwen3-30B-A3B. The dashed
+  curve continues TIS-5 throughout training; the solid curve skips low-ESS
+  updates.}
+  \label{fig:tis5-skip}
+\end{figure}
 
 
 \subsection{Intervention and training dynamics}

@@ -21,8 +21,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 paperstyle.FIGDIR = os.path.join(ROOT, "figures_mains")
 
 RUNS = [
-    ("rlhf_grpo", "GRPO", "#4d4d4d", "--", -5),
-    ("rlhf_cispo3_ess", "TIS 3 + ESS gate", C["ours"], "-", 6),
+    ("rlhf_grpo", "Clipped", "#4d4d4d", "--", -5),
+    ("rlhf_cispo3_ess", "ESS-conditioned", C["ours"], "-", 6),
 ]
 
 
@@ -73,9 +73,12 @@ axis.set_title("Open-ended RLHF", loc="left")
 
 handles = [
     Line2D([0], [0], color="#4d4d4d", linestyle="--", linewidth=1.25,
-           label="GRPO"),
+           label="Clipped"),
     Line2D([0], [0], color=C["ours"], linestyle="-", linewidth=1.55,
-           label="TIS 3 + ESS gate"),
+           label="ESS-conditioned"),
 ]
-fig.legend(handles=handles, loc="outside lower center", ncol=2, frameon=False)
+fig.legend(
+    handles=handles, loc="outside lower center", ncol=2, frameon=False,
+    fontsize=8.0, handlelength=2.2,
+)
 save(fig, "result/rlhf_4b/overall")
