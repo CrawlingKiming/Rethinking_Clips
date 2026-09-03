@@ -636,8 +636,8 @@ Appendix~\ref{app:gaussian} gives the calculations and protocol.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/gaussian_is_reliability.pdf}
-  \caption{\textbf{Stage I: ESS predicts IS reliability and certified
-  improvement.} We use $g=2$, $N=32$, and $1-\delta=0.9$. (a) Exact IS
+  \caption{\textbf{I: ESS predicts IS reliability and certified
+  improvement.} (a) Exact IS
   gradient MSE and the finite-moment upper bound in
   Equation~\eqref{eq:rho-gradient-mse-bound}. (b) Positive
   Theorem~\ref{thm:permissive-reliability} certificates and actual positive
@@ -645,7 +645,7 @@ Appendix~\ref{app:gaussian} gives the calculations and protocol.
   \label{fig:gaussian-is-reliability}
 \end{figure}
 
-The first stage asks when an IS update remains reliable.
+We first ask when an IS update remains reliable.
 Figure~\ref{fig:gaussian-is-reliability}(a) answers this question at the
 estimator level: the exact IS MSE stays below the bound from
 Lemma~\ref{lem:rho-gradient-reliability}, and both rise sharply as ESS falls.
@@ -661,7 +661,7 @@ open: which controlled estimator should be used after IS loses its advantage?
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/gaussian_estimator_choice.pdf}
-  \caption{\textbf{Stage II: the gain comparison selects the estimator.}
+  \caption{\textbf{II: the gain comparison selects the estimator.}
   We compare IS, TIS with $c=3$, and PPO masking with $\epsilon=0.2$ at
   $\eta=0.4$. (a) Exact expected gain relative to IS; positive values favor
   the controlled estimator. (b) Exact expected gain around the two pairwise
@@ -669,7 +669,7 @@ open: which controlled estimator should be used after IS loses its advantage?
   \label{fig:gaussian-estimator-choice}
 \end{figure}
 
-The second stage resolves that choice through the estimator-selection
+The second Figure~\ref{fig:gaussian-estimator-choice} resolves that choice through the estimator-selection
 criterion in Corollary~\ref{cor:certificate-crossover}.
 Figure~\ref{fig:gaussian-estimator-choice}(a) plots the resulting expected-gain
 difference relative to IS. TIS-3 has the lowest MSE throughout the path, yet
@@ -692,13 +692,10 @@ large-model training, where the policy pair evolves after every update.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures_mains/motivation/ess_reliability_collapse_ess_unclipped_combine.pdf}
-  \caption{\textbf{ESS deterioration is associated with less reliable
-  subsequent improvement.}
+  \caption{
   Left: AIME-2024 mean@16 along an unclipped trajectory and TIS with caps
-  3 and 5. For TIS-3 and TIS-5, annotations report ESS at the onset of the
-  sustained performance decline; for the unclipped trajectory, we report the
-  minimum ESS observed in the local late-degradation region around the marked
-  point. Right: each point pairs ESS at an evaluation checkpoint with the
+  3 and 5. Annotations report ESS at the onset of the
+  sustained performance decline. Right: each point pairs ESS at an evaluation checkpoint with the
   change in AIME-2024 mean@16 over the following ten updates. The shaded
   regions indicate ESS below $0.1$ and $0.05$. Lower ESS is associated with
   substantially weaker and less reliable subsequent improvement.}
@@ -729,225 +726,286 @@ evaluation checkpoint, we pair the current ESS with the change in AIME-2024
 mean@16 over the following ten updates. The resulting pattern shows a clear
 change in update reliability as ESS decreases. Among intervals with
 ESS below $0.1$, only $1$ of $6$ is followed by an improvement. In comparison,
-$20$ of $27$ intervals with ESS at least $0.1$ improve. Low ESS therefore does not identify the quality of the current policy; it identifies a regime in which continued
+$20$ of $27$ intervals with the same ESS criterion improve. Low ESS therefore identifies a regime in which continued
 importance-weighted updates are substantially less likely to produce reliable improvement.
 
-This behavior is precisely the finite-sample effect characterized in
+This behavior is the effect characterized in
 Section~\ref{sec:theory}. Decreasing ESS enlarges the
-gradient-error radius through the factor $\rho_k^{-1/2}$ and consequently
-weakens the corresponding policy-improvement certificate. The large-model
+gradient-error radius through the factor $\rho_k^{-1/2}$ and consequently weakens the corresponding policy-improvement certificate. The large-model
 trajectories exhibit the same optimization consequence: as ESS deteriorates,
 subsequent improvement becomes less reliable. This observation motivates the
 optimization rule studied next: retain the importance-weighted update while
 its reliability remains high, and introduce clipping when ESS indicates that
 additional estimator control has become valuable.
+
+```latex
 \section{ESS-conditioned policy optimization}
+\label{sec:ess-conditioned-optimization}
 
-Section~5 identifies ESS as an observable coordinate for effective support. We
-now ask whether acting on this signal resolves the central optimization
-tradeoff: retain a permissive update while the rollout remains informative,
-then activate control as effective support contracts. We first test this rule
-in Qwen3-30B-A3B math RLVR and then change the model scale and training
-objective.
+The preceding section showed that decreasing sequence ESS accompanies a loss
+of reliable subsequent improvement under importance-weighted policy updates.
+We now test the corresponding intervention: retain the importance-weighted
+update while ESS remains above a fixed threshold, and activate clipping when
+ESS falls below it. The central empirical question is whether this timing
+preserves the learning achieved by importance weighting while reducing the
+late-stage degradation observed under continued TIS or unclipped updates.
 
-\subsection{Update rule and protocol}
+\subsection{Update rule and evaluation protocol}
 
-Let $\widehat g_{\mathrm{perm}}$ denote the permissive update and
-$\widehat g_{\mathrm{safe}}$ a prespecified safeguard. Given a threshold
-$\tau$, the ESS-conditioned update is
+Let $\widehat g_{\mathrm{IW}}$ denote an importance-weighted update and
+$\widehat g_{\mathrm{clip}}$ a prespecified clipped update. Given an ESS
+threshold $\tau$, we define
 \begin{equation}
-  \widehat g_{\mathrm{gate}}
-  =\begin{cases}
-    \widehat g_{\mathrm{perm}},&\widehat\rho\ge \tau,\\
-    \widehat g_{\mathrm{safe}},&\widehat\rho< \tau.
+  \widehat g_{\mathrm{ESS}}
+  =
+  \begin{cases}
+    \widehat g_{\mathrm{IW}},
+      & \widehat\rho \ge \tau,\\
+    \widehat g_{\mathrm{clip}},
+      & \widehat\rho < \tau.
   \end{cases}
   \label{eq:llm-gate}
 \end{equation}
-ESS determines when the update changes; the selected safeguard determines how
-the low-support update is controlled. We fix $\tau=0.1$ for all primary
-comparisons and vary it only in the threshold ablation. This value was
-prescribed for the language-model runs and is not derived from the Gaussian
-thresholds in Section~\ref{sec:gaussian-example}.
-GRPO, DPPO, and the unclipped construction use the raw $\widehat\rho$ in
-Equation~\eqref{eq:sample-ess}. Clip-Higher instead uses the analogous shaped
-ESS computed from post-cap sequence coefficients.
+Thus, ESS determines when clipping is activated, while the clipping rule
+determines how the update is modified after activation. We use
+$\tau=0.1$ in the primary experiments.
 
-\paragraph{Evaluation protocol.}
 The main experiment trains Qwen3-30B-A3B for up to 200 policy updates on the
 boxed mathematical-reasoning data of \citet{yu2025dapo} and evaluates
-AIME-2024 using mean@16. The primary permissive branch is TIS with ratio cap 3;
-an explicit ablation instead uses the unclipped update. At low ESS, we test
-three prespecified safeguards: conventional GRPO clipping
+AIME-2024 using mean@16. The primary importance-weighted branch is TIS with
+ratio cap 3, and a separate ablation replaces TIS with an unclipped update.
+For the clipped branch, we consider conventional GRPO clipping
 \citep{shao2024deepseekmath}, Clip-Higher \citep{yu2025dapo}, and DPPO
 \citep{qi2026dppo}.
-The static 30B recipes use their native token-mean aggregation, whereas the
-TIS-3 conditional recipes use sum normalization. Panels (a)--(c) of the main
-figure therefore compare complete recipes; the TIS-3 pair in panel (d) and the
-unclipped comparison isolate ESS conditioning.
 
-\subsection{Main results}
+The comparisons serve two different purposes. The matched TIS-3 comparison
+and the unclipped ablation isolate the effect of activating clipping according
+to ESS. The remaining 30B comparisons evaluate complete training recipes:
+the static baselines retain their native token-mean aggregation, whereas the
+TIS-3 conditional recipes use sum normalization. We therefore use the matched
+comparisons to establish the effect of ESS conditioning and the complete-recipe
+comparisons to evaluate its broader optimization performance.
+
+\subsection{Main results on Qwen3-30B-A3B}
 \label{sec:llm-experiments}
 
-Figure~\ref{fig:llm-main} establishes the central empirical result. Each
-conditional recipe uses TIS 3 while effective support is high and activates
-the named safeguard only when normalized ESS falls below $0.1$. Across GRPO,
-Clip-Higher, and DPPO, the conditional recipes achieve both a higher peak and
-a higher final AIME score than the corresponding static recipes, with endpoint
-gains ranging from $6.88$ to $12.3$ percentage points. The matched TIS-3
-comparison isolates the failure that conditioning prevents:
-ungated TIS 3 peaks at $31.7\%$ and then collapses to $0.417\%$, whereas the
-ESS-conditioned trajectory reaches $47.3\%$ and retains $44.8\%$ at step 200.
-ESS conditioning therefore does more than stabilize a permissive estimator.
-It preserves its learning advantage while support is broad and introduces
-control only after effective support contracts.
+We first isolate the effect of the ESS-conditioned intervention.
+Figure~\ref{fig:llm-main} compares ungated TIS-3 with the same TIS-3
+trajectory followed by Clip-Higher once ESS falls below $0.1$. Ungated TIS-3
+initially learns rapidly, reaching an AIME-2024 mean@16 of $31.7\%$, but
+subsequently collapses to $0.417\%$. The ESS-conditioned trajectory instead
+reaches $47.3\%$ and retains $44.8\%$ at step 200. Activating clipping after
+the ESS transition therefore changes the late-stage trajectory without imposing
+the same restriction throughout early training.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/curves/overall.pdf}
-  \caption{ESS conditioning combines permissive high-support learning with
-  low-support control on Qwen3-30B-A3B. Each conditional trajectory uses TIS
-  3 when $\widehat\rho\ge 0.1$ and the named safeguard otherwise. Panels
-  (a)--(c) compare the complete conditional and static recipes; the former use
-  sum normalization and the latter their native token-mean aggregation. Panel
-  (d) gives the matched collapse-prevention comparison against ungated TIS 3,
-  using the TIS-3/Clip-Higher trajectory from panel (b). Direct labels report
-  the final observed AIME-2024 mean@16.}
+  \includegraphics[width=\linewidth]
+  {figures_mains/result/q30ba3b/curves/overall.pdf}
+  \caption{\textbf{ESS-conditioned clipping preserves importance-weighted
+  learning while reducing late-stage failure on Qwen3-30B-A3B.}
+  Panel (d) provides the matched intervention comparison: the ungated
+  trajectory continues TIS-3, whereas the conditional trajectory activates
+  Clip-Higher when $\widehat\rho<0.1$. Panels (a)--(c) compare complete
+  TIS-3-plus-ESS recipes with static GRPO, Clip-Higher, and DPPO recipes,
+  respectively. The complete-recipe comparisons use their corresponding
+  aggregation schemes described in the text. Direct labels report the final
+  observed AIME-2024 mean@16.}
   \label{fig:llm-main}
 \end{figure}
 
-Figure~\ref{fig:llm-noclip-gate} uses the unclipped trajectory diagnosed in
-Figure~\ref{fig:ess-predicts-performance} as the permissive reference.
-Conditional clipping preserves a comparable peak and raises step-200
-performance from $34.6\%$ to $38.1\%$. Thus, the same ESS signal can retain
-most of the permissive estimator's learning while limiting late-stage
-degradation without relying on a particular truncation cap.
+The same intervention principle applies without a truncation cap.
+Figure~\ref{fig:llm-noclip-gate} uses the unclipped trajectory analyzed in the
+preceding section and activates conventional clipping only after ESS falls
+below $0.1$. The two trajectories attain comparable peak performance, but the
+conditional trajectory finishes at $38.1\%$, compared with $34.6\%$ when the
+unclipped update is continued through step 200. Together with the TIS-3
+comparison, this result shows that the timing effect is not specific to a
+particular truncation cap.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.72\linewidth]{figures_mains/result/q30ba3b/noclip/overall.pdf}
-  \caption{The timing principle extends to a fully unclipped high-support
-  update. Conventional clipping is activated only when raw normalized ESS is
-  below $0.1$. Conditional control preserves a comparable peak while reducing
-  the late performance loss. Direct labels report step-200 AIME-2024 mean@16.}
+  \includegraphics[width=0.72\linewidth]
+  {figures_mains/result/q30ba3b/noclip/overall.pdf}
+  \caption{\textbf{ESS-conditioned clipping also reduces late degradation
+  under an unclipped update.}
+  Both trajectories use the unclipped update while $\widehat\rho\ge0.1$; the
+  conditional trajectory activates conventional clipping below the threshold.
+  Direct labels report the step-200 AIME-2024 mean@16.}
   \label{fig:llm-noclip-gate}
 \end{figure}
-\FloatBarrier
 
-\paragraph{Results on Dense models}
-Figure~\ref{fig:llm-8b-transfer} changes from the 30B mixture-of-experts model
-to dense Qwen3-8B while keeping math RLVR fixed. The ESS-conditioned
-construction finishes above its static counterpart in both
-aggregation-matched comparisons. The gains are smaller than the 30B rescue,
-but the endpoint ordering persists under both Clip-Higher and DPPO. This
-extends the support-conditioned design beyond the model on which the failure
-was first observed.
+Panels (a)--(c) of Figure~\ref{fig:llm-main} evaluate the same construction
+with several clipping rules. Across GRPO, Clip-Higher, and DPPO, the
+ESS-conditioned recipes attain both higher peak and higher final AIME scores
+than the corresponding static recipes, with endpoint improvements ranging
+from $6.88$ to $12.3$ percentage points. Because these comparisons retain the
+native aggregation of each static baseline while using sum normalization in
+the TIS-3 conditional recipes, they should be interpreted as comparisons
+between complete training recipes rather than isolated ablations of the ESS
+gate. The matched results above provide the direct evidence for the timing
+intervention; panels (a)--(c) show that the resulting construction remains
+effective across different choices of clipping rule.
+
+\subsection{Transfer across model scale and training objective}
+
+The 30B experiments establish the intervention on the model where the delayed
+failure was initially observed. We next change the model architecture while
+holding the mathematical-reasoning objective fixed.
+
+Figure~\ref{fig:llm-8b-transfer} reports aggregation-matched comparisons on
+dense Qwen3-8B. The ESS-conditioned construction finishes above its static
+counterpart under both Clip-Higher and DPPO. The gains are smaller than the
+late-stage rescue observed on Qwen3-30B-A3B, but the endpoint ordering remains
+unchanged across both comparisons. The effect of ESS conditioning therefore
+extends beyond the 30B mixture-of-experts setting.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures_mains/result/8b/curves/overall.pdf}
-  \caption{Dense-model transfer on Qwen3-8B. Panel (a) compares token-mean
-  Clip-Higher with its token-mean ESS-conditioned construction. Panel (b)
-  compares static and ESS-conditioned DPPO under the same sum-normalized
-  aggregation. Direct labels give the step-200 AIME-2024 mean@16.}
+  \includegraphics[width=\linewidth]
+  {figures_mains/result/8b/curves/overall.pdf}
+  \caption{\textbf{ESS-conditioned updates retain their advantage on dense
+  Qwen3-8B.}
+  Panel (a) compares static and ESS-conditioned Clip-Higher under token-mean
+  aggregation. Panel (b) gives the corresponding DPPO comparison under
+  sum-normalized aggregation. Direct labels report the step-200 AIME-2024
+  mean@16.}
   \label{fig:llm-8b-transfer}
 \end{figure}
 
-\paragraph{Results on RLHF}
-We next change both the objective and the data, training
+We further change both the objective and the data by training
 Qwen3-4B-Instruct-2507 for 200 updates on Anthropic HH-RLHF
-\citep{bai2022hh} using Skywork-Reward-Llama-3.1-8B
-\citep{liu2024skywork} as the reward model. Figure~\ref{fig:llm-rlhf-transfer}
-shows that the complete TIS-3-plus-ESS recipe reaches a reward-model score of
-$60.7$, compared with $43.0$ for GRPO. The advantage therefore survives a
-shift from verifiable math rewards to learned-reward optimization. This
-experiment measures optimization of the training reward model rather than
-human preference directly.
+\citep{bai2022hh}, using Skywork-Reward-Llama-3.1-8B
+\citep{liu2024skywork} as the reward model.
+Figure~\ref{fig:llm-rlhf-transfer} compares GRPO with the complete
+TIS-3-plus-ESS recipe. The conditional recipe reaches a final reward-model
+score of $60.7$, compared with $43.0$ for GRPO. The benefit therefore persists
+when moving from verifiable mathematical rewards to learned-reward
+optimization. This experiment evaluates optimization of the specified reward
+model rather than human preference directly.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.72\linewidth]{figures_mains/result/rlhf_4b/overall.pdf}
-  \caption{Transfer to open-ended RLHF on Qwen3-4B-Instruct-2507. Thin curves
-  are per-step reward-model scores; thick curves are trailing seven-step
-  means. Direct labels give the step-200 observations. This is a
-  complete-recipe comparison between GRPO and TIS 3 with an ESS-conditioned
-  safeguard.}
+  \includegraphics[width=0.72\linewidth]
+  {figures_mains/result/rlhf_4b/overall.pdf}
+  \caption{\textbf{The ESS-conditioned construction also improves
+  learned-reward optimization.}
+  On HH-RLHF with Qwen3-4B-Instruct-2507, the complete TIS-3-plus-ESS recipe
+  reaches a reward-model score of $60.7$, compared with $43.0$ for GRPO after
+  200 updates.}
   \label{fig:llm-rlhf-transfer}
 \end{figure}
 \FloatBarrier
 
-Across these experiments, ESS contributes timing rather than a new clipping
-rule: it converts conservative control from a permanent constraint into a
-targeted intervention.
+Across these experiments, ESS does not define a new clipping rule. It
+determines when a prespecified clipping rule is introduced. This separation
+allows the importance-weighted estimator to govern the update before the
+reliability transition identified in Section~5, while retaining the variance
+control of clipping later in training.
 
-\subsection{Ablations and alternative interventions}
+\subsection{Ablations: intervention timing and action}
 
-\paragraph{Collapse prevention does not depend on one exact threshold.}
-Figure~\ref{fig:ess-threshold-ablation} varies only the ESS threshold for the
-TIS-3/GRPO construction. Thresholds $0.05$, $0.1$, and $0.2$ all avoid the
-catastrophic $0.417\%$ endpoint of ungated TIS 3, with last-reported scores of
-$43.1\%$, $38.5\%$, and $34.8\%$, respectively. Performance changes because the
-threshold determines how long the permissive branch remains active. Thus,
-$\tau$ is an operating point for the ESS diagnostic rather than a universal
-theoretical constant; the failure-prevention effect persists across the tested
-fourfold range.
+The conditional construction contains two distinct choices: the ESS threshold
+determines when to intervene, and the low-ESS update determines what
+intervention is applied. We examine these choices separately.
+
+\paragraph{Sensitivity to the ESS threshold.}
+Figure~\ref{fig:ess-threshold-ablation} varies only the threshold $\tau$ for
+the TIS-3/GRPO construction. Thresholds $0.05$, $0.1$, and $0.2$ all avoid the
+catastrophic $0.417\%$ endpoint of ungated TIS-3, reaching last-observed
+AIME-2024 mean@16 scores of $43.1\%$, $38.5\%$, and $34.8\%$, respectively.
+Changing $\tau$ changes the timing of the transition from TIS to clipping and
+therefore changes the amount of training performed under each estimator. The
+collapse-prevention effect persists across the tested fourfold range, while
+the final performance remains sensitive to intervention timing.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.58\linewidth]{figures_mains/result/q30ba3b/cispo3_ess_threshold/eval.pdf}
-  \caption{Sensitivity to the ESS threshold in the Qwen3-30B-A3B
-  TIS-3/GRPO construction. All three thresholds prevent the ungated TIS-3
-  collapse; changing $\tau$ shifts the balance between the permissive and
-  safeguarded branches. Labels report peak and last-observed AIME-2024
-  mean@16.}
+  \includegraphics[width=0.58\linewidth]
+  {figures_mains/result/q30ba3b/cispo3_ess_threshold/eval.pdf}
+  \caption{\textbf{Collapse prevention is robust across the tested ESS
+  thresholds.}
+  For the TIS-3/GRPO construction, all
+  $\tau\in\{0.05,0.1,0.2\}$ avoid the ungated TIS-3 collapse, while final
+  performance varies with intervention timing. Labels report peak and
+  last-observed AIME-2024 mean@16.}
   \label{fig:ess-threshold-ablation}
 \end{figure}
 
-\paragraph{Alternative low-support actions separate detection from control.}
-ESS can also trigger a complete update veto rather than clipping.
-Figure~\ref{fig:skip-variants} shows that this simpler action rescues TIS 5
-from a $0.00\%$ collapse to a $39.4\%$ endpoint. Skipping is more conservative
-when the permissive trajectory remains viable: with the unclipped update it
-finishes at $35.6\%$, below the $38.1\%$ obtained by ESS-conditioned clipping,
-and sacrifices more of the attainable peak. Across both experiments, ESS
-provides a common trigger for the low-support regime, but the response still
-matters. The stronger performance under conditional clipping is consistent
-with controlled estimation retaining useful signal that a full update veto
-discards.
+\paragraph{Clipping versus skipping after the ESS trigger.}
+ESS specifies when to intervene but does not determine the intervention
+itself. We therefore replace clipping with a complete update veto while
+leaving the ESS trigger unchanged.
+
+Figure~\ref{fig:skip-variants} shows that skipping is sufficient to prevent
+catastrophic failure in TIS-5: the ungated trajectory collapses to $0.00\%$,
+whereas ESS-conditioned skipping finishes at $39.4\%$. The comparison differs
+when the importance-weighted trajectory remains viable for longer. Under the
+unclipped update, skipping finishes at $35.6\%$, below the $38.1\%$ obtained
+with ESS-conditioned clipping, and also gives up more of the attainable peak.
+The intervention therefore matters after the reliability transition has been
+detected. A complete veto eliminates the unreliable update altogether, whereas
+clipping can continue to retain part of the gradient signal.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures_mains/result/q30ba3b/skip_gate/overall.pdf}
-  \caption{ESS-conditioned skipping as an alternative low-support action.
-  Panel (a) shows that a hard veto stabilizes an unclipped update but sacrifices
-  more learning than ESS-conditioned clipping. Panel (b) gives the matched
-  TIS-5 comparison, in which skipping prevents the static trajectory's
-  collapse. All curves report AIME-2024 mean@16.}
+  \includegraphics[width=\linewidth]
+  {figures_mains/result/q30ba3b/skip_gate/overall.pdf}
+  \caption{\textbf{The intervention after the ESS trigger affects retained
+  learning.}
+  Panel (a) compares clipping and a complete update veto after the ESS
+  threshold under an unclipped trajectory. Panel (b) shows that the same
+  skipping rule prevents the collapse of TIS-5. All curves report AIME-2024
+  mean@16.}
   \label{fig:skip-variants}
 \end{figure}
 \FloatBarrier
 
-Together, the threshold and action ablations show that collapse prevention
-comes from conditioning control on effective support, while retained learning
-depends on how aggressively the low-support update is modified.
+The two ablations separate the roles of the diagnostic and the intervention.
+The threshold controls when the estimator is modified, whereas the
+post-threshold rule controls how much of the gradient update is retained.
+This distinction is consistent with the estimator analysis in
+Section~\ref{sec:theory}: detecting a deterioration in importance-weighted
+reliability does not by itself specify the optimal modification, because
+different interventions induce different tradeoffs between estimator variation
+and retained gradient alignment.
 
 
 \section{Conclusion}
 
-We studied clipping as a finite-sample estimator choice rather than a default
-property of policy optimization. The theory separates gradient-estimation
-error from the useful update retained after control: reducing MSE improves the
-fixed-step certificate only when that gain compensates for the signal removed
-by clipping. This distinction makes IS preferable while effective support is
-broad and explains why controlled estimators become attractive as mismatch
-grows. The Gaussian construction instantiates these comparisons and shows why mild
-truncation can dominate more aggressive masking. The reported language-model
-trajectories then show that sequence
-ESS can reveal support contraction and time a prespecified safeguard without
-serving as the oracle itself. In the RLVR and RLHF examples, the resulting
-conditional constructions retain permissive learning in the higher-support
-regime and protect training more strongly as support contracts. ESS therefore
-provides the operational link between importance-weight reliability and the
-decision of when to control an update.
+We studied clipping in policy optimization through the finite-sample
+reliability of the gradient estimator. Off-policy policy gradients can be
+written as importance-weighted means, making estimator reliability a direct
+part of the optimization problem. Our theory connects gradient-estimation
+error to one-step policy improvement and shows explicitly how the second
+moment of the importance weights, summarized by ESS, enters the MSE and
+high-probability error radius of the IS estimator. For clipped estimators, the
+analysis identifies a separate tradeoff: reducing the update second moment is
+beneficial only when that reduction compensates for the population-gradient
+alignment removed by clipping.
+
+The Gaussian construction makes both mechanisms observable. As ESS decreases,
+the IS gradient becomes less reliable and positive improvement becomes less
+frequent. The estimator comparison then shows that lower MSE alone does not
+determine the preferred update: truncation or masking becomes advantageous
+only after its reduction in update variation outweighs the gradient signal it
+removes.
+
+The large-model experiments show the corresponding training-time behavior.
+Under both TIS and unclipped updates, low sequence ESS is associated with a
+loss of reliable subsequent improvement. Activating clipping at this transition
+preserves the earlier learning of the importance-weighted update while reducing
+late-stage degradation. The same construction remains effective across
+multiple clipping rules, dense and mixture-of-experts models, and both RLVR
+and learned-reward optimization.
+
+These results position ESS as a finite-sample reliability statistic rather
+than as a clipping rule itself. Its role is to identify when continued
+importance-weighted estimation becomes unreliable; the appropriate response
+remains an estimator choice. This separation provides a principled basis for
+using clipping selectively rather than imposing it throughout policy
+optimization.
+```
 
 \appendix
 
