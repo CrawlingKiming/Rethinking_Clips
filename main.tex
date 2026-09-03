@@ -336,8 +336,7 @@ contributions. We address these questions in turn.
 
 \subsection{Gradient-estimator reliability and policy improvement}
 
-We first establish the optimization consequence of gradient-estimation error.
-The following result applies to an arbitrary gradient estimator.
+We first establish the optimization consequence of gradient-estimation error which generalizes the performance result from the arbitrary gradient choices.
 
 \begin{lemma}[A reliable gradient estimate yields policy improvement]
 \label{lem:gradient-error-progress}
@@ -355,23 +354,19 @@ $\widehat g=0$. Then
 \end{equation}
 \end{lemma}
 
-Lemma~\ref{lem:gradient-error-progress} uses the same smoothness mechanism as
-existing policy-gradient analyses
+Lemma~\ref{lem:gradient-error-progress} uses the same smoothness mechanism as existing policy-gradient analyses
 \citep{pirotta2013adaptive,papini2022smoothing}. It makes gradient-estimator
 reliability directly relevant to optimization: whenever the error radius is
-smaller than $\|\widehat g\|_2$, the resulting direction admits a positive
-one-step improvement certificate.
+smaller than $\|\widehat g\|_2$, the resulting direction admits a positive one-step improvement certificate. This turns the question to the graident-estimator reliablity for the policy optimization.
 
 \paragraph{ESS and the IS estimator.}
-For IS, the estimation error can be expressed explicitly in terms of the same
-weight second moment that defines ESS. At update $k$, condition on the
-preceding updates and write
-$W_k:=W_{\theta_k}$,
-$f_k:=f_{\theta_k}$,
-$g_k:=g(\theta_k)$,
+The problem of the gradient-estimator reliablity analysis is that as the population gradient is unknown, the reliablity can be bounded with the current quantity. Here, we leverage the ESS and make the concentration inequality bounds, and show that the error radius admits the bound determined by the ESS.
+
+To formalize, write $W_k:=W_{\theta_k}$,
+$f_k:=f_{\theta_k}$, $g_k:=g(\theta_k)$,
 $\widehat g_k:=\widehat g_N(\theta_k)$, and
-$\rho_k:=\rho_{\theta_k}$. Assume that the $N$ rollout samples are independent
-draws from $Q$, that $d_2(P_{\theta_k}\|Q)<\infty$, and that
+$\rho_k:=\rho_{\theta_k}$ at update $k$ that conditiones on the
+preceding updates. Assume that the $N$ rollout samples are independent draws from $Q$, that $d_2(P_{\theta_k}\|Q)<\infty$, and that
 $\E_Q[W_k^2\|f_k\|_2^2]<\infty$. Define the importance-weighted contribution
 scale
 \begin{equation}
@@ -414,7 +409,7 @@ increases the finite-sample error through the factor $\rho_k^{-1}$. If $f_k$
 is bounded, then $M_{2,k}\le\|f_k\|_\infty^2$, recovering the familiar
 bounded-integrand form.
 
-The MSE bound yields a high-probability error radius for the realized gradient.
+We now connect such bound to the high-probability error radius for the realized gradient.
 
 \begin{lemma}[Normalized ESS controls the gradient-error radius]
 \label{lem:rho-gradient-reliability}
@@ -429,7 +424,7 @@ $1-\delta$,
 \end{lemma}
 
 Holding the contribution scale fixed, the reliability radius therefore grows
-as $(N\rho_k)^{-1/2}$. Combining this result with
+as $\rho_k^{-1/2}$. Combining this result with
 Lemma~\ref{lem:gradient-error-progress} yields the corresponding
 ESS-dependent policy-improvement guarantee.
 
@@ -473,24 +468,15 @@ the finite-sample IS error explicit. The certificate is positive whenever
  \sqrt{\frac{M_{2,k}}{\delta N\rho_k}}.
  \label{eq:positive-is-certificate}
 \end{equation}
-Hence the usefulness of the importance-weighted update depends on the
-estimated gradient signal relative to its finite-sample error. Holding
-$M_{2,k}$ and the observed gradient magnitude fixed, decreasing ESS enlarges
-the error radius, contracts the admissible step, and weakens the certified
-improvement. This provides the finite-sample link between importance-weight
-concentration, gradient reliability, and policy improvement.
+Hence the usefulness of the importance-weighted update depends on the ESS quantities. Decreasing ESS enlarges
+the error radius, contracts the admissible step, and weakens the certified improvement. This provides the finite-sample link between importance-weight concentration, gradient reliability, and policy improvement.
 
 \subsection{When does clipping improve the update?}
 \label{sec:clipping-recovery}
 
-The preceding result characterizes the reliability of importance-weighted
-gradient estimation. Determining whether clipping is beneficial requires a
-separate comparison because clipping changes the gradient estimator itself.
-The statistical comparison is between the sampling variation removed by the
-modification and the bias introduced by changing or masking gradient
-contributions.
+We now extend the previous result the the arbitrary gradient estimator. The preceding result characterizes the reliability of importance-weighted gradient estimation. Thus, determining whether clipping is beneficial requires a comparison between the reailibilty of the gradient estimator itself. 
 
-Write
+To formalize, write
 $\widehat g_k(u):=\widehat g_N(u;\theta_k)$. For an arbitrary coefficient
 rule $u$, adding and subtracting the estimator mean gives
 \begin{equation}
@@ -505,16 +491,11 @@ rule $u$, adding and subtracting the estimator mean gives
  \end{aligned}
  \label{eq:clipping-risk-decomposition}
 \end{equation}
-The two terms are squared bias and sampling variation. Since the IS estimator
-is unbiased, an alternative estimator has lower MSE exactly when its reduction
-in sampling variation exceeds the squared bias introduced by modifying the
-coefficients. This gives the estimator-level bias--variance crossover.
+The two terms are classical quantities in statistical analysis: squared bias and sampling variation. 
 
-Lower MSE alone, however, does not determine the ordering of policy
-improvement: modifying the estimator can also remove components aligned with
-the population gradient. To compare estimators rather than step-size rules, we
-therefore hold the optimization step fixed. The following theorem gives the
-corresponding expected-improvement certificate.
+Intutively, the reliablity of the gradient estimator can be seen as the bias and variance trade off. One example is the IS estimator. As the IS estimator is unbiased, the reliablity of the IS estimator relies on the variance itself. Alternative estimator is thus beneficial when it admits lower MSE by adding comparably small amount of bias compared to the lowered variance.
+
+Lower MSE alone, however, does not determine the ordering of policy improvement: modifying the estimator can also remove components aligned with the population gradient. Combining these two insights, the following theorem gives the corresponding expected-improvement certificate.
 
 \begin{theorem}[Improvement certificate]
 \label{thm:fixed-step-certificate}
@@ -534,7 +515,7 @@ $\E\|\widehat g_k(u)\|_2^2<\infty$. For any step size $\eta_k>0$,
 \end{equation}
 \end{theorem}
 
-Denote the right-hand side by
+The right-hand side characterizes the requirement of the eismtatior fo the policy improvement. Denote the right-hand side by
 \begin{equation}
  B_k(u;\eta_k)
  :=
@@ -596,13 +577,11 @@ large enough to compensate for the gradient signal removed by masking.
 
 \paragraph{Truncation and masking.}
 TIS and PPO-style clipping instantiate different modifications within this
-comparison. TIS changes the magnitude of an importance coefficient while
-retaining the corresponding score contribution. PPO-style clipping instead
-sets selected score contributions to zero according to the
+comparison. TIS changes the magnitude of an importance coefficient while retaining the corresponding score contribution. At high-level of truncation, the estimator admits the minimal addition of the bias with the guarantee of the finite second momentum. However, this value can be vacuous. PPO-style clipping instead sets selected score contributions to zero according to the
 advantage-dependent clipping condition. Both alter the bias and second moment
 of the resulting gradient estimator, and
 Corollary~\ref{cor:certificate-crossover} compares their optimization
-consequences through the same alignment--second-moment criterion.
+consequences through the same alignment-second-moment criterion.
 
 Taken together, the analysis establishes the two links needed for the
 remainder of the paper. For importance-weighted estimation, ESS enters the
@@ -842,10 +821,7 @@ We next test whether the same construction extends beyond the
 Qwen3-30B-A3B setting. We first change model scale while retaining the
 mathematical-reasoning objective.
 
-Figure~\ref{fig:llm-8b-transfer} extends the recipe comparison to dense
-Qwen3-8B. ESS-conditioned optimization finishes above its clipped counterpart
-under both standard GRPO and Clip-Higher. The same ordering therefore persists
-across model scale and across the two clipping rules.
+Figure~\ref{fig:llm-8b-transfer} extends the recipe comparison to dense Qwen3-8B. ESS-conditioned optimization demonstrates stronger efficiency above its clipped couterpart under both standard GRPO and Clip-Higher. 
 
 \begin{figure}[htbp]
   \centering
@@ -858,12 +834,9 @@ across model scale and across the two clipping rules.
   \label{fig:llm-8b-transfer}
 \end{figure}
 
-We then reduce the model to Qwen3-1.7B while retaining the mathematical-
-reasoning objective. Figure~\ref{fig:llm-17b-transfer} reports evaluation
-performance for the two matched learning-rate recipes and overlays ESS for
-TIS-3 + Clip. TIS-3 + Clip reaches a final AIME score of $12.1\%$, compared
-with $10.2\%$ for GRPO. The ESS curve tracks the finite-rollout support
-available to the TIS-3 + Clip updates throughout training.
+We then reduce the model to Qwen3-1.7B while retaining the mathematical-reasoning objective. Figure~\ref{fig:llm-17b-transfer} reports evaluation performance for the two matched learning-rate recipes and overlays ESS for
+TIS-3 + Clip. Remarkably, the ESS-condition was above the ESS condition threshold (0.1), hence, the optimization never performed clipping thus resembles the behavior of the TIS clipping performance. Interesting enough the performance was stable and achieved a higher performance even in the prolonged training of 500. This theoretical expalanation matches the observation given in other paper, where the TIS shows reasonalbe training trajectories in the early logs.
+
 
 \begin{figure}[H]
   \centering
