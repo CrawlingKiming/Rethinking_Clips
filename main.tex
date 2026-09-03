@@ -738,23 +738,21 @@ optimization rule studied next: retain the importance-weighted update while
 its reliability remains high, and introduce clipping when ESS indicates that
 additional estimator control has become valuable.
 
-```latex
 \section{ESS-conditioned policy optimization}
 \label{sec:ess-conditioned-optimization}
 
-The preceding section showed that decreasing sequence ESS accompanies a loss
-of reliable subsequent improvement under importance-weighted policy updates.
-We now test the corresponding intervention: retain the importance-weighted
-update while ESS remains above a fixed threshold, and activate clipping when
-ESS falls below it. The central empirical question is whether this timing
-preserves the learning achieved by importance weighting while reducing the
-late-stage degradation observed under continued TIS or unclipped updates.
+The preceding experiments show that decreasing sequence ESS accompanies a loss
+of reliable subsequent improvement under importance-weighted updates. We now
+ask whether this reliability signal can be used to time clipping. Rather than
+applying clipping throughout training, we retain the importance-weighted
+update while ESS remains above a fixed threshold and activate clipping once
+ESS falls below it.
 
-\subsection{Update rule and evaluation protocol}
+\subsection{Update rule and protocol}
 
-Let $\widehat g_{\mathrm{IW}}$ denote an importance-weighted update and
+Let $\widehat g_{\mathrm{IW}}$ denote the importance-weighted update and
 $\widehat g_{\mathrm{clip}}$ a prespecified clipped update. Given an ESS
-threshold $\tau$, we define
+threshold $\tau$, we use
 \begin{equation}
   \widehat g_{\mathrm{ESS}}
   =
@@ -766,442 +764,708 @@ threshold $\tau$, we define
   \end{cases}
   \label{eq:llm-gate}
 \end{equation}
-Thus, ESS determines when clipping is activated, while the clipping rule
-determines how the update is modified after activation. We use
-$\tau=0.1$ in the primary experiments.
+ESS therefore determines when clipping is introduced, while the clipping rule
+determines how the update is modified thereafter. We use $\tau=0.1$ in the
+primary experiments.
 
-The main experiment trains Qwen3-30B-A3B for up to 200 policy updates on the
-boxed mathematical-reasoning data of \citet{yu2025dapo} and evaluates
-AIME-2024 using mean@16. The primary importance-weighted branch is TIS with
-ratio cap 3, and a separate ablation replaces TIS with an unclipped update.
-For the clipped branch, we consider conventional GRPO clipping
+Our main experiments train Qwen3-30B-A3B for up to 200 policy updates on the
+boxed mathematical-reasoning data of \citet{yu2025dapo} and evaluate
+AIME-2024 using mean@16. The primary importance-weighted update is TIS with
+ratio cap 3. At low ESS, we consider conventional GRPO clipping
 \citep{shao2024deepseekmath}, Clip-Higher \citep{yu2025dapo}, and DPPO
-\citep{qi2026dppo}.
+\citep{qi2026dppo}. We additionally replace TIS-3 with an unclipped update to
+test whether the timing principle depends on truncation.
 
-The comparisons serve two different purposes. The matched TIS-3 comparison
-and the unclipped ablation isolate the effect of activating clipping according
-to ESS. The remaining 30B comparisons evaluate complete training recipes:
-the static baselines retain their native token-mean aggregation, whereas the
-TIS-3 conditional recipes use sum normalization. We therefore use the matched
-comparisons to establish the effect of ESS conditioning and the complete-recipe
-comparisons to evaluate its broader optimization performance.
+The static 30B baselines use their native token-mean aggregation, whereas the
+TIS-3 conditional recipes use sum normalization. We therefore interpret these
+comparisons as complete training recipes. The subsequent unclipped experiment
+keeps the importance-weighted branch fixed and isolates the effect of
+introducing clipping according to ESS.
 
-\subsection{Main results on Qwen3-30B-A3B}
+\subsection{Main results}
 \label{sec:llm-experiments}
 
-We first isolate the effect of the ESS-conditioned intervention.
-Figure~\ref{fig:llm-main} compares ungated TIS-3 with the same TIS-3
-trajectory followed by Clip-Higher once ESS falls below $0.1$. Ungated TIS-3
-initially learns rapidly, reaching an AIME-2024 mean@16 of $31.7\%$, but
-subsequently collapses to $0.417\%$. The ESS-conditioned trajectory instead
-reaches $47.3\%$ and retains $44.8\%$ at step 200. Activating clipping after
-the ESS transition therefore changes the late-stage trajectory without imposing
-the same restriction throughout early training.
+Figure~\ref{fig:llm-main} compares ESS-conditioned optimization with static
+clipping across three commonly used update rules. In all three cases, delaying
+clipping improves both the peak and final AIME performance. Relative to the
+corresponding static recipes, the final-score improvements range from $6.88$
+to $12.3$ percentage points. The common behavior is that TIS-3 preserves rapid
+learning early in training, while the clipping rule becomes active only after
+ESS enters the low-reliability regime identified in Section~5.
+
+The final comparison in Figure~\ref{fig:llm-main} places this improvement
+against the failure mode that motivated the paper. Ungated TIS-3 initially
+improves but eventually collapses, reaching a final AIME score of $0.417\%$.
+The TIS-3-to-Clip-Higher trajectory from Figure~\ref{fig:llm-main}(b), by
+contrast, reaches $47.3\%$ and retains $44.8\%$ at the end of training.
+Selective clipping therefore retains the early learning of TIS while avoiding
+the late failure produced by continuing the same importance-weighted update.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]
   {figures_mains/result/q30ba3b/curves/overall.pdf}
-  \caption{\textbf{ESS-conditioned clipping preserves importance-weighted
-  learning while reducing late-stage failure on Qwen3-30B-A3B.}
-  Panel (d) provides the matched intervention comparison: the ungated
-  trajectory continues TIS-3, whereas the conditional trajectory activates
-  Clip-Higher when $\widehat\rho<0.1$. Panels (a)--(c) compare complete
-  TIS-3-plus-ESS recipes with static GRPO, Clip-Higher, and DPPO recipes,
-  respectively. The complete-recipe comparisons use their corresponding
-  aggregation schemes described in the text. Direct labels report the final
-  observed AIME-2024 mean@16.}
+  \caption{Qwen3-30B-A3B math RLVR over 200 policy updates. Dashed curves
+  denote the static comparison, and solid curves use TIS-3 while
+  $\widehat\rho\ge0.1$ and activate the indicated clipping rule below the
+  threshold. (a) GRPO clipping. (b) Clip-Higher. (c) DPPO.
+  (d) Ungated TIS-3 compared with the TIS-3-to-Clip-Higher trajectory from
+  (b), highlighting the late collapse avoided by ESS-conditioned clipping.
+  End labels report the final observed AIME-2024 mean@16.}
   \label{fig:llm-main}
 \end{figure}
 
-The same intervention principle applies without a truncation cap.
-Figure~\ref{fig:llm-noclip-gate} uses the unclipped trajectory analyzed in the
-preceding section and activates conventional clipping only after ESS falls
-below $0.1$. The two trajectories attain comparable peak performance, but the
-conditional trajectory finishes at $38.1\%$, compared with $34.6\%$ when the
-unclipped update is continued through step 200. Together with the TIS-3
-comparison, this result shows that the timing effect is not specific to a
-particular truncation cap.
+We next remove truncation from the importance-weighted branch.
+Figure~\ref{fig:llm-noclip-gate} compares an unclipped trajectory with the
+same update followed by conventional clipping when ESS falls below $0.1$.
+Both trajectories attain similar peak performance, but continued unclipped
+optimization subsequently degrades to $34.6\%$, whereas ESS-conditioned
+clipping retains $38.1\%$ at step 200. The benefit of conditioning is therefore
+not tied to the particular TIS cap used in the primary experiment.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.72\linewidth]
   {figures_mains/result/q30ba3b/noclip/overall.pdf}
-  \caption{\textbf{ESS-conditioned clipping also reduces late degradation
-  under an unclipped update.}
-  Both trajectories use the unclipped update while $\widehat\rho\ge0.1$; the
-  conditional trajectory activates conventional clipping below the threshold.
-  Direct labels report the step-200 AIME-2024 mean@16.}
+  \caption{Qwen3-30B-A3B math RLVR with an unclipped importance-weighted
+  update. The dashed curve continues the unclipped update throughout training;
+  the solid curve activates conventional clipping when
+  $\widehat\rho<0.1$. End labels report the step-200 AIME-2024 mean@16.}
   \label{fig:llm-noclip-gate}
 \end{figure}
+\FloatBarrier
 
-Panels (a)--(c) of Figure~\ref{fig:llm-main} evaluate the same construction
-with several clipping rules. Across GRPO, Clip-Higher, and DPPO, the
-ESS-conditioned recipes attain both higher peak and higher final AIME scores
-than the corresponding static recipes, with endpoint improvements ranging
-from $6.88$ to $12.3$ percentage points. Because these comparisons retain the
-native aggregation of each static baseline while using sum normalization in
-the TIS-3 conditional recipes, they should be interpreted as comparisons
-between complete training recipes rather than isolated ablations of the ESS
-gate. The matched results above provide the direct evidence for the timing
-intervention; panels (a)--(c) show that the resulting construction remains
-effective across different choices of clipping rule.
 
 \subsection{Transfer across model scale and training objective}
 
-The 30B experiments establish the intervention on the model where the delayed
-failure was initially observed. We next change the model architecture while
-holding the mathematical-reasoning objective fixed.
+We next test whether the same construction extends beyond the
+Qwen3-30B-A3B setting. We first change model scale while retaining the
+mathematical-reasoning objective.
 
 Figure~\ref{fig:llm-8b-transfer} reports aggregation-matched comparisons on
-dense Qwen3-8B. The ESS-conditioned construction finishes above its static
-counterpart under both Clip-Higher and DPPO. The gains are smaller than the
-late-stage rescue observed on Qwen3-30B-A3B, but the endpoint ordering remains
-unchanged across both comparisons. The effect of ESS conditioning therefore
-extends beyond the 30B mixture-of-experts setting.
+dense Qwen3-8B. ESS-conditioned optimization finishes above its static
+counterpart under both Clip-Higher and DPPO. Although the improvement is
+smaller than the late-stage rescue observed on Qwen3-30B-A3B, the same
+ordering persists across both update rules.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]
   {figures_mains/result/8b/curves/overall.pdf}
-  \caption{\textbf{ESS-conditioned updates retain their advantage on dense
-  Qwen3-8B.}
-  Panel (a) compares static and ESS-conditioned Clip-Higher under token-mean
-  aggregation. Panel (b) gives the corresponding DPPO comparison under
-  sum-normalized aggregation. Direct labels report the step-200 AIME-2024
-  mean@16.}
+  \caption{Qwen3-8B math RLVR over 200 policy updates. Dashed curves use the
+  static update and solid curves use its ESS-conditioned counterpart. (a) Clip-Higher. (b) DPPO. End labels report the step-200 AIME-2024 mean@16.}
   \label{fig:llm-8b-transfer}
 \end{figure}
 
 We further change both the objective and the data by training
-Qwen3-4B-Instruct-2507 for 200 updates on Anthropic HH-RLHF
-\citep{bai2022hh}, using Skywork-Reward-Llama-3.1-8B
-\citep{liu2024skywork} as the reward model.
-Figure~\ref{fig:llm-rlhf-transfer} compares GRPO with the complete
-TIS-3-plus-ESS recipe. The conditional recipe reaches a final reward-model
-score of $60.7$, compared with $43.0$ for GRPO. The benefit therefore persists
-when moving from verifiable mathematical rewards to learned-reward
-optimization. This experiment evaluates optimization of the specified reward
-model rather than human preference directly.
+Qwen3-4B-Instruct-2507 on Anthropic HH-RLHF \citep{bai2022hh}, using
+Skywork-Reward-Llama-3.1-8B \citep{liu2024skywork} as the reward model.
+Figure~\ref{fig:llm-rlhf-transfer} shows the same advantage under
+learned-reward optimization. The TIS-3-plus-ESS recipe reaches a final
+reward-model score of $60.7$, compared with $43.0$ for GRPO. This experiment
+evaluates optimization of the specified reward model rather than human
+preference directly.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.72\linewidth]
   {figures_mains/result/rlhf_4b/overall.pdf}
-  \caption{\textbf{The ESS-conditioned construction also improves
-  learned-reward optimization.}
-  On HH-RLHF with Qwen3-4B-Instruct-2507, the complete TIS-3-plus-ESS recipe
-  reaches a reward-model score of $60.7$, compared with $43.0$ for GRPO after
-  200 updates.}
+  \caption{RLHF on Qwen3-4B-Instruct-2507 using
+  Skywork-Reward-Llama-3.1-8B as the reward model. Thin curves show per-step
+  reward-model scores and thick curves show their trailing seven-step means.
+  The dashed curve is GRPO and the solid curve is TIS-3 with ESS-conditioned
+  clipping. End labels report the step-200 observations.}
   \label{fig:llm-rlhf-transfer}
 \end{figure}
 \FloatBarrier
 
-Across these experiments, ESS does not define a new clipping rule. It
-determines when a prespecified clipping rule is introduced. This separation
-allows the importance-weighted estimator to govern the update before the
-reliability transition identified in Section~5, while retaining the variance
-control of clipping later in training.
 
-\subsection{Ablations: intervention timing and action}
+\subsection{Ablations}
 
-The conditional construction contains two distinct choices: the ESS threshold
-determines when to intervene, and the low-ESS update determines what
-intervention is applied. We examine these choices separately.
+The ESS-conditioned construction contains two distinct choices: the threshold
+determines when the update changes, while the low-ESS rule determines how it
+changes. We study these components separately.
 
-\paragraph{Sensitivity to the ESS threshold.}
-Figure~\ref{fig:ess-threshold-ablation} varies only the threshold $\tau$ for
-the TIS-3/GRPO construction. Thresholds $0.05$, $0.1$, and $0.2$ all avoid the
-catastrophic $0.417\%$ endpoint of ungated TIS-3, reaching last-observed
-AIME-2024 mean@16 scores of $43.1\%$, $38.5\%$, and $34.8\%$, respectively.
-Changing $\tau$ changes the timing of the transition from TIS to clipping and
-therefore changes the amount of training performed under each estimator. The
-collapse-prevention effect persists across the tested fourfold range, while
-the final performance remains sensitive to intervention timing.
+\paragraph{ESS threshold.}
+Figure~\ref{fig:ess-threshold-ablation} varies only $\tau$ in the
+TIS-3/GRPO construction. Thresholds $0.05$, $0.1$, and $0.2$ all avoid the
+collapse of ungated TIS-3, with last-observed AIME scores of $43.1\%$,
+$38.5\%$, and $34.8\%$, respectively. The threshold therefore controls the
+timing of clipping, and the resulting performance varies with how long TIS-3
+remains active. The collapse-prevention behavior persists across the tested
+range.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.58\linewidth]
   {figures_mains/result/q30ba3b/cispo3_ess_threshold/eval.pdf}
-  \caption{\textbf{Collapse prevention is robust across the tested ESS
-  thresholds.}
-  For the TIS-3/GRPO construction, all
-  $\tau\in\{0.05,0.1,0.2\}$ avoid the ungated TIS-3 collapse, while final
-  performance varies with intervention timing. Labels report peak and
-  last-observed AIME-2024 mean@16.}
+  \caption{Sensitivity to the ESS threshold for TIS-3 with GRPO clipping on
+  Qwen3-30B-A3B. Curves use $\tau\in\{0.05,0.1,0.2\}$; clipping is activated
+  when normalized sequence ESS falls below the corresponding threshold.
+  Legend entries report peak and final AIME-2024 mean@16.}
   \label{fig:ess-threshold-ablation}
 \end{figure}
 
-\paragraph{Clipping versus skipping after the ESS trigger.}
-ESS specifies when to intervene but does not determine the intervention
+\paragraph{Clipping versus skipping.}
+ESS determines when to intervene but does not prescribe the intervention
 itself. We therefore replace clipping with a complete update veto while
-leaving the ESS trigger unchanged.
+keeping the same ESS threshold.
 
-Figure~\ref{fig:skip-variants} shows that skipping is sufficient to prevent
-catastrophic failure in TIS-5: the ungated trajectory collapses to $0.00\%$,
-whereas ESS-conditioned skipping finishes at $39.4\%$. The comparison differs
-when the importance-weighted trajectory remains viable for longer. Under the
-unclipped update, skipping finishes at $35.6\%$, below the $38.1\%$ obtained
-with ESS-conditioned clipping, and also gives up more of the attainable peak.
-The intervention therefore matters after the reliability transition has been
-detected. A complete veto eliminates the unreliable update altogether, whereas
-clipping can continue to retain part of the gradient signal.
+Figure~\ref{fig:skip-variants} shows two distinct outcomes. For TIS-5,
+skipping prevents the complete collapse of the ungated trajectory, improving
+the final AIME score from $0.00\%$ to $39.4\%$. For the unclipped update,
+however, skipping sacrifices substantially more learning: its peak and final
+performance remain below those obtained with ESS-conditioned clipping.
+Detection and control are therefore separate decisions. ESS determines when
+the importance-weighted update becomes unreliable, while the intervention
+determines how much gradient signal is retained after that transition.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]
   {figures_mains/result/q30ba3b/skip_gate/overall.pdf}
-  \caption{\textbf{The intervention after the ESS trigger affects retained
-  learning.}
-  Panel (a) compares clipping and a complete update veto after the ESS
-  threshold under an unclipped trajectory. Panel (b) shows that the same
-  skipping rule prevents the collapse of TIS-5. All curves report AIME-2024
+  \caption{ESS-conditioned update skipping on Qwen3-30B-A3B. Dashed curves
+  apply no ESS action, and solid curves skip the update when
+  $\widehat\rho<0.1$. (a) Unclipped importance-weighted update.
+  (b) TIS with cap 5. End labels report the final observed AIME-2024
   mean@16.}
   \label{fig:skip-variants}
 \end{figure}
 \FloatBarrier
 
-The two ablations separate the roles of the diagnostic and the intervention.
-The threshold controls when the estimator is modified, whereas the
-post-threshold rule controls how much of the gradient update is retained.
-This distinction is consistent with the estimator analysis in
-Section~\ref{sec:theory}: detecting a deterioration in importance-weighted
-reliability does not by itself specify the optimal modification, because
-different interventions induce different tradeoffs between estimator variation
-and retained gradient alignment.
+Together, the ablations separate the two roles in ESS-conditioned
+optimization. The ESS threshold determines the intervention time; the
+post-threshold estimator determines the resulting bias--variation tradeoff.
+This distinction mirrors the theoretical analysis: identifying deterioration
+in importance-weighted reliability does not by itself determine how the
+gradient estimator should be modified.
 
 
 \section{Conclusion}
 
 We studied clipping in policy optimization through the finite-sample
-reliability of the gradient estimator. Off-policy policy gradients can be
-written as importance-weighted means, making estimator reliability a direct
-part of the optimization problem. Our theory connects gradient-estimation
-error to one-step policy improvement and shows explicitly how the second
-moment of the importance weights, summarized by ESS, enters the MSE and
-high-probability error radius of the IS estimator. For clipped estimators, the
-analysis identifies a separate tradeoff: reducing the update second moment is
-beneficial only when that reduction compensates for the population-gradient
-alignment removed by clipping.
+reliability of the gradient estimator. Off-policy policy gradients admit an
+importance-weighted mean-estimation formulation, under which ESS enters
+directly through the second moment of the importance weights. Our theory
+connects this finite-sample estimation error to one-step policy improvement
+and separately characterizes when clipping compensates for the gradient
+alignment it removes.
 
-The Gaussian construction makes both mechanisms observable. As ESS decreases,
-the IS gradient becomes less reliable and positive improvement becomes less
-frequent. The estimator comparison then shows that lower MSE alone does not
-determine the preferred update: truncation or masking becomes advantageous
-only after its reduction in update variation outweighs the gradient signal it
-removes.
+The Gaussian experiment makes these relationships explicit. As ESS decreases,
+the importance-weighted gradient becomes less reliable and positive policy
+improvement becomes less frequent. The estimator comparison further shows that
+lower estimation error alone is insufficient to determine the preferred
+update: clipping or truncation becomes advantageous only when its reduction in
+update variation compensates for the useful gradient signal it removes.
 
-The large-model experiments show the corresponding training-time behavior.
-Under both TIS and unclipped updates, low sequence ESS is associated with a
-loss of reliable subsequent improvement. Activating clipping at this transition
-preserves the earlier learning of the importance-weighted update while reducing
-late-stage degradation. The same construction remains effective across
-multiple clipping rules, dense and mixture-of-experts models, and both RLVR
-and learned-reward optimization.
+The language-model experiments exhibit the corresponding training behavior.
+Under both TIS and unclipped updates, decreasing ESS precedes a loss of reliable
+subsequent improvement. Using this signal to time clipping retains the rapid
+early learning of importance weighting while reducing its late-stage
+degradation. The same construction improves performance across clipping rules,
+model scales, and both RLVR and learned-reward optimization.
 
-These results position ESS as a finite-sample reliability statistic rather
-than as a clipping rule itself. Its role is to identify when continued
-importance-weighted estimation becomes unreliable; the appropriate response
-remains an estimator choice. This separation provides a principled basis for
-using clipping selectively rather than imposing it throughout policy
-optimization.
-```
+ESS therefore serves a specific role in policy optimization: it characterizes
+the finite-sample reliability of importance-weighted estimation and provides a
+principled signal for deciding when additional estimator control becomes
+valuable. Clipping remains an estimator choice; ESS determines when that choice
+matters.
+
 
 \appendix
 
 \section{Numerical Experiments}
 
-
-\subsection{Gaussian bandit}
+\subsection{Gaussian bandit: exact calculations}
 \label{app:gaussian}
 
-This section gives the calculations used in
-Section~\ref{sec:gaussian-example}. 
+This appendix gives the calculations underlying the Gaussian experiment in
+Section~\ref{sec:gaussian-example}. All estimator
+moments and expected one-step gains are available from truncated Gaussian
+moments. Monte Carlo simulation is used only to evaluate the batch-level
+probabilities in Figure~\ref{fig:gaussian-is-reliability}(b).
 
-\paragraph{Setup}
+\paragraph{Gaussian policy pair and ESS path.}
 
-
-
-We compare IS, TIS with cap $c=3$, and the PPO-style rule in
-Equation~\eqref{eq:ppo-coefficient-rule}, using the exact current-policy value
-baseline.
-
-Because the score contribution is polynomial and each mask
-boundary is linear in $z$, the means, MSEs, and update second moments are finite
-sums of truncated Gaussian moments.
-
-We choose a quadratic reward because it makes the smoothness certificate equal
-to the true expected gain. Any separation between the two oracles is therefore
-genuine rather than an artifact of a loose bound.
-
-Consider the current policy and rollout policy
+Fix the current policy
 \begin{equation}
- P_\theta=\mathcal N(\theta,1),
- \qquad
- Q_\Delta=\mathcal N(\theta-\Delta,1),
- \qquad \Delta\ge0,
- \label{eq:gaussian-policy-pair}
+    P_\theta=\mathcal N(\theta,1)
 \end{equation}
-with reward $R(a)=-\tfrac12(a-a^\star)^2$. We hold the current policy fixed and
-vary only the rollout gap $\Delta$. Writing $g:=a^\star-\theta>0$, the
-objective is
+and consider rollout policies
 \begin{equation}
- J(\theta)=-\frac12\{(\theta-a^\star)^2+1\},
- \qquad \nabla J(\theta)=g,
- \qquad L=1.
- \label{eq:gaussian-objective}
+    Q_\Delta=\mathcal N(\theta-\Delta,1),
+    \qquad \Delta\ge0.
+    \label{eq:gaussian-policy-pair}
 \end{equation}
-Here $\theta$ is the fixed pre-update mean and $Q_\Delta$ remains frozen during
-the hypothetical one-step update. We vary $\Delta$ only across common-state
-comparisons.
-For $z=a-\theta$, the likelihood ratio and normalized ESS reduce to
+Thus, increasing $\Delta$ changes only the distance between the rollout and
+current policies. Let
+\[
+    z:=a-\theta.
+\]
+Then
+\[
+    z\sim\mathcal N(0,1)
+    \quad\text{under }P_\theta,
+    \qquad
+    z\sim\mathcal N(-\Delta,1)
+    \quad\text{under }Q_\Delta.
+\]
+The likelihood ratio is
 \begin{equation}
- W_\Delta(z)=\exp\{\Delta z+\Delta^2/2\},
- \qquad
- \rho(\Delta)=\{\E_{Q_\Delta}[W_\Delta^2]\}^{-1}
- =\exp(-\Delta^2).
- \label{eq:gaussian-ratio-ess}
+    W_\Delta(z)
+    =
+    \frac{dP_\theta}{dQ_\Delta}(z)
+    =
+    \exp\left\{\Delta z+\frac{\Delta^2}{2}\right\}.
+    \label{eq:gaussian-likelihood-ratio}
 \end{equation}
-Normalized ESS is therefore a one-to-one coordinate for this branch.
+A direct calculation gives
+\begin{equation}
+    \E_{Q_\Delta}[W_\Delta^2]
+    =e^{\Delta^2},
+    \qquad
+    \rho(\Delta)
+    =e^{-\Delta^2}.
+    \label{eq:gaussian-ratio-ess}
+\end{equation}
+Hence $\Delta$ and normalized ESS are in one-to-one correspondence:
+\begin{equation}
+    \Delta=\sqrt{-\log\rho}.
+    \label{eq:gaussian-delta-rho}
+\end{equation}
+All figures are therefore parameterized by $\rho$, while the calculations
+below are carried out through the corresponding $\Delta$.
 
-Write $\mu_u:=\E[\widehat g_u]$, $s_u:=\E[\widehat g_u^2]$, and
-$B_u(\eta):=\eta g\mu_u-\eta^2s_u/2$. For this quadratic objective, the
-fixed-step certificate is exact:
-\begin{equation}
- \E[J(\theta+\eta\widehat g_u)-J(\theta)]
- =\eta g\mu_u-\frac{\eta^2}{2}s_u
- =B_u(\eta).
- \label{eq:gaussian-exact-gain}
-\end{equation}
-We use $N=32$, the standard PPO radius $\epsilon=0.2$, TIS cap $c=3$, and
-choose $g=2$ and $\eta=0.4$ so that the reliability and estimator-crossover
-regimes are visible on one monotone ESS path.
+\paragraph{Reward, population gradient, and per-sample contribution.}
 
-\paragraph{Exact Closed Form Computations}
-Let $z=a-\theta$. Under the current policy,
-$z\sim\mathcal N(0,1)$ and the score is $z$. The exact current-policy value
-baseline gives
+We use the quadratic reward
 \begin{equation}
- A_g(z)=gz+\frac{1-z^2}{2},
- \qquad
- f_g(z):=zA_g(z)=gz^2+\frac{z-z^3}{2}.
- \label{eq:gaussian-advantage-contribution}
+    R(a)=-\frac12(a-a^\star)^2
 \end{equation}
-Although $f_g$ is unbounded, all polynomial Gaussian moments used below are
-finite, so the finite-moment conditions of
-Lemma~\ref{lem:rho-gradient-reliability} and
-Theorem~\ref{thm:permissive-reliability} hold. IS uses $W_\Delta f_g$ and TIS
-uses $\min\{W_\Delta,c\}f_g$. The PPO-style candidate uses
-$W_\Delta f_gM_{\epsilon,\Delta}$, where
+and define
 \begin{equation}
- M_{\epsilon,\Delta}(z)
- :=\mathbf 1\{A_g(z)\ge0,\ W_\Delta(z)\le1+\epsilon\}
- +\mathbf 1\{A_g(z)<0,\ W_\Delta(z)\ge1-\epsilon\}.
- \label{eq:gaussian-ppo-mask}
+    d:=a^\star-\theta>0.
 \end{equation}
-Let $M_{\mathrm{IS}}\equiv1$ and
-$M_{\mathrm{P}}=M_{\epsilon,\Delta}$. Change of measure gives the exact
-per-sample moments
+The current-policy objective and gradient are
+\begin{equation}
+    J(\theta)
+    =
+    -\frac12\left\{d^2+1\right\},
+    \qquad
+    \nabla J(\theta)=d.
+    \label{eq:gaussian-objective}
+\end{equation}
+We hold $\theta$, and therefore $d$, fixed while varying $\Delta$.
+
+Using the exact current-policy value as the baseline, the advantage of a
+sample with centered action $z$ is
+\begin{equation}
+    A(z)
+    =
+    dz+\frac{1-z^2}{2}.
+    \label{eq:gaussian-advantage}
+\end{equation}
+Since the score of $\mathcal N(\theta,1)$ is $z$, the corresponding
+policy-gradient contribution is the cubic polynomial
+\begin{equation}
+    \psi(z)
+    :=
+    zA(z)
+    =
+    dz^2+\frac{z-z^3}{2}.
+    \label{eq:gaussian-gradient-contribution}
+\end{equation}
+In particular,
+\[
+    \E_{P_\theta}[\psi(z)]=d,
+\]
+as required by the policy-gradient identity.
+
+We compare three estimators using samples
+$z_1,\ldots,z_N\stackrel{\mathrm{iid}}{\sim}\mathcal N(-\Delta,1)$.
+Their per-sample contributions are
 \begin{align}
- \mu_u(\Delta)
- &=\E_{U\sim\mathcal N(0,1)}[f_g(U)M_u(U)],
- \nonumber\\
- h_u(\Delta)
- &=e^{\Delta^2}
- \E_{V\sim\mathcal N(\Delta,1)}[f_g(V)^2M_u(V)],
- \qquad u\in\{\mathrm{IS},\mathrm{P}\}.
- \label{eq:gaussian-exact-moments}
+    \xi_{\mathrm{IS}}(z)
+    &:=W_\Delta(z)\psi(z),
+    \label{eq:gaussian-is-contribution}\\
+    \xi_{\mathrm{T}}(z)
+    &:=\min\{W_\Delta(z),c\}\psi(z),
+    \label{eq:gaussian-tis-contribution}\\
+    \xi_{\mathrm{P}}(z)
+    &:=W_\Delta(z)\psi(z)M_{\epsilon,\Delta}(z),
+    \label{eq:gaussian-ppo-contribution}
 \end{align}
-For TIS, define
-$b_c(\Delta):=(\log c-\Delta^2/2)/\Delta$. Its exact moments are
+where $c=3$, $\epsilon=0.2$, and
+\begin{equation}
+    M_{\epsilon,\Delta}(z)
+    =
+    \mathbf 1
+    \{A(z)\ge0,\ W_\Delta(z)\le1+\epsilon\}
+    +
+    \mathbf 1
+    \{A(z)<0,\ W_\Delta(z)\ge1-\epsilon\}.
+    \label{eq:gaussian-ppo-mask}
+\end{equation}
+The corresponding batch estimator is
+\begin{equation}
+    \widehat g_u
+    =
+    \frac1N\sum_{i=1}^N\xi_u(z_i),
+    \qquad
+    u\in\{\mathrm{IS},\mathrm{T},\mathrm{P}\}.
+    \label{eq:gaussian-batch-estimator}
+\end{equation}
+
+This representation reduces every quantity used in the figures to the first
+two moments of $\xi_u$. Define
+\begin{equation}
+    \mu_u(\Delta):=\E_{Q_\Delta}[\xi_u(z)],
+    \qquad
+    \nu_u(\Delta):=\E_{Q_\Delta}[\xi_u(z)^2].
+    \label{eq:gaussian-first-second-moments}
+\end{equation}
+Then
 \begin{align}
- \mu_{\mathrm{T}}(\Delta)
- &=\E_{U\sim\mathcal N(0,1)}
- [f_g(U)\mathbf 1\{U\le b_c\}]
- +c\E_{U\sim\mathcal N(-\Delta,1)}
- [f_g(U)\mathbf 1\{U>b_c\}],
- \nonumber\\
- h_{\mathrm{T}}(\Delta)
- &=e^{\Delta^2}\E_{V\sim\mathcal N(\Delta,1)}
- [f_g(V)^2\mathbf 1\{V\le b_c\}]
- +c^2\E_{V\sim\mathcal N(-\Delta,1)}
- [f_g(V)^2\mathbf 1\{V>b_c\}].
- \label{eq:gaussian-tis-moments}
+    \E[\widehat g_u]
+    &=\mu_u,
+    \label{eq:gaussian-estimator-mean}\\
+    \E[\widehat g_u^2]
+    &=
+    \mu_u^2+\frac{\nu_u-\mu_u^2}{N},
+    \label{eq:gaussian-estimator-second-moment}\\
+    \E[(\widehat g_u-d)^2]
+    &=
+    (\mu_u-d)^2+\frac{\nu_u-\mu_u^2}{N}.
+    \label{eq:gaussian-estimator-mse}
 \end{align}
-In particular, $\mu_{\mathrm{IS}}=g$. For an iid estimator with batch size $N$,
+Thus, once $(\mu_u,\nu_u)$ are known, both the estimator MSE and the
+second-moment term in the policy-improvement certificate are known exactly.
+
+\paragraph{Exact Gaussian moment calculation.}
+
+The required moments can be evaluated by change of measure. For IS,
 \begin{equation}
- m_u=(\mu_u-g)^2+\frac{h_u-\mu_u^2}{N},
- \qquad
- s_u=\mu_u^2+\frac{h_u-\mu_u^2}{N}.
- \label{eq:gaussian-risk-second-moment}
+    \mu_{\mathrm{IS}}=d,
+    \qquad
+    \nu_{\mathrm{IS}}
+    =
+    e^{\Delta^2}
+    \E_{V\sim\mathcal N(\Delta,1)}
+    [\psi(V)^2].
+    \label{eq:gaussian-is-moments}
 \end{equation}
 
-For $g=2$, the IS weighted-contribution scale in
-Equation~\eqref{eq:weighted-contribution-scale} is
+For PPO masking,
 \begin{align}
- M_2(\Delta)
- &=\rho(\Delta)h_{\mathrm{IS}}(\Delta)
- \nonumber\\
- &=\frac{\Delta^6}{4}-2\Delta^5+\frac{29\Delta^4}{4}
- -18\Delta^3+\frac{65\Delta^2}{2}-24\Delta+\frac{29}{2}.
- \label{eq:gaussian-weighted-contribution-scale}
+    \mu_{\mathrm{P}}
+    &=
+    \E_{U\sim\mathcal N(0,1)}
+    [\psi(U)M_{\epsilon,\Delta}(U)],
+    \label{eq:gaussian-ppo-mean}\\
+    \nu_{\mathrm{P}}
+    &=
+    e^{\Delta^2}
+    \E_{V\sim\mathcal N(\Delta,1)}
+    [\psi(V)^2M_{\epsilon,\Delta}(V)].
+    \label{eq:gaussian-ppo-second-moment}
 \end{align}
-Hence the exact IS MSE is
-$\{e^{\Delta^2}M_2(\Delta)-4\}/32$ and its
-Lemma~\ref{lem:rho-gradient-reliability} envelope is
-$e^{\Delta^2}M_2(\Delta)/32$.
-Figure~\ref{fig:gaussian-is-reliability}(b) uses $10^5$ independent batches at
-each of 81 policy pairs and $\delta=0.1$ to estimate the probability of a
-positive adaptive-step certificate and the probability of actual positive
-policy improvement. On the same draws, the minimum realized coverage of both
-the Lemma~\ref{lem:rho-gradient-reliability} event and the
-Theorem~\ref{thm:permissive-reliability} inequality is $0.98277$, above the
-required $0.9$. Both $M_2(\Delta)$ and the adaptive step are evaluated from
-population quantities in this controlled theory validation; they are not
-proposed as an empirical gate.
 
-The advantage changes sign at $g\pm\sqrt{g^2+1}$, and the PPO ratio boundaries
-are $(\log(1\pm\epsilon)-\Delta^2/2)/\Delta$. Equations
-\eqref{eq:gaussian-exact-moments} and \eqref{eq:gaussian-tis-moments} are
-therefore finite sums of truncated normal polynomial moments. With
-$I_j(a,b):=\int_a^bz^j\phi(z)\,dz$, integration by parts gives
+For TIS, the truncation boundary is obtained from
+$W_\Delta(z)=c$:
 \begin{equation}
- I_j(a,b)
- =a^{j-1}\phi(a)-b^{j-1}\phi(b)+(j-1)I_{j-2}(a,b),
- \qquad j\ge2,
- \label{eq:truncated-normal-recursion}
+    b_c(\Delta)
+    :=
+    \frac{\log c-\Delta^2/2}{\Delta}.
+    \label{eq:gaussian-tis-boundary}
 \end{equation}
-starting from $I_0=\Phi(b)-\Phi(a)$ and
-$I_1=\phi(a)-\phi(b)$. Boundary terms vanish at infinity. Substituting these
-moments into Equation~\eqref{eq:gaussian-risk-second-moment} and the exact gain
-in Equation~\eqref{eq:gaussian-exact-gain} gives the reported boundaries.
+Splitting the integral at this boundary gives
+\begin{align}
+    \mu_{\mathrm{T}}
+    &=
+    \E_{U\sim\mathcal N(0,1)}
+    [\psi(U)\mathbf 1\{U\le b_c\}]
+    +
+    c\,
+    \E_{U\sim\mathcal N(-\Delta,1)}
+    [\psi(U)\mathbf 1\{U>b_c\}],
+    \label{eq:gaussian-tis-mean}\\
+    \nu_{\mathrm{T}}
+    &=
+    e^{\Delta^2}
+    \E_{V\sim\mathcal N(\Delta,1)}
+    [\psi(V)^2\mathbf 1\{V\le b_c\}]
+    +
+    c^2\,
+    \E_{V\sim\mathcal N(-\Delta,1)}
+    [\psi(V)^2\mathbf 1\{V>b_c\}].
+    \label{eq:gaussian-tis-second-moment}
+\end{align}
 
-\paragraph{Results}
-We evaluate
-$\sqrt{-\log(0.9)}\le\Delta\le\sqrt{-\log(0.005)}$. For each
-$u\in\{\mathrm{T},\mathrm{P}\}$, substitution into
-Corollary~\ref{cor:certificate-crossover} gives
+These expectations have closed forms because $\psi$ is a cubic polynomial and
+all estimator boundaries are linear thresholds in $z$. In particular, the
+advantage changes sign at
 \begin{equation}
- C_u(\rho)
- =\{m_{\mathrm{IS}}-m_u\}
- -(1-\eta)\{s_{\mathrm{IS}}-s_u\}
- =\frac{2}{\eta}\{B_u-B_{\mathrm{IS}}\}.
- \label{eq:gaussian-crossover-calculation}
+    z=d\pm\sqrt{d^2+1},
 \end{equation}
-Numerical evaluation of the closed-form moments gives
+while the PPO ratio boundaries are
 \begin{equation}
- \rho_{\mathrm{IS,TIS3}}=0.105,
- \qquad
- \rho_{\mathrm{IS,PPO}}=0.0392.
- \label{eq:gaussian-thresholds}
+    b_\pm(\Delta)
+    =
+    \frac{\log(1\pm\epsilon)-\Delta^2/2}{\Delta}.
+    \label{eq:gaussian-ppo-boundaries}
 \end{equation}
-At the TIS-3 root, the MSE reduction and discounted second-moment reduction
-both equal $3.94$; at the PPO root, both equal $11.0$. TIS-3 has lower
-MSE than both IS and PPO throughout the displayed branch, yet IS has the
-larger certificate for $\rho>0.105$. Below that point TIS-3 forms the upper
-certificate envelope. PPO crosses IS at $0.0392$ only pairwise: it remains
-below TIS-3 throughout the branch. Equation~\eqref{eq:gaussian-exact-gain}
-makes the same ordering exact for expected one-step policy improvement.
+The real line can therefore be partitioned at the two advantage roots and the
+two ratio boundaries, on each of which the PPO mask is constant.
+
+For completeness, let
+\begin{equation}
+    I_j(a,b)
+    :=
+    \int_a^b z^j\phi(z)\,dz.
+\end{equation}
+The truncated standard-normal moments satisfy
+\begin{equation}
+    I_j(a,b)
+    =
+    a^{j-1}\phi(a)
+    -
+    b^{j-1}\phi(b)
+    +
+    (j-1)I_{j-2}(a,b),
+    \qquad j\ge2,
+    \label{eq:truncated-normal-recursion}
+\end{equation}
+with
+\begin{equation}
+    I_0(a,b)=\Phi(b)-\Phi(a),
+    \qquad
+    I_1(a,b)=\phi(a)-\phi(b).
+\end{equation}
+After shifting the integration variable for nonzero Gaussian means,
+Equations~\eqref{eq:gaussian-is-moments}--\eqref{eq:gaussian-tis-second-moment}
+reduce to finite sums of these moments. All curves described below, except
+the batch probabilities in
+Figure~\ref{fig:gaussian-is-reliability}(b), are evaluated from these exact
+moments.
+
+\paragraph{Figure~\ref{fig:gaussian-is-reliability}: ESS and IS reliability.}
+
+We first reproduce the quantities used to validate the ESS-dependent
+reliability result. For IS, define
+\begin{equation}
+    M_2(\Delta)
+    :=
+    \rho(\Delta)\nu_{\mathrm{IS}}(\Delta)
+    =
+    \E_{V\sim\mathcal N(\Delta,1)}[\psi(V)^2].
+    \label{eq:gaussian-M2}
+\end{equation}
+For the setting used in the figure, $d=2$, this becomes
+\begin{align}
+    M_2(\Delta)
+    &=
+    \frac{\Delta^6}{4}
+    -2\Delta^5
+    +\frac{29\Delta^4}{4}
+    -18\Delta^3
+    +\frac{65\Delta^2}{2}
+    -24\Delta
+    +\frac{29}{2}.
+    \label{eq:gaussian-weighted-contribution-scale}
+\end{align}
+
+Because IS is unbiased,
+Equation~\eqref{eq:gaussian-estimator-mse} gives
+\begin{equation}
+    \operatorname{MSE}_{\mathrm{IS}}(\Delta)
+    =
+    \frac1N
+    \left\{
+        \frac{M_2(\Delta)}{\rho(\Delta)}
+        -d^2
+    \right\}.
+    \label{eq:gaussian-exact-is-mse}
+\end{equation}
+The finite-moment bound from
+Equation~\eqref{eq:rho-gradient-mse-bound} is
+\begin{equation}
+    \operatorname{MSE}_{\mathrm{IS}}(\Delta)
+    \le
+    \frac{M_2(\Delta)}
+         {N\rho(\Delta)}.
+    \label{eq:gaussian-is-mse-envelope}
+\end{equation}
+Figure~\ref{fig:gaussian-is-reliability}(a) plots these two quantities against
+$\rho=e^{-\Delta^2}$. Thus, every point in the left plot is obtained directly
+from Equations~\eqref{eq:gaussian-exact-is-mse} and
+\eqref{eq:gaussian-is-mse-envelope}; no Monte Carlo approximation is used.
+
+Figure~\ref{fig:gaussian-is-reliability}(b) evaluates the corresponding
+batch-level policy-improvement statement. We use
+\[
+    N=32,
+    \qquad
+    d=2,
+    \qquad
+    \delta=0.1,
+\]
+and evaluate 81 ESS values logarithmically spaced between $0.005$ and $0.9$.
+For each $\rho$, we set
+\[
+    \Delta=\sqrt{-\log\rho}
+\]
+and compute the theoretical error radius
+\begin{equation}
+    \varepsilon(\rho)
+    =
+    \sqrt{
+      \frac{M_2(\Delta)}
+           {\delta N\rho}
+    }.
+    \label{eq:gaussian-reliability-radius}
+\end{equation}
+
+At each ESS value, we independently generate $10^5$ batches of size $N$ from
+$Q_\Delta$. For every batch, we compute
+\begin{equation}
+    \widehat g_{\mathrm{IS}}
+    =
+    \frac1N\sum_{i=1}^N
+    W_\Delta(z_i)\psi(z_i)
+\end{equation}
+and the adaptive step from
+Theorem~\ref{thm:permissive-reliability},
+\begin{equation}
+    \gamma
+    =
+    \left(
+        1-\frac{\varepsilon(\rho)}
+                 {|\widehat g_{\mathrm{IS}}|}
+    \right)_+,
+    \label{eq:gaussian-adaptive-step}
+\end{equation}
+where $L=1$. The theorem gives a positive certificate exactly when
+\begin{equation}
+    |\widehat g_{\mathrm{IS}}|>\varepsilon(\rho).
+    \label{eq:gaussian-positive-certificate-event}
+\end{equation}
+The exact reward change produced by the same batch is
+\begin{equation}
+    \Delta J
+    =
+    d\gamma\widehat g_{\mathrm{IS}}
+    -
+    \frac{\gamma^2}{2}\widehat g_{\mathrm{IS}}^2.
+    \label{eq:gaussian-realized-improvement}
+\end{equation}
+Figure~\ref{fig:gaussian-is-reliability}(b) reports, at each ESS value, the
+fraction of batches satisfying
+Equation~\eqref{eq:gaussian-positive-certificate-event} and the fraction
+satisfying $\Delta J>0$. These are respectively the ``positive certificate''
+and ``actual improvement'' curves in the figure.
+
+As an additional check of the high-probability result, we also record the
+event
+\begin{equation}
+    |\widehat g_{\mathrm{IS}}-d|
+    \le
+    \varepsilon(\rho).
+\end{equation}
+Across the displayed ESS grid, its minimum empirical coverage is $0.98277$,
+which exceeds the required $1-\delta=0.9$.
+
+\paragraph{Figure~\ref{fig:gaussian-estimator-choice}: estimator crossover.}
+
+We next compare IS, TIS-3, and PPO at a common fixed step $\eta=0.4$.
+For the quadratic objective, the smoothness inequality is an equality.
+Indeed, for any realized scalar update $h$,
+\begin{equation}
+    J(\theta+\eta h)-J(\theta)
+    =
+    \eta dh-\frac{\eta^2}{2}h^2.
+\end{equation}
+Taking expectation with $h=\widehat g_u$ gives the exact expected gain
+\begin{equation}
+    \mathcal G_u(\eta)
+    :=
+    \E[J(\theta+\eta\widehat g_u)-J(\theta)]
+    =
+    \eta d\mu_u
+    -
+    \frac{\eta^2}{2}
+    \left(
+        \mu_u^2+\frac{\nu_u-\mu_u^2}{N}
+    \right).
+    \label{eq:gaussian-exact-gain}
+\end{equation}
+Thus, the fixed-step certificate in
+Theorem~\ref{thm:fixed-step-certificate} is exact in this experiment.
+
+Figure~\ref{fig:gaussian-estimator-choice}(a) plots
+\begin{equation}
+    \mathcal G_{\mathrm{T}}(\eta)
+    -
+    \mathcal G_{\mathrm{IS}}(\eta)
+    \qquad\text{and}\qquad
+    \mathcal G_{\mathrm{P}}(\eta)
+    -
+    \mathcal G_{\mathrm{IS}}(\eta)
+    \label{eq:gaussian-gain-gaps}
+\end{equation}
+against ESS. Positive values therefore indicate that the corresponding
+modified estimator has larger expected one-step improvement than IS.
+
+These differences are exactly equivalent to the crossover criterion in
+Corollary~\ref{cor:certificate-crossover}. Let
+\begin{equation}
+    S_u:=\E[\widehat g_u^2],
+    \qquad
+    m_u:=\E[(\widehat g_u-d)^2].
+\end{equation}
+Since $L=1$,
+\begin{equation}
+    \{m_{\mathrm{IS}}-m_u\}
+    -
+    (1-\eta)
+    \{S_{\mathrm{IS}}-S_u\}
+    =
+    \frac{2}{\eta}
+    \left\{
+        \mathcal G_u(\eta)
+        -
+        \mathcal G_{\mathrm{IS}}(\eta)
+    \right\}.
+    \label{eq:gaussian-crossover-identity}
+\end{equation}
+Consequently, the zero crossings in
+Figure~\ref{fig:gaussian-estimator-choice}(a) are precisely the estimator
+crossovers predicted by the corollary.
+
+Using the exact moments above and solving these one-dimensional equalities
+gives
+\begin{equation}
+    \rho_{\mathrm{IS,TIS3}}
+    =0.105,
+    \qquad
+    \rho_{\mathrm{IS,PPO}}
+    =0.0392.
+    \label{eq:gaussian-thresholds}
+\end{equation}
+Figure~\ref{fig:gaussian-estimator-choice}(b) plots the three exact gains
+$\mathcal G_{\mathrm{IS}}$,
+$\mathcal G_{\mathrm{T}}$, and
+$\mathcal G_{\mathrm{P}}$ in the neighborhood of these two crossover points.
+The vertical lines and open markers indicate the same roots reported in
+Equation~\eqref{eq:gaussian-thresholds}.
+
+TIS-3 has the smallest gradient MSE throughout the displayed ESS range, but
+this does not make it the preferred update everywhere. At high ESS, IS retains
+the larger expected gain. TIS-3 overtakes IS only after
+$\rho$ falls below $0.105$. PPO crosses IS later, at $\rho=0.0392$, and remains
+below TIS-3 throughout the displayed range. The experiment therefore
+illustrates the distinction established by the theory: estimator MSE and
+policy improvement need not induce the same ordering.
+
 
 \section{Additional coefficient-rule details}
 \label{app:coefficient-rules}
