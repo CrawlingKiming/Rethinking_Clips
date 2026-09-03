@@ -689,46 +689,58 @@ The remaining question is whether ESS provides this timing signal during
 large-model training, where the policy pair evolves after every update.
 \FloatBarrier
 
-\subsection{Policy optimization in large language models}
-
-Large-model training turns the fixed-policy comparison into a temporal one:
-ESS must fall early enough to trigger control before the permissive trajectory
-fails. We test this requirement on the ungated TIS-3 trajectory from
-Figure~\ref{fig:llm-motivation} and an unclipped Qwen3-30B-A3B trajectory.
-Both are evaluated on AIME-2024 using mean@16.
-Figure~\ref{fig:ess-predicts-performance} aligns raw sequence ESS, its trailing
-seven-update average, and held-out performance along each training path.
-
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures/result/q30ba3b/noclip/ess_predicts_val.pdf}
-  \caption{\textbf{Sequence ESS provides an early training-time signal.}
-  Thin blue curves show raw ESS, thick blue curves show its trailing
-  seven-update average, and green curves show AIME-2024 mean@16. Blue dotted
-  lines mark the first sustained sub-$0.1$ ESS episode; green dashed lines mark
-  peak validation. The gray TIS-3 segment occurs after collapse.}
-  \label{fig:ess-predicts-performance}
+  \includegraphics[width=\linewidth]{figures_mains/motivation/ess_reliability_collapse_ess_unclipped_combine.pdf}
+  \caption{\textbf{ESS deterioration is associated with less reliable
+  subsequent improvement.}
+  Left: AIME-2024 mean@16 along an unclipped trajectory and TIS with caps
+  3 and 5. For TIS-3 and TIS-5, annotations report ESS at the onset of the
+  sustained performance decline; for the unclipped trajectory, we report the
+  minimum ESS observed in the local late-degradation region around the marked
+  point. Right: each point pairs ESS at an evaluation checkpoint with the
+  change in AIME-2024 mean@16 over the following ten updates. The shaded
+  regions indicate ESS below $0.1$ and $0.05$. Lower ESS is associated with
+  substantially weaker and less reliable subsequent improvement.}
+  \label{fig:ess-local-improvement}
 \end{figure}
+\subsection{Policy optimization in large language models}
+\label{sec:llm-reliability}
 
-Figure~\ref{fig:ess-predicts-performance} shows the same temporal ordering in
-both permissive updates. For the unclipped trajectory, the first sustained
-sub-$0.1$ ESS episode begins near step 103, 37 updates before validation
-reaches its peak. Under TIS 3, the corresponding episode begins near step 71,
-while validation remains close to its maximum and before the subsequent
-collapse. The later rebound in TIS-3 ESS occurs only after performance has
-vanished, which distinguishes renewed policy overlap from recovered policy
-quality. In both cases, sustained support contraction is visible before the
-failure that motivates intervention.
+The Gaussian experiment isolates the relation between ESS, gradient-estimator
+reliability, and policy improvement in a setting where each quantity can be
+evaluated directly. We now examine whether the same finite-sample mechanism is
+visible during large-model optimization. We consider three Qwen3-30B-A3B
+trajectories, consisting of an unclipped update and TIS with caps 3 and 5, and
+evaluate all trajectories on AIME-2024 using mean@16.
 
-These trajectories provide the training-time counterpart of the Gaussian
-reliability result. Sequence ESS supplies an observable trigger for the
-low-support regime, and the gain comparison supplies the rule used after that
-trigger. This combination yields our policy-optimization design: retain the
-permissive estimator while ESS is high, then activate a prespecified safeguard
-when ESS becomes low. Section~6 tests whether this timing rule preserves early
-learning while preventing late collapse.
-\FloatBarrier
+The left panel of Figure~\ref{fig:ess-local-improvement} places ESS within the
+training dynamics. All three importance-weighted updates improve substantially
+during the early stage of training, but their performance eventually begins to
+degrade. At the onset of the sustained decline, TIS-3 has ESS $0.122$, whereas
+TIS-5 has already fallen to ESS $0.00374$. The unclipped trajectory degrades
+later, with a ESS of $0.037$ observed in training region. Thus, the delayed failure observed in the introduction
+occurs after a substantial deterioration in the importance-weight distribution,
+even though the precise ESS value at which degradation begins differs across
+trajectories.
 
+The right panel tests the theoretical prediction more directly. At each
+evaluation checkpoint, we pair the current ESS with the change in AIME-2024
+mean@16 over the following ten updates. The resulting pattern shows a clear
+change in update reliability as ESS decreases. Among intervals with
+ESS below $0.1$, only $1$ of $6$ is followed by an improvement. In comparison,
+$20$ of $27$ intervals with ESS at least $0.1$ improve. Low ESS therefore does not identify the quality of the current policy; it identifies a regime in which continued
+importance-weighted updates are substantially less likely to produce reliable improvement.
+
+This behavior is precisely the finite-sample effect characterized in
+Section~\ref{sec:theory}. Decreasing ESS enlarges the
+gradient-error radius through the factor $\rho_k^{-1/2}$ and consequently
+weakens the corresponding policy-improvement certificate. The large-model
+trajectories exhibit the same optimization consequence: as ESS deteriorates,
+subsequent improvement becomes less reliable. This observation motivates the
+optimization rule studied next: retain the importance-weighted update while
+its reliability remains high, and introduce clipping when ESS indicates that
+additional estimator control has become valuable.
 \section{ESS-conditioned policy optimization}
 
 Section~5 identifies ESS as an observable coordinate for effective support. We
