@@ -32,7 +32,7 @@
 \newcommand{\Cov}{\operatorname{Cov}}
 \newcommand{\Var}{\operatorname{Var}}
 
-\title{\bf Rethinking the policy optimization with Gradient Estimators}
+\title{\bf Rethinking Policy Optimization with Gradient Estimators}
 \author{Dongkyu Derek Cho, Thomas Voice}
 \date{}
 
@@ -60,10 +60,10 @@ Optimization (PPO) provides a simple and scalable approximation through
 ratio-based clipping \citep{schulman2015trpo,schulman2017ppo}. PPO-style
 objectives, including GRPO, inherit this intuition by clipping or masking updates
 when sampled likelihood ratios move too far from one
-\citep{shao2024deepseekmath}. The resulting theoretical picture is clear under population view: if the population gradient estimators available, keeping the updated policy sufficiently close to the rollout policy controls the error of the surrogate objective and thereby protects policy improvement.
+\citep{shao2024deepseekmath}. The resulting theoretical picture is clear at the population level: if population gradient estimators are available, keeping the updated policy sufficiently close to the rollout policy controls the error of the surrogate objective and thereby protects policy improvement.
 
-LLM training, however, presents a striking tension with this population-level view. Empirically, permissive estimators-including truncated importance sampling (TIS) with
-large caps or even unclipped updates-can remain stable and learn considerably faster. Yet this success need not persist. Figure~\ref{fig:llm-motivation} illustrates this phenomenon: TIS with caps 3 and 5 improves steadily for many
+LLM training, however, presents a striking tension with this population-level view. Empirically, permissive estimators, including truncated importance sampling (TIS) with
+large caps or even unclipped updates, can remain stable and learn considerably faster. Yet this success need not persist. Figure~\ref{fig:llm-motivation} illustrates this phenomenon: TIS with caps 3 and 5 improves steadily for many
 updates before abruptly collapsing. The same update rule can therefore be highly
 effective for a long period and suddenly become unreliable. This raises the
 central question of this paper: \emph{when does a permissive policy-gradient
@@ -164,7 +164,7 @@ trajectory $Y=(Y_1,\ldots,Y_T)$ with reward $R(X,Y)$, the policy objective is
  \label{eq:policy-objective}
 \end{equation}
 
-The goal of the parameterized policy learning is to determine the parameter $\theta$ that maximizes the policy objective $J(\theta)$. Parameter can be learned by the gradient ascent, known as the policy gradient methods. By classical control-variate analysis and the score function identity, the policy gradient admits the following form:
+Parameterized policy learning seeks a parameter $\theta$ that maximizes the policy objective $J(\theta)$. Policy-gradient methods learn this parameter through gradient ascent. By classical control-variate analysis and the score function identity, the policy gradient admits the following form:
 \begin{equation}
  g(\theta)
  :=
@@ -179,12 +179,12 @@ The goal of the parameterized policy learning is to determine the parameter $\th
  \right].
  \label{eq:on-policy-gradient}
 \end{equation}
-Here, $A(X,Y):=R(X,Y)-b(X)$ is the control-variate adjusted advantage, where the baseline $b(X)$ leaves the expected gradient unchanged while reducing its variance.
+Here, $A(X,Y):=R(X,Y)-b(X)$ is the control-variate-adjusted advantage, where the baseline $b(X)$ leaves the expected gradient unchanged while reducing its variance.
 
-The expectation in Equation~\eqref{eq:on-policy-gradient} is taken under the current policy $P_\theta$. Modern policy optimization methods relies on the reuse of the data \citep{schulman2017ppo, schulman2015trpo}, admiting the mismatch from the current policy and rollout policy
+The expectation in Equation~\eqref{eq:on-policy-gradient} is taken under the current policy $P_\theta$. Modern policy-optimization methods rely on reusing data \citep{schulman2017ppo, schulman2015trpo}, which creates a mismatch between the current policy and the rollout policy
 $Q(\cdot\mid X)$. 
 
-This mismatch is then calibrated by the likelihood ratio. To formalize, write define the likelihood ratio and score
+This mismatch is then accounted for by the likelihood ratio. Formally, define the likelihood ratio and score
 \begin{equation}
  r_{\theta,t}
  :=
@@ -209,8 +209,8 @@ likelihood ratio is
  \label{eq:sequence-ratio}
 \end{equation}
 Given i.i.d.\ rollouts
-$Z_i=(X_i,Y_i)\sim\nu(dx)Q(dy\mid x)$, $i=1,\ldots,N$ where absolute continuity of measures
-$P_\theta(\cdot\mid X)\ll Q(\cdot\mid X)$ holds, change of measure rewrites the
+$Z_i=(X_i,Y_i)\sim\nu(dx)Q(dy\mid x)$, $i=1,\ldots,N$, and assuming
+$P_\theta(\cdot\mid X)\ll Q(\cdot\mid X)$, a change of measure rewrites the
 population gradient entirely under the rollout distribution:
 \begin{equation}
  g(\theta)
@@ -223,13 +223,13 @@ population gradient entirely under the rollout distribution:
 \end{equation}
 where $f_\theta
  :=
- A(X,Y)\sum_{t=1}^T\ell_{\theta,t}.$ denotes the score and advantage contribution. 
+ A(X,Y)\sum_{t=1}^T\ell_{\theta,t}$ denotes the score-and-advantage contribution.
  
- Equation~\eqref{eq:true-gradient} reveals the connection with the policy gradient optimization and the foundational work in statistics, the importance weighted mean estimator problem. Intuitively, the quality of the resulting policy update therefore depends on how reliably this finite importance-weighted average estimates $g(\theta)$ and thus inherits the challenges of it.
+ Equation~\eqref{eq:true-gradient} reveals the connection between policy-gradient optimization and the importance-weighted mean-estimation problem, a foundational problem in statistics. The quality of the resulting policy update therefore depends on how reliably this finite importance-weighted average estimates $g(\theta)$; the update thus inherits the challenges of importance-weighted estimation.
 
 \paragraph{Estimator choices.}
 Large or highly dispersed likelihood ratios can make
-estimator statistically unstable. Practical
+gradient estimators statistically unstable. Practical
 policy-gradient algorithms therefore modify the coefficients of the empirical gradient to control this behavior. To represent these modifications in a common form,
 write
 $\mathbf r_\theta=(r_{\theta,1},\ldots,r_{\theta,T})$ and let
@@ -248,16 +248,16 @@ $u=(u_1,\ldots,u_T)$ denote a collection of coefficient rules. Define
  \label{eq:coefficient-rule-estimator}
 \end{equation}
 
-Setting $ u_{\mathrm{IS},t}=W_\theta, t=1,\ldots,T.$ corresponds to the conventional IS estimator.
+Setting $u_{\mathrm{IS},t}=W_\theta$ for $t=1,\ldots,T$ corresponds to the conventional IS estimator.
 
-We hereby introduce two common choices of estimators. First, a factorwise truncated importance-sampling rule (TIS) \citep{minimax2025m1} instead caps the corresponding ratio,
+We consider two common estimator choices. First, a factorwise truncated importance-sampling rule (TIS) \citep{minimax2025m1} caps the corresponding ratio,
 \begin{equation}
  u_{\mathrm{T},t}(\mathbf r,A)
  :=
  \min\{r_t,c\},
  \label{eq:tis-coefficient-rule}
 \end{equation}
-which leads to reduced magnitude of a large importance coefficient while retaining the associated score contribution.
+which reduces the magnitude of a large importance coefficient while retaining the associated score contribution.
 
 On the other hand, PPO/GRPO clipping modifies the gradient in a qualitatively different way. Differentiating the clipped surrogate yields the advantage-dependent masking
 rule
@@ -461,13 +461,13 @@ $1-\delta$,
 \end{equation}
 \end{theorem}
 
-Theorem~\ref{thm:permissive-reliability} makes the optimization consequence of ESS explicit. Denote a positive certificate event as 
+Theorem~\ref{thm:permissive-reliability} makes the optimization consequence of ESS explicit. Define the positive-certificate event as
 \begin{equation}
  \mathcal C_k
  :=
  \left\{
  \|\widehat g_k\|_2>\varepsilon_k(\delta)
- \right\}
+ \right\}.
  \label{eq:positive-is-certificate}
 \end{equation}
 Decreasing ESS enlarges the error radius and therefore makes this condition harder to satisfy. The same argument also controls the probability of obtaining an improving
@@ -725,12 +725,12 @@ can change.
 
 \section{Policy optimization and ESS}
 
-In this section, we demonstrate our theoretical analysis in two settings. We first use analytically tractable Gaussian bandit first instantiates IS reliability, estimator crossover, and one-step policy improvement. Large-model trajectories then show how observed ESS evolves around delayed optimization failure.
+In this section, we demonstrate our theoretical analysis in two settings. We first use an analytically tractable Gaussian bandit to instantiate IS reliability, estimator crossover, and one-step policy improvement. Large-model trajectories then show how observed ESS evolves around delayed optimization failure.
 
 \subsection{Policy optimization in a Gaussian bandit}
 \label{sec:gaussian-example}
 
-For Gaussian bandit example, we consider Gaussian policies with quadratic rewards, which admits the closed form of population gradient and estimator moments. We first test whether ESS predicts when IS loses finite-sample reliability, and policy improvement gain comparison along with the path of different ESS. Appendix~\ref{app:gaussian} gives the calculations and protocol.
+For the Gaussian bandit example, we consider Gaussian policies with quadratic rewards, which admit closed-form population gradients and estimator moments. We first test whether ESS predicts when IS loses finite-sample reliability and then compare policy-improvement gains along a path of varying ESS. Appendix~\ref{app:gaussian} gives the calculations and protocol.
 
 \begin{figure}[htbp]
   \centering
@@ -744,7 +744,7 @@ For Gaussian bandit example, we consider Gaussian policies with quadratic reward
   \label{fig:gaussian-is-reliability}
 \end{figure}
 
-Figure~\ref{fig:gaussian-is-reliability}(a) illustrates the role of ESS as an estimator and the policy improvements: the exact IS MSE stays below the bound from
+Figure~\ref{fig:gaussian-is-reliability}(a) illustrates the role of ESS in estimator reliability and policy improvement: the exact IS MSE stays below the bound from
 Lemma~\ref{lem:rho-gradient-reliability}, and both rise sharply as ESS falls.
 Theorem~\ref{thm:permissive-reliability} uses this same error radius to build
 an adaptive step, so estimator reliability should translate directly into
@@ -766,7 +766,7 @@ open: which controlled estimator should be used after IS loses its advantage?
   \label{fig:gaussian-estimator-choice}
 \end{figure}
 
-The second Figure~\ref{fig:gaussian-estimator-choice} demonstrates the estimator-selection
+Figure~\ref{fig:gaussian-estimator-choice} then demonstrates the estimator-selection
 criterion in Corollary~\ref{cor:certificate-crossover}.
 Figure~\ref{fig:gaussian-estimator-choice}(a) plots the resulting expected-gain
 difference relative to IS. TIS-3 has the lowest MSE throughout the path, yet
@@ -803,7 +803,7 @@ training dynamics. All three importance-weighted updates improve substantially
 during the early stage of training, but their performance eventually begins to
 degrade. At the onset of the sustained decline, TIS-3 has ESS $0.122$, whereas
 TIS-5 has already fallen to ESS $0.00374$. The unclipped trajectory degrades
-later, with a ESS of $0.037$ observed in training region. Thus, the delayed failure observed in the introduction
+later, with an ESS of $0.037$ observed during training. Thus, the delayed failure observed in the introduction
 occurs after a substantial deterioration in the importance-weight distribution,
 even though the precise ESS value at which degradation begins differs across
 trajectories.
@@ -920,7 +920,7 @@ We next test whether the same construction extends beyond the
 Qwen3-30B-A3B setting. We first change model scale while retaining the
 mathematical-reasoning objective.
 
-Figure~\ref{fig:llm-8b-transfer} extends the recipe comparison to dense Qwen3-8B. ESS-conditioned optimization demonstrates stronger efficiency above its clipped couterpart under both standard GRPO and Clip-Higher. 
+Figure~\ref{fig:llm-8b-transfer} extends the recipe comparison to dense Qwen3-8B. ESS-conditioned optimization demonstrates better sample efficiency than its clipped counterpart under both standard GRPO and Clip-Higher.
 
 \begin{figure}[htbp]
   \centering
@@ -934,13 +934,13 @@ Figure~\ref{fig:llm-8b-transfer} extends the recipe comparison to dense Qwen3-8B
 \end{figure}
 
 We then reduce the model to Qwen3-1.7B while retaining the mathematical-reasoning objective. Figure~\ref{fig:llm-17b-transfer} reports evaluation performance for the two matched learning-rate recipes and overlays ESS for
-TIS-3 + Clip. Remarkably, the ESS-condition was above the ESS condition threshold (0.1), hence, the optimization never performed clipping thus resembles the behavior of the TIS clipping performance. Interesting enough the performance was stable and achieved a higher performance even in the prolonged training of 500. This theoretical expalanation matches the observation given in other paper, where the TIS shows reasonalbe training trajectories.
+TIS-3 + Clip. ESS remains above the conditioning threshold of $0.1$, so the optimizer never activates clipping and thus behaves like TIS-3. Performance remains stable and improves even during the extended 500-step training run. This theoretical explanation is consistent with observations in other work, where TIS shows reasonable training trajectories.
 
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.52\linewidth]{figures_mains/result/q17b/overall.pdf}
-  \caption{Qwen3-1.7B results in prolonged training steps. AIME-2024 mean@16 is shown for GRPO (dashed) and TIS-3 + Clip (solid). Blue: ESS for TIS-3 + Clip.}
+  \caption{Qwen3-1.7B results over extended training. AIME-2024 mean@16 is shown for GRPO (dashed) and TIS-3 + Clip (solid). Blue: ESS for TIS-3 + Clip.}
   \label{fig:llm-17b-transfer}
 \end{figure}
 
@@ -1032,7 +1032,7 @@ gradient estimator should be modified.
 
 \section{Conclusion}
 
-We studied the finite-sample perspective on policy optimization cases that provides theoretical foundation of finite-sample policy improvements. Off-policy gradients admit an importance-weighted mean-estimation formulation, under which ESS enters directly through the second moment of the importance weights. Our theory connects this finite-sample estimation error to policy improvement and separately characterizes when clipping compensates for the gradient alignment it removes. We demonstrated our theoretical analysis through two empirical analysis, both in Gaussian bandit and large langauage models. We then extend our analysis to the simple reliablity-aware optimizatino, which prevents the collapse unlike the previous udpates, and further demonstrates strong empricial performance across model sizes and objectives. 
+We studied a finite-sample perspective on policy optimization that provides a theoretical foundation for finite-sample policy improvement. Off-policy gradients admit an importance-weighted mean-estimation formulation, under which ESS enters directly through the second moment of the importance weights. Our theory connects this finite-sample estimation error to policy improvement and separately characterizes when clipping compensates for the gradient alignment it removes. We demonstrated our theoretical analysis through two empirical analyses, one in a Gaussian bandit and one in large language models. We then extended our analysis to a simple reliability-aware optimization method, which prevents the collapse seen with the previous updates and demonstrates strong empirical performance across model sizes and objectives.
 
 
 \bibliographystyle{plainnat}
