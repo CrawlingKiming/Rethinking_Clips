@@ -461,28 +461,17 @@ $1-\delta$,
 \end{equation}
 \end{theorem}
 
-Theorem~\ref{thm:permissive-reliability} makes the optimization consequence
-of ESS explicit. A positive certificate is obtained on the reliability event
-whenever
-\begin{equation}
- \|\widehat g_k\|_2
- >
- \varepsilon_k(\delta).
- \label{eq:positive-is-certificate}
-\end{equation}
-Decreasing ESS enlarges the error radius and therefore makes this condition harder to satisfy.
-
-The same argument also controls the probability of obtaining an improving
-update. Let
+Theorem~\ref{thm:permissive-reliability} makes the optimization consequence of ESS explicit. Denote a positive certificate event as 
 \begin{equation}
  \mathcal C_k
  :=
  \left\{
  \|\widehat g_k\|_2>\varepsilon_k(\delta)
  \right\}
+ \label{eq:positive-is-certificate}
 \end{equation}
-denote the event that the certificate is positive.
-
+Decreasing ESS enlarges the error radius and therefore makes this condition harder to satisfy. The same argument also controls the probability of obtaining an improving
+update. 
 \begin{corollary}[Positive certificate and actual improvement]
 \label{cor:positive-improvement-probability}
 Under the update of
@@ -721,7 +710,7 @@ estimator variation compensates for the additional gradient signal removed.
 The ordering is determined by the crossover criterion rather than by the form
 of the clipping rule alone. Section~\ref{sec:gaussian-example} gives an exact
 instance, with IS--TIS and IS--PPO crossovers at $\rho=0.105$ and
-$\rho=0.0392$, respectively.
+$\rho=0.039$, respectively.
 \end{remark}
 
 The preceding results connect the reliability analysis of Section~4.1 to
