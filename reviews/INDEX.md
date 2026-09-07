@@ -64,3 +64,5 @@
 | rethinking-clips | latex | 2026-09-01 19:52 | SHIP | 100/100 | 0 | local | direct | reviews/rethinking-clips/latex/2026-09-01-1952.md | Clean 25-page build; Figure 2, Lemma 2/Theorem 3 coverage, crossover identities, and pages 5--10 and 17--18 visually verified |
 
 | rethinking-clips | figures | 2026-09-07 | PASS IN SCOPE | | 5 preexisting reference/citation warnings | local build and PDF review | user request | reviews/rethinking-clips/figures/2026-09-07-compact.md | Four compact variants, original assets preserved, minimal language edits, refreshed main.pdf |
+
+| rethinking-clips | writing | 2026-09-07 | PASS IN SCOPE | | preexisting equation/citation warnings | research-paper-writing and local PDF review | user request | reviews/rethinking-clips/writing/2026-09-07-concision.md | 18 targeted regions; 294 prose words removed; claims, math, figures, and appendix preserved |
