@@ -115,9 +115,9 @@ Our contributions are threefold. \textbf{Finite-Sample Policy Improvement:} We d
 %\paragraph{Trust-region and proximal policy optimization.}
 
 Trust-region methods control policy deviation to obtain monotonic-improvement guarantees, while PPO replaces the explicit trust-region constraint with a ratio-clipped surrogate that is easier to optimize at scale
-\citep{schulman2015trpo,schulman2017ppo}. However, recent analyses of LLM policy optimization shows that trust region solely does not determine the reliable policy optimizations. For example, recent empirical analysis reveal that less aggressive clipping thresholds \citep{yu2025dapo,park2025clipping,minimax2025m1,qi2026dppo}, even the unclipped learning can be effective. Yet, existing works lack theoretical explanations. 
+\citep{schulman2015trpo,schulman2017ppo}. However, recent analyses of LLM policy optimization show that the trust region alone does not determine the reliability of policy optimization. For example, recent empirical analyses reveal that less aggressive clipping thresholds \citep{yu2025dapo,park2025clipping,minimax2025m1,qi2026dppo} and even unclipped learning can be effective. Yet, existing works lack theoretical explanations.
 
-Our analysis addresses a different source of error: the finite-sample gradient estimate used to make that update by linking the policy optimization to the importance-weighted estimation problem. Existing works in importance sampling reveals the central role of the ratio moments as the uncertatinty estimation error and utilize this to the off-policy estimation problem \citep{metelli2018pois,metelli2020is}. We further extend 
+Our analysis addresses a different source of error: the finite-sample gradient estimate used to make that update by linking the policy optimization to the importance-weighted estimation problem. Existing work in importance sampling reveals the central role of ratio moments in quantifying estimation uncertainty and applies this to the off-policy estimation problem \citep{metelli2018pois,metelli2020is}. We further extend these
 two ingredients by relating importance-weight concentration to
 gradient-estimation reliability and, in turn, to policy improvement \citep{pirotta2013adaptive,papini2022smoothing}.
 
@@ -178,7 +178,7 @@ where $f_\theta
  A(X,Y)\sum_{t=1}^T\ell_{\theta,t}$ denotes the score and advantage contribution and $ W_\theta=
  \prod_{t=1}^T r_{\theta,t}$ becomes the complete sample likelihood ratio.
  
- Equation~\eqref{eq:true-gradient} reveals the connection between policy-gradient optimization and the importance-weighted mean-estimation problem which is a foundational problem in statistics. The quality of the resulting policy update therefore depends on how reliably this finite importance-weighted average estimates $g(\theta)$; the update thus inherits the challenges of importance-weighted estimation.
+ Equation~\eqref{eq:true-gradient} reveals the connection between policy-gradient optimization and the importance-weighted mean-estimation problem, which is a foundational problem in statistics. The quality of the resulting policy update therefore depends on how reliably this finite importance-weighted average estimates $g(\theta)$; the update thus inherits the challenges of importance-weighted estimation.
 
 \paragraph{Estimator choices.}
 Large or highly dispersed likelihood ratios can make
@@ -201,7 +201,7 @@ $u=(u_1,\ldots,u_T)$ denote a collection of coefficient rules. Define
  \label{eq:coefficient-rule-estimator}
 \end{equation}
 
-Setting $u_{\mathrm{IS},t}=r_{\theta,t}$ for $t=1,\ldots,T$ corresponds to the conventional IS estimator. We consider two common estimator choices in this paper; Truncated importance sampling rule (TIS)\citep{minimax2025m1} and PPO/GRPO clippings \citep{schulman2017ppo,shao2024deepseekmath}
+Setting $u_{\mathrm{IS},t}=r_{\theta,t}$ for $t=1,\ldots,T$ corresponds to the conventional IS estimator. We consider two common estimator choices in this paper: the truncated importance sampling rule (TIS)~\citep{minimax2025m1} and PPO/GRPO clipping \citep{schulman2017ppo,shao2024deepseekmath}:
 \begin{equation*}
  u_{\mathrm{T},t}(\mathbf r,A)
  :=
@@ -214,7 +214,7 @@ Setting $u_{\mathrm{IS},t}=r_{\theta,t}$ for $t=1,\ldots,T$ corresponds to the c
  \mathbf 1\{A<0,\ r_t\ge1-\epsilon\}\right],
  \label{eq:tis-coefficient-rule}
 \end{equation*}
-TIS caps the corresponding ratio which reduces the magnitude of a large importance coefficient while retaining the associated score contribution. On the other hand, PPO/GRPO clipping modifies the gradient in a qualitatively different way by advantage-dependent masking
+TIS caps the corresponding ratio, which reduces the magnitude of a large importance coefficient while retaining the associated score contribution. On the other hand, PPO/GRPO clipping modifies the gradient in a qualitatively different way by an advantage-dependent masking
 rule. Once the corresponding clipping condition is active, the selected score contribution is removed from the gradient.
 
 \subsection{Importance-weight concentration and effective sample size}
@@ -248,13 +248,13 @@ ESS can be written as
  \label{eq:ess-ratio-dispersion}
 \end{equation}
 
-A low ESS therefore indicates greater dispersion of the population likelihood ratios and suggests greater finite-sample variability in importance-weighted estimation. To illustrate, we use Figure~\ref{fig:gaussian-is-mse} in Gaussian policy optimization example in Section~\ref{sec:gaussian-example}. Here, the lower ESS detoriates the gradient estimator MSE. Intuitvely, this further suggests the ESS provides the desired connection to reliable policy updates in Figure~\ref{fig:llm-motivation}. When ESS approaches the observed threshold, subsequent updates become unstable and eventually collapse.
+A low ESS therefore indicates greater dispersion of the population likelihood ratios and suggests greater finite-sample variability in importance-weighted estimation. To illustrate, we use Figure~\ref{fig:gaussian-is-mse} in the Gaussian policy optimization example in Section~\ref{sec:gaussian-example}. Here, lower ESS worsens the gradient estimator MSE. Intuitively, this further suggests that ESS provides the desired connection to reliable policy updates in Figure~\ref{fig:llm-motivation}. When ESS approaches the observed threshold, subsequent updates become unstable and eventually collapse.
 
 
 \section{Theoretical Analysis}
 \label{sec:theory}
 
-In this section, we provide the theoretical analysis of the finite sample policy improvement and the estimator reliablity, along with the connection with ESS. 
+In this section, we provide the theoretical analysis of the finite sample policy improvement and the estimator reliability, along with the connection with ESS.
 
 %The estimator formulation in Section~\ref{sec:setting} reduces policy optimization from a fixed rollout to a finite-sample gradient-estimation problem. We then specialize the result to IS, for which the estimation error admits an exact second-moment representation involving ESS. The following subsection uses this reliability characterization to compare alternative estimator choices.
 
@@ -262,7 +262,7 @@ In this section, we provide the theoretical analysis of the finite sample policy
 \label{sec:gradient-reliability}
 
 \paragraph{MSE and policy improvement}
-We first establish how mean squared error (MSE) in the estimated gradient limits one-step policy improvement. Under the smoothness condition on the parameterized policy, one can converts the arbitrary estimator deviation from the population gradient directly into a lower bound on policy improvement.
+We first establish how mean squared error (MSE) in the estimated gradient limits one-step policy improvement. Under the smoothness condition on the parameterized policy, one can convert an arbitrary estimator's deviation from the population gradient directly into a lower bound on policy improvement.
 
 \begin{lemma}[A reliable gradient estimate yields policy improvement]
 \label{lem:gradient-error-progress}
@@ -360,8 +360,8 @@ magnitude and the probability of one-step policy improvement.
 \subsection{Estimator reliability and ESS-dependent crossover}
 \label{sec:clipping-recovery}
 
-We now generalize the result to the general estimators. To faciliate the analysis, consider a general coefficient rule $u$, the same reliability question
-must also account for the bias introduced by modifying the estimator. Write the MSE error of the gradient estimator as $m_k(u)$. We first connect MSE to the gradient-estimator reliablity. 
+We now generalize the result to the general estimators. To facilitate the analysis, consider a general coefficient rule $u$. The same reliability question
+must also account for the bias introduced by modifying the estimator. Write the MSE error of the gradient estimator as $m_k(u)$. We first connect MSE to the gradient-estimator reliability.
 
 \begin{lemma}[MSE controls gradient-estimator reliability]
 \label{lem:general-mse-reliability}
@@ -417,7 +417,7 @@ Equation~\eqref{eq:certificate-mse-form} places estimator reliability and
 policy improvement in the same expression. Lower MSE strengthens the
 certificate, while coefficient control can simultaneously reduce the
 magnitude of the update. The preferred estimator therefore depends on whether
-the reduction in estimation error is large enough to compensate for the useful update removed by the modification. Such preferred estimator can be determined by the comparison of the lower bound of the policy improvement.
+the reduction in estimation error is large enough to compensate for the useful update removed by the modification. Such a preferred estimator can be determined by comparing the lower bounds on policy improvement.
 
 \begin{corollary}[Estimator crossover]
 \label{cor:certificate-crossover}
@@ -498,13 +498,13 @@ moments,
 
 Proposition~\ref{prop:tis-close} shows that TIS retains the improvement certificate of untruncated importance weighting when truncation affects only a small, controlled tail. PPO-style clipping makes a stronger modification, which masks the entire $r_t$-weighted contribution. It can therefore produce a larger reduction in estimator variation, but requires that reduction to compensate for a correspondingly larger change in the mean update.
 
-Together, our analysis reveals the importance of the policy gradient reliability in policy optimization, and suggest ESS as the observable reliablity criterion. Further,  Theorem~\ref{thm:permissive-reliability} and Proposition~\ref{prop:ess-estimator-crossover} suggests the insight when other estimators can be beneficial in some cases. High ESS suggests using permissive gradient estimators, and lower ESS suggest more conservative choices such as clipping highlighting the potential benefit of stronger estimator variance control. 
+Together, our analysis reveals the importance of the policy gradient reliability in policy optimization and suggests ESS as the observable reliability criterion. Further, Theorem~\ref{thm:permissive-reliability} and Proposition~\ref{prop:ess-estimator-crossover} provide insight into when other estimators can be beneficial in some cases. High ESS suggests using permissive gradient estimators, and lower ESS suggests more conservative choices such as clipping, highlighting the potential benefit of stronger estimator variance control.
 
 %give the explanation why permissive updates could fail when ESS is small. The smaller ESS implies observable ESS values correlate with the reliable policy optimization. When ESS is relatively large, the IS estimation error is small and mild truncation can preserve the resulting importance-weighted update. As ESS decreases, the growing finite-sample error of IS increases the potential benefit of stronger variance control. 
 
 
 \section{Policy optimization and ESS}
-In this section, we demonstrate our theoretical analysis in two settings. Here, we represent our result on the Gaussian bandit and LLM trajectories. 
+In this section, we demonstrate our theoretical analysis in two settings. Here, we present our results on the Gaussian bandit and LLM trajectories.
 
 %We first use an analytically tractable Gaussian bandit to instantiate IS reliability, estimator crossover, and one-step policy improvement. Large-model trajectories then show how observed ESS evolves around delayed optimization failure.
 
@@ -514,7 +514,8 @@ We consider Gaussian policies with quadratic rewards, which admit closed-form po
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.9\linewidth]{figures/gaussian_policy_comparison.pdf}
+  % Original: \includegraphics[width=0.9\linewidth]{figures/gaussian_policy_comparison.pdf}
+  \includegraphics[width=\linewidth]{figures/gaussian_policy_comparison_compact.pdf}
   \caption{Gaussian-bandit reliability and estimator comparison. From left
   to right: positive certificates and actual positive improvement under the
   adaptive IS step; exact expected gain of TIS-3 and PPO relative to IS; and
@@ -550,7 +551,8 @@ in the low-support regime, exactly as predicted by the gain criterion.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.8\linewidth]{figures_mains/motivation/ess_reliability_collapse_ess_unclipped_combine.pdf}
+  % Original: \includegraphics[width=0.8\linewidth]{figures_mains/motivation/ess_reliability_collapse_ess_unclipped_combine.pdf}
+  \includegraphics[width=\linewidth]{figures_mains/motivation/ess_reliability_collapse_compact.pdf}
   \caption{
   Left: AIME-2024 mean@16 along an unclipped trajectory and TIS with caps
   3 and 5. Annotations report ESS at the onset of the
@@ -566,7 +568,7 @@ trajectories, consisting of an unclipped update and TIS with caps 3 and 5, and
 evaluate all trajectories on AIME-2024 using mean@16.
 
 The left panel of Figure~\ref{fig:ess-local-improvement} places ESS within the
-training dynamics. All three importance-weighted updates improve substantially the early stage of training, but their performance eventually begins to degrade. At the onset of the sustained decline, all three methods exhibits low ESS. The right panel tests the theoretical prediction more directly. At each evaluation checkpoint, we pair the current ESS with the change in AIME-2024
+training dynamics. All three importance-weighted updates improve substantially during the early stage of training, but their performance eventually begins to degrade. At the onset of the sustained decline, all three methods exhibit low ESS. The right panel tests the theoretical prediction more directly. At each evaluation checkpoint, we pair the current ESS with the change in AIME-2024
 mean@16 over the following ten updates. The resulting pattern shows a clear change in update reliability as ESS decreases. Low ESS identifies a regime in which continued
 importance-weighted updates are substantially less likely to produce reliable improvement. %Thus, the delayed failure observed in the introduction occurs after a substantial deterioration in the importance-weight distribution, even though the precise ESS value at which degradation begins differs across trajectories. 
 
@@ -587,29 +589,32 @@ additional estimator control has become valuable.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.8\linewidth]
-  {figures_mains/result/q30ba3b/curves/overall.pdf}
+  % Original: \includegraphics[width=0.8\linewidth]{figures_mains/result/q30ba3b/curves/overall.pdf}
+  \includegraphics[width=\linewidth]
+  {figures_mains/result/q30ba3b/curves/overall_with_noclip_compact.pdf}
   \caption{Qwen3-30B-A3B math RLVR results. Dashed curves
-  corresponds to the baseline methods. Solid curves begin with TIS-3 and switch to the corresponding clipped update when ESS falls below $0.1$. (a) GRPO clipping. (b) Clip-Higher. (c) DPPO.} %End labels report the final observed AIME-2024 mean@16.}
+  correspond to the baseline methods. Solid curves begin with TIS-3 in (a), (b), and (c), or an unclipped update in (d), and switch to the corresponding clipped update when ESS falls below $0.1$. (a) GRPO clipping. (b) Clip-Higher. (c) DPPO. (d) GRPO-no clip.} %End labels report the final observed AIME-2024 mean@16.}
   \label{fig:llm-main}
+  \label{fig:llm-noclip-gate}
 \end{figure}
 
-In this section, we now extend our theorical analysis to optimization rule. Based on the observation, the reliablity signal can be used to the optimization by the \emph{clipping timing}. While ESS remains above a fixed threshold, we retain importance-weighted updates and activate clipping for a conservative updates.
+In this section, we now extend our theoretical analysis to an optimization rule. Based on this observation, the reliability signal can be used in optimization to determine the \emph{clipping timing}. While ESS remains above a fixed threshold, we retain importance-weighted updates and activate clipping for conservative updates.
 
 %ask whether this reliability signal can be used to optimization. Rather than applying clipping throughout training, we retain the importance-weightedupdate while ESS remains above a fixed threshold and activate clipping once ESS falls below it.
 
 \subsection{Update rule and protocol}
 
-\begin{wrapfigure}{r}{0.35\textwidth}
-  \vspace{-0.7\baselineskip}
-  \centering
-  \includegraphics[width=0.95\linewidth]
-  {figures_mains/result/q30ba3b/noclip/overall.pdf}
-  \caption{Qwen3-30B-A3B math RLVR with an unclipped update. Dashed: unclipped
-  throughout. Solid: ESS-conditioned clipping.}
-  \label{fig:llm-noclip-gate}
-  \vspace{-0.6\baselineskip}
-\end{wrapfigure}
+% Original standalone figure, now displayed in panel (d) above.
+% \begin{wrapfigure}{r}{0.35\textwidth}
+%   \vspace{-0.7\baselineskip}
+%   \centering
+%   \includegraphics[width=0.95\linewidth]
+%   {figures_mains/result/q30ba3b/noclip/overall.pdf}
+%   \caption{Qwen3-30B-A3B math RLVR with an unclipped update. Dashed: unclipped
+%   throughout. Solid: ESS-conditioned clipping.}
+%   \label{fig:llm-noclip-gate}
+%   \vspace{-0.6\baselineskip}
+% \end{wrapfigure}
 
 Let $\widehat g_{\mathrm{IW}}$ denote the importance-weighted update such as IS or TIS, and $\widehat g_{\mathrm{clip}}$ a prespecified clipped update. Given an ESS threshold $\tau$, we use the following gradient estimator:
 \begin{equation}
@@ -626,19 +631,19 @@ Let $\widehat g_{\mathrm{IW}}$ denote the importance-weighted update such as IS 
 %ESS therefore determines when clipping is introduced, while the clipping rule determines how the update is modified thereafter. 
 We use $\tau=0.1$ in the primary experiments.
 
-In the main experiments, we investigate the configurations that demonstrated failure modes, and see rather our intervention rule comes up with reliable updates. We consider the followings on Qwen3-30B-A3B base models: (1) TIS-3 updates with GRPO clipping \citep{shao2024deepseekmath}, (2) TIS-3 updates with Clip-Higher \citep{yu2025dapo}, (3) TIS-3 updates with DPPO \citep{qi2026dppo}, (4) unclipped updates with GRPO clipping \citep{shao2024deepseekmath}. Baseline models include GPRO, GRPO with no clips, Clip-Higher, DPPO, and TIS-3 updates. Our main experiments train models for up to 200 training steps on the mathematical-reasoning data of \citet{yu2025dapo} and evaluate AIME-2024 using mean@16. 
+In the main experiments, we investigate the configurations that demonstrated failure modes, and see whether our intervention rule yields reliable updates. We consider the following on Qwen3-30B-A3B base models: (1) TIS-3 updates with GRPO clipping \citep{shao2024deepseekmath}, (2) TIS-3 updates with Clip-Higher \citep{yu2025dapo}, (3) TIS-3 updates with DPPO \citep{qi2026dppo}, (4) unclipped updates with GRPO clipping \citep{shao2024deepseekmath}. Baseline models include GRPO, GRPO with no clips, Clip-Higher, DPPO, and TIS-3 updates. Our main experiments train models for up to 200 training steps on the mathematical-reasoning data of \citet{yu2025dapo} and evaluate AIME-2024 using mean@16.
 
 %For importance-weighted updates, we use TIS with ratio cap 3 as a default choice. At low ESS, we consider conventional GRPO clipping \citep{shao2024deepseekmath}, Clip-Higher \citep{yu2025dapo}, and DPPO \citep{qi2026dppo}. We additionally replace TIS-3 with an unclipped update totest whether the timing principle depends on truncation.
 
 \subsection{Results}
 \label{sec:llm-experiments}
-Figure~\ref{fig:llm-main} compares ESS-conditioned optimization with static clipping across corresponding baselines. In all three cases, ESS-conditioned optimization present stronger AIME performance and efficiency. Specifically, while the TIS-3 and unclipped GRPO presents the instability, the ESS-conditioned optimization exhibits remarkable stability, preventing catastrophic collapses.
+The first three panels of Figure~\ref{fig:llm-main} compare ESS-conditioned optimization with static clipping across corresponding baselines. In all three cases, ESS-conditioned optimization presents stronger AIME performance and efficiency. Specifically, while TIS-3 and unclipped GRPO present instability, the ESS-conditioned optimization exhibits remarkable stability, preventing catastrophic collapses.
 
 
-Figure~\ref{fig:llm-noclip-gate} leaves one run
+Figure~\ref{fig:llm-noclip-gate}(d) leaves one run
 unchanged and introduces conventional clipping in the other when ESS falls below $0.1$. While the unclipped run subsequently degrades to $34.6\%$, ESS-conditioned learning retains $38.1\%$ at step 200. The timing principle therefore extends beyond the TIS-3 branch. 
 
-Together, the Figure A and B shows the empirical strength of the ESS-conditioned optimization, which supports the theoretical motivation. 
+Together, these panels show the empirical strength of the ESS-conditioned optimization, which supports the theoretical motivation.
 
 \subsection{Broader Evaluation}
 
@@ -648,11 +653,12 @@ mathematical-reasoning objective. Figure~\ref{fig:llm-8b-transfer} extends the r
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.8\linewidth]
-  {figures_mains/result/8b/curves/overall.pdf}
+  % Original: \includegraphics[width=0.8\linewidth]{figures_mains/result/8b/curves/overall.pdf}
+  \includegraphics[width=\linewidth]
+  {figures_mains/result/8b/curves/overall_with_dppo_compact.pdf}
   \caption{Qwen3-8B math RLVR over 200 policy updates. Dashed curves apply
   clipping throughout training, and solid curves use the ESS-conditioned
-  counterpart. (a) GRPO. (b) Clip-Higher. End labels report the step-200
+  counterpart. (a) GRPO. (b) Clip-Higher. (c) DPPO. End labels report the step-200
   AIME-2024 mean@16.}
   \label{fig:llm-8b-transfer}
 \end{figure}
@@ -660,13 +666,13 @@ mathematical-reasoning objective. Figure~\ref{fig:llm-8b-transfer} extends the r
 We then reduce the model to Qwen3-1.7B while retaining the mathematical-reasoning objective. Figure~\ref{fig:llm-17b-transfer} reports evaluation performance for the two matched learning-rate recipes and overlays ESS for
 TIS-3 + Clip. ESS remains above the conditioning threshold of $0.1$, so the optimizer never activates clipping and thus behaves like TIS-3. Performance remains stable and improves even during the extended 500-step training run. This theoretical explanation is consistent with observations in other work, where TIS shows reasonable training trajectories.
 
-\begin{wrapfigure}[26]{r}{0.45\textwidth}
+\begin{wrapfigure}[26]{R}{0.45\textwidth}
   \vspace{-0.7\baselineskip}
   \centering
   \includegraphics[width=0.9\linewidth]{figures_mains/result/q17b/overall.pdf}
   \includegraphics[width=0.9\linewidth]
   {figures_mains/result/rlhf_4b/overall.pdf}
-  \caption{Top: Qwen3-1.7B results over extended training. AIME-2024 result is shown for GRPO (dashed) and TIS-3 + Clip (solid). Blue lined represents ESS for TIS-3 + Clip. Bottom: RLHF on Qwen3-4B-Instruct-2507. End labels report the step-200 observations.}
+  \caption{Top: Qwen3-1.7B results over extended training. AIME-2024 result is shown for GRPO (dashed) and TIS-3 + Clip (solid). The blue line represents ESS for TIS-3 + Clip. Bottom: RLHF on Qwen3-4B-Instruct-2507. End labels report the step-200 observations.}
   \label{fig:llm-rlhf-transfer}
   \vspace{-0.6\baselineskip}
 \end{wrapfigure}
@@ -689,14 +695,14 @@ determines when the update changes, while the low-ESS rule determines how it cha
 
 \paragraph{ESS threshold.}
 Figure~\ref{fig:ess-threshold-ablation} varies only $\tau$ in the TIS-3/GRPO construction. Thresholds $0.05$, $0.1$, and $0.2$ all avoid the collapse of ungated TIS-3, with last-observed AIME scores of $43.1\%$,
-$38.5\%$, and $34.8\%$, respectively, demonstrating the collapse-prevention behavior persists across the tested range.
+$38.5\%$, and $34.8\%$, respectively, demonstrating that the collapse-prevention behavior persists across the tested range.
 
 \paragraph{Clipping versus skipping.}
 ESS determines when to intervene but does not prescribe the intervention itself. We therefore replace clipping with a complete update veto while keeping the same ESS threshold.
 
 Figure~\ref{fig:skip-variants} isolates a complete update veto on the unclipped branch. Skipping raises the final score only slightly, from $34.6\%$
 to $35.6\%$, while reducing the peak from $44.4\%$ to $35.6\%$. By contrast,
-ESS-conditioned clipping in Figure~\ref{fig:llm-noclip-gate} reaches a
+ESS-conditioned clipping in Figure~\ref{fig:llm-noclip-gate}(d) reaches a
 $43.3\%$ peak and retains $38.1\%$. The intervention must therefore preserve
 useful gradient signal after ESS identifies an unreliable minibatch.
 
