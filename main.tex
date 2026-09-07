@@ -253,6 +253,16 @@ rule. Once the corresponding clipping condition is active, the selected score co
 
 \subsection{Importance-weight concentration and effective sample size}
 
+\begin{wrapfigure}[18]{r}{0.44\textwidth}
+  \vspace{-0.6\baselineskip}
+  \centering
+  \includegraphics[width=\linewidth]{figures/gaussian_is_mse.pdf}
+  \caption{Exact IS gradient MSE as a function of ESS $\rho$ in the
+  Gaussian bandit.}
+  \label{fig:gaussian-is-mse}
+  \vspace{-0.4\baselineskip}
+\end{wrapfigure}
+
 Despite the central role of finite-sample gradient reliability in policy
 optimization, relatively few works directly connect this reliability to the
 statistical properties of the underlying gradient estimator. From the
@@ -627,44 +637,33 @@ We consider Gaussian policies with quadratic rewards, which admit closed-form po
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures/gaussian_is_reliability.pdf}
-  \caption{(a) Exact IS
-  gradient MSE and the finite-moment upper bound in
-  Equation~\eqref{eq:rho-gradient-mse-bound}. (b) Positive
-  Theorem~\ref{thm:permissive-reliability} certificates and actual positive
-  improvement under the corresponding adaptive step.}
-  \label{fig:gaussian-is-reliability}
+  \includegraphics[width=\linewidth]{figures/gaussian_policy_comparison.pdf}
+  \caption{Gaussian-bandit reliability and estimator comparison. From left
+  to right: positive certificates and actual positive improvement under the
+  adaptive IS step; exact expected gain of TIS-3 and PPO relative to IS; and
+  exact expected gain near the pairwise crossovers. Vertical lines and open
+  markers identify the intersections.}
+  \label{fig:gaussian-policy-comparison}
 \end{figure}
 
 \paragraph{ESS predicts reliability and policy improvement}
-Figure~\ref{fig:gaussian-is-reliability}(a) illustrates the role of ESS in estimator reliability and policy improvement: the exact IS MSE stays below the bound from
-Lemma~\ref{lem:rho-gradient-reliability}, and both rise sharply as ESS falls.
-Theorem~\ref{thm:permissive-reliability} uses this same error radius to build
-an adaptive step, so estimator reliability should translate directly into
-policy improvement. Panel (b) confirms that translation. Across the full ESS
+The left plot in Figure~\ref{fig:gaussian-policy-comparison} illustrates how
+estimator reliability translates into policy improvement. Across the full ESS
 path, the probability of actual improvement tracks the probability of a
 positive certificate with a maximum gap of only $0.00891$. As support
 contracts, both probabilities fall together. ESS therefore identifies when a
 reliable IS update is available, but this first stage leaves one question
 open: which controlled estimator should be used after IS loses its advantage?
 
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/gaussian_estimator_choice.pdf}
-  \caption{We compare IS, TIS with $c=3$, and PPO masking with $\epsilon=0.2$. (a) Exact expected gain relative to IS; positive values favor the controlled estimator. (b) Exact expected gain around the two pairwise
-  crossovers. Vertical lines and open markers identify the intersections.}
-  \label{fig:gaussian-estimator-choice}
-\end{figure}
-
 \paragraph{ESS determines estimator-choice criterion}
-Figure~\ref{fig:gaussian-estimator-choice} then demonstrates the estimator-selection
+Figure~\ref{fig:gaussian-policy-comparison} then demonstrates the estimator-selection
 criterion in Corollary~\ref{cor:certificate-crossover}.
-Figure~\ref{fig:gaussian-estimator-choice}(a) plots the resulting expected-gain
+The center plot gives the resulting expected-gain
 difference relative to IS. TIS-3 has the lowest MSE throughout the path, yet
 IS retains more useful gradient alignment and therefore has the larger gain
 at high ESS. As ESS falls, the variance reduction from truncation becomes
 decisive, and TIS-3 overtakes IS at $\rho=0.105$. PPO removes still more
-alignment, so it crosses IS only at $\rho=0.0392$. Panel (b) makes both
+alignment, so it crosses IS only at $\rho=0.0392$. The right plot makes both
 transitions visible as intersections of the exact policy-improvement curves.
 The resulting upper envelope selects IS in the high-support regime and TIS-3
 in the low-support regime, exactly as predicted by the gain criterion.
@@ -843,7 +842,7 @@ We studied a finite-sample perspective on policy optimization that provides a th
 \subsection{Gaussian bandit experiment}
 \label{app:gaussian}
 
-This section provides the experimental setup and exact calculations underlying the Gaussian bandit experiments in Section~\ref{sec:gaussian-example}. All estimator moments, mean-squared errors, and expected one-step gains are computed analytically using truncated Gaussian moments. Monte Carlo simulation is used only to evaluate the batch-level probabilities reported in Figure~\ref{fig:gaussian-is-reliability}(b).
+This section provides the experimental setup and exact calculations underlying the Gaussian bandit experiments in Section~\ref{sec:gaussian-example}. All estimator moments, mean-squared errors, and expected one-step gains are computed analytically using truncated Gaussian moments. Monte Carlo simulation is used only to evaluate the batch-level probabilities in Figure~\ref{fig:gaussian-policy-comparison}.
 
 \subsubsection{Experimental setup}
 
@@ -935,7 +934,7 @@ u\in\{\mathrm{IS},\mathrm{T},\mathrm{P}\}.
 
 \subsubsection{Exact calculation of evaluation quantities}
 
-All quantities reported in the Gaussian experiments, except for the batch-level probabilities in Figure~\ref{fig:gaussian-is-reliability}(b), are computed exactly. For each estimator, define its first two per-sample moments by
+All quantities reported in the Gaussian experiments, except for the batch-level probabilities, are computed exactly. For each estimator, define its first two per-sample moments by
 \[
 \mu_u(\Delta):=\E_{Q_\Delta}[\xi_u(z)],
 \qquad
@@ -1019,7 +1018,7 @@ After shifting the integration variable for nonzero Gaussian means, all moments 
 
 \subsubsection{ESS and IS reliability}
 
-Figure~\ref{fig:gaussian-is-reliability} evaluates the ESS-dependent reliability result for the IS estimator. We set
+Figures~\ref{fig:gaussian-is-mse} and~\ref{fig:gaussian-policy-comparison} evaluate the ESS-dependent reliability result for the IS estimator. We set
 \[
 N=32,
 \qquad
@@ -1058,10 +1057,10 @@ Since IS is unbiased, its exact MSE and the finite-moment upper bound in Equatio
 &\le
 \frac{M_2(\Delta)}{N\rho(\Delta)}.
 \end{align*}
-Figure~\ref{fig:gaussian-is-reliability}(a) plots these two quantities against $\rho=e^{-\Delta^2}$. No Monte Carlo approximation is used in this panel.
+Figure~\ref{fig:gaussian-is-mse} plots the exact MSE against $\rho=e^{-\Delta^2}$. No Monte Carlo approximation is used in this figure.
 
 \paragraph{Batch-level improvement experiment.}
-Figure~\ref{fig:gaussian-is-reliability}(b) evaluates the corresponding batch-level policy-improvement statement. We consider 81 ESS values logarithmically spaced between $0.005$ and $0.9$. For each $\rho$, we set $\Delta=\sqrt{-\log\rho}$ and compute the theoretical error radius
+The left plot in Figure~\ref{fig:gaussian-policy-comparison} evaluates the corresponding batch-level policy-improvement statement. We consider 81 ESS values logarithmically spaced between $0.005$ and $0.9$. For each $\rho$, we set $\Delta=\sqrt{-\log\rho}$ and compute the theoretical error radius
 \[
 \varepsilon(\rho)
 =
@@ -1091,7 +1090,7 @@ d\gamma\widehat g_{\mathrm{IS}}
 -
 \frac{\gamma^2}{2}\widehat g_{\mathrm{IS}}^2.
 \]
-Figure~\ref{fig:gaussian-is-reliability}(b) reports the fraction of batches satisfying the positive-certificate condition and the fraction satisfying $\Delta J>0$. These correspond to the ``positive certificate'' and ``actual improvement'' curves, respectively.
+The figure reports the fraction of batches satisfying the positive-certificate condition and the fraction satisfying $\Delta J>0$. These correspond to the ``positive certificate'' and ``actual improvement'' curves, respectively.
 
 As an additional check of the high-probability result, we record the event
 \[
@@ -1101,7 +1100,7 @@ Across the displayed ESS grid, the minimum empirical coverage is $0.98277$, exce
 
 \subsubsection{Estimator crossover}
 
-Figure~\ref{fig:gaussian-estimator-choice} compares IS, TIS-3, and PPO under the common fixed step size $\eta=0.4$. For the quadratic objective, the smoothness inequality is exact: for any realized scalar update $h$,
+The center and right plots in Figure~\ref{fig:gaussian-policy-comparison} compare IS, TIS-3, and PPO under the common fixed step size $\eta=0.4$. For the quadratic objective, the smoothness inequality is exact: for any realized scalar update $h$,
 \[
 J(\theta+\eta h)-J(\theta)
 =
@@ -1122,7 +1121,7 @@ Taking expectation with $h=\widehat g_u$ gives
 Hence, the fixed-step certificate in Theorem~\ref{thm:fixed-step-certificate} coincides with the exact expected one-step improvement in this experiment.
 
 \paragraph{Crossover criterion.}
-Figure~\ref{fig:gaussian-estimator-choice}(a) plots
+The center plot shows
 \[
 \mathcal G_{\mathrm{T}}(\eta)-\mathcal G_{\mathrm{IS}}(\eta)
 \qquad\text{and}\qquad
@@ -1146,7 +1145,7 @@ Since $L=1$,
 \left\{\mathcal G_u(\eta)-\mathcal G_{\mathrm{IS}}(\eta)\right\}.
 \label{eq:gaussian-crossover-identity}
 \end{equation}
-Therefore, the zero crossings in Figure~\ref{fig:gaussian-estimator-choice}(a) are precisely the estimator crossovers predicted by the corollary.
+Therefore, the zero crossings in the center plot of Figure~\ref{fig:gaussian-policy-comparison} are precisely the estimator crossovers predicted by the corollary.
 
 Using the exact moments above, the resulting crossover ESS values are
 \[
@@ -1154,7 +1153,7 @@ Using the exact moments above, the resulting crossover ESS values are
 \qquad
 \rho_{\mathrm{IS,PPO}}=0.0392.
 \]
-Figure~\ref{fig:gaussian-estimator-choice}(b) plots the exact gains $\mathcal G_{\mathrm{IS}}$, $\mathcal G_{\mathrm{T}}$, and $\mathcal G_{\mathrm{P}}$ in the neighborhood of these two crossover points. The vertical lines and open markers indicate the corresponding roots.
+The right plot gives the exact gains $\mathcal G_{\mathrm{IS}}$, $\mathcal G_{\mathrm{T}}$, and $\mathcal G_{\mathrm{P}}$ in the neighborhood of these two crossover points. The vertical lines and open markers indicate the corresponding roots.
 
 TIS-3 has the smallest gradient MSE throughout the displayed ESS range, but this does not make it the preferred update everywhere. At high ESS, IS retains the larger expected gain. TIS-3 overtakes IS only once $\rho$ falls below $0.105$, while PPO crosses IS later at $\rho=0.0392$ and remains below TIS-3 throughout the displayed range. The experiment therefore illustrates the distinction established by the theory: estimator accuracy and policy improvement need not induce the same ordering.
 

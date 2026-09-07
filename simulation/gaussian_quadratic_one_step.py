@@ -579,20 +579,19 @@ def make_figure(
     use_paper_style()
     plt.rcParams.update(
         {
-            "font.size": 10.5,
-            "axes.titlesize": 11.5,
-            "axes.labelsize": 10.5,
-            "xtick.labelsize": 9.5,
-            "ytick.labelsize": 9.5,
-            "legend.fontsize": 10.0,
-            "legend.handlelength": 2.35,
+            "font.size": 9.0,
+            "axes.labelsize": 9.0,
+            "xtick.labelsize": 8.0,
+            "ytick.labelsize": 8.0,
+            "legend.fontsize": 8.0,
+            "legend.handlelength": 2.0,
             "legend.labelspacing": 0.38,
             "legend.borderaxespad": 0.55,
             "axes.linewidth": 0.85,
             "grid.linewidth": 0.65,
             "grid.alpha": 0.34,
-            "lines.linewidth": 2.2,
-            "lines.markersize": 4.6,
+            "lines.linewidth": 1.9,
+            "lines.markersize": 3.8,
             "xtick.major.size": 3.4,
             "ytick.major.size": 3.4,
         }
@@ -600,9 +599,6 @@ def make_figure(
     ordered = sorted(rows, key=lambda item: item["rho"])
     rho = np.asarray([float(row["rho"]) for row in ordered])
     is_mse = np.asarray([float(row["is_mse"]) for row in ordered])
-    is_mse_bound = np.asarray(
-        [float(row["is_finite_moment_mse_bound"]) for row in ordered]
-    )
     positive_fraction = np.asarray(
         [float(row["mc_positive_certificate_fraction"]) for row in ordered]
     )
@@ -630,9 +626,7 @@ def make_figure(
     tis_root = estimator_moments(summary["tis_certificate_crossover_delta"])
     ppo_root = estimator_moments(summary["certificate_crossover_delta"])
 
-    reliability_figure, (risk_axis, improvement_axis) = plt.subplots(
-        1, 2, figsize=(FULL, 2.45)
-    )
+    risk_figure, risk_axis = plt.subplots(figsize=(3.25, 2.35))
     risk_axis.plot(
         rho,
         is_mse,
@@ -643,29 +637,26 @@ def make_figure(
         markeredgewidth=1.2,
         label="Exact IS MSE",
     )
-    risk_axis.plot(
-        rho,
-        is_mse_bound,
-        color=NEUTRAL_COLOR,
-        linestyle=(0, (5.0, 2.2)),
-        linewidth=2.0,
-        label="Finite-moment upper bound",
-    )
-    risk_axis.fill_between(
-        rho,
-        is_mse,
-        is_mse_bound,
-        color=IS_COLOR,
-        alpha=0.13,
-        linewidth=0.0,
-    )
     risk_axis.set_xscale("log")
     risk_axis.set_yscale("log")
-    risk_axis.set_xlim(MINIMUM_RHO, MAXIMUM_RHO)
+    risk_axis.set_xlim(MINIMUM_RHO, 1.0)
+    risk_axis.set_xticks([1e-2, 1e-1, 1.0])
     risk_axis.set_xlabel(r"ESS $\rho$")
     risk_axis.set_ylabel("IS gradient MSE")
-    risk_axis.set_title("(a)", loc="left", fontweight="bold", pad=7)
-    risk_axis.legend(loc="lower left", frameon=False)
+    risk_axis.grid(True, which="major", color="#C9D1D9", alpha=0.48)
+    risk_axis.grid(False, which="minor")
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    risk_base = FIGURES_DIR / "gaussian_is_mse"
+    risk_figure.savefig(risk_base.with_suffix(".pdf"))
+    risk_figure.savefig(risk_base.with_suffix(".png"), dpi=300)
+    plt.close(risk_figure)
+
+    combined_figure, (
+        improvement_axis,
+        crossover_axis,
+        gain_axis,
+    ) = plt.subplots(1, 3, figsize=(FULL, 2.35))
 
     improvement_axis.plot(
         rho,
@@ -706,22 +697,7 @@ def make_figure(
     )
     improvement_axis.set_xlabel(r"ESS $\rho$")
     improvement_axis.set_ylabel("Fraction of batches")
-    improvement_axis.set_title("(b)", loc="left", fontweight="bold", pad=7)
     improvement_axis.legend(loc="upper left", frameon=False)
-
-    for axis in (risk_axis, improvement_axis):
-        axis.grid(True, which="major", color="#C9D1D9", alpha=0.48)
-        axis.grid(False, which="minor")
-
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    reliability_base = FIGURES_DIR / "gaussian_is_reliability"
-    reliability_figure.savefig(reliability_base.with_suffix(".pdf"))
-    reliability_figure.savefig(reliability_base.with_suffix(".png"), dpi=300)
-    plt.close(reliability_figure)
-
-    choice_figure, (crossover_axis, gain_axis) = plt.subplots(
-        1, 2, figsize=(FULL, 2.55)
-    )
     crossover_axis.axhline(
         0.0,
         color=NEUTRAL_COLOR,
@@ -769,7 +745,7 @@ def make_figure(
             ha="left" if x_offset > 0 else "right",
             va="top",
             rotation=90,
-            fontsize=8.8,
+            fontsize=7.2,
             fontweight="semibold",
             color=color,
             bbox={
@@ -784,9 +760,8 @@ def make_figure(
     crossover_axis.set_yticks([-1.0, -0.1, 0.0, 0.1, 1.0, 10.0])
     crossover_axis.set_xlim(MINIMUM_RHO, MAXIMUM_RHO)
     crossover_axis.set_xlabel(r"ESS $\rho$")
-    crossover_axis.set_ylabel("Expected gain relative to IS")
-    crossover_axis.set_title("(a)", loc="left", fontweight="bold", pad=7)
-    crossover_axis.legend(loc="lower left", frameon=False)
+    crossover_axis.set_ylabel("Gain relative to IS")
+    crossover_axis.legend(loc="lower left", frameon=False, fontsize=7.2)
 
     gain_axis.axhline(
         0.0,
@@ -859,21 +834,20 @@ def make_figure(
     gain_axis.set_xticks([0.04, 0.08, 0.12, 0.16])
     gain_axis.set_xlabel(r"ESS $\rho$")
     gain_axis.set_ylabel("Exact expected gain")
-    gain_axis.set_title("(b)", loc="left", fontweight="bold", pad=7)
     gain_axis.legend(
         loc="lower right",
         frameon=False,
         ncol=1,
     )
 
-    for axis in (crossover_axis, gain_axis):
+    for axis in (improvement_axis, crossover_axis, gain_axis):
         axis.grid(True, which="major", color="#C9D1D9", alpha=0.48)
         axis.grid(False, which="minor")
 
-    choice_base = FIGURES_DIR / "gaussian_estimator_choice"
-    choice_figure.savefig(choice_base.with_suffix(".pdf"))
-    choice_figure.savefig(choice_base.with_suffix(".png"), dpi=300)
-    plt.close(choice_figure)
+    combined_base = FIGURES_DIR / "gaussian_policy_comparison"
+    combined_figure.savefig(combined_base.with_suffix(".pdf"))
+    combined_figure.savefig(combined_base.with_suffix(".png"), dpi=300)
+    plt.close(combined_figure)
 
 
 def main() -> None:
@@ -987,8 +961,8 @@ def main() -> None:
         print(f"{name}: {value:.12g}")
     print(f"wrote {csv_path.relative_to(ROOT)}")
     print(f"wrote {json_path.relative_to(ROOT)}")
-    print("wrote figures/gaussian_is_reliability.{pdf,png}")
-    print("wrote figures/gaussian_estimator_choice.{pdf,png}")
+    print("wrote figures/gaussian_is_mse.{pdf,png}")
+    print("wrote figures/gaussian_policy_comparison.{pdf,png}")
 
 
 if __name__ == "__main__":
