@@ -268,17 +268,12 @@ We first establish how mean squared error (MSE) in the estimated gradient limits
 \label{lem:gradient-error-progress}
 Let $\widehat g$ be an estimate of $g=\nabla J(\theta)$ satisfying
 $\|\widehat g-g\|_2\le\varepsilon$. Suppose that $J$ is $L$-smooth along the
-update segment for $L>0$, and define
-\begin{equation}
- \gamma
+update segment for $L>0$, and define $ \gamma
  :=
  \frac1L
  \left(
  1-\frac{\varepsilon}{\|\widehat g\|_2}
- \right)_+,
- \label{eq:reliable-step}
-\end{equation}
-with $\gamma=0$ when $\widehat g=0$. Then
+ \right)_+,$ with $\gamma=0$ when $\widehat g=0$. Then
 \begin{equation}
  J(\theta+\gamma\widehat g)-J(\theta)
  \ge
@@ -323,22 +318,17 @@ $\rho_k^{-1/2}$. Substituting this radius gives the corresponding ESS-dependent 
 \begin{theorem}[ESS-dependent improvement for the IS estimator]
 \label{thm:permissive-reliability}
 Under the conditions of Lemma~\ref{lem:rho-gradient-reliability}, suppose that
-$J$ is $L_k$-smooth along the update segment. For any $0<\delta\le1$, define
-\begin{equation}
- \varepsilon_k(\delta)
+$J$ is $L_k$-smooth along the update segment. For any $0<\delta\le1$, define $\varepsilon_k(\delta)
  :=
  \sqrt{\frac{M_{2,k}}{\delta N\rho_k}},
- \qquad
+ \quad
  \gamma_k
  :=
  \frac1{L_k}
  \left(
  1-\frac{\varepsilon_k(\delta)}
         {\|\widehat g_k\|_2}
- \right)_+ ,
- \label{eq:is-safe-step}
-\end{equation}
-with $\gamma_k=0$ when $\widehat g_k=0$. Then, with probability at least
+ \right)_+ ,$ with $\gamma_k=0$ when $\widehat g_k=0$. Then, with probability at least
 $1-\delta$,
 \begin{equation}
  J(\theta_k+\gamma_k\widehat g_k)-J(\theta_k)
@@ -462,14 +452,11 @@ $0<\eta_k\le1/L_k$. Then $u$ has a stronger certificate than IS if and only if
 \end{equation}
 \end{proposition}
 
-Proposition~\ref{prop:ess-estimator-crossover} isolates the role of ESS in
-the crossover. All dependence of the IS certificate on importance-weight
-concentration appears through $1/\rho_k$ on the left-hand side, whereas the
-right-hand side collects the corresponding MSE and second-moment terms of the
-alternative estimator. Conditional on these quantities, decreasing ESS makes
-the inequality easier to satisfy and therefore shifts the comparison toward
-estimator control. The precise crossover remains estimator dependent, which
-allows truncation and clipping to become preferable at different ESS levels.
+Proposition~\ref{prop:ess-estimator-crossover} isolates the role of ESS in the crossover. Decreasing ESS makes the inequality easier to satisfy and therefore shifts the comparison toward estimator control, favoring the conservative updates such as clipping. 
+
+%The precise crossover remains estimator dependent, which allows truncation and clipping to become preferable at different ESS levels.
+
+%All dependence of the IS certificate on importance-weight concentration appears through $1/\rho_k$ on the left-hand side, whereas the right-hand side collects the corresponding MSE and second-moment terms of the alternative estimator. 
 
 \paragraph{TIS under rare truncation.}
 
@@ -515,7 +502,7 @@ We consider Gaussian policies with quadratic rewards, which admit closed-form po
 \begin{figure}[htbp]
   \centering
   % Original: \includegraphics[width=0.9\linewidth]{figures/gaussian_policy_comparison.pdf}
-  \includegraphics[width=\linewidth]{figures/gaussian_policy_comparison_compact.pdf}
+  \includegraphics[width=0.9\linewidth]{figures/gaussian_policy_comparison_compact.pdf}
   \caption{Gaussian-bandit reliability and estimator comparison. From left
   to right: positive certificates and actual positive improvement under the
   adaptive IS step; exact expected gain of TIS-3 and PPO relative to IS; and
@@ -552,7 +539,7 @@ in the low-support regime, exactly as predicted by the gain criterion.
 \begin{figure}[htbp]
   \centering
   % Original: \includegraphics[width=0.8\linewidth]{figures_mains/motivation/ess_reliability_collapse_ess_unclipped_combine.pdf}
-  \includegraphics[width=\linewidth]{figures_mains/motivation/ess_reliability_collapse_compact.pdf}
+  \includegraphics[width=0.8\linewidth]{figures_mains/motivation/ess_reliability_collapse_compact.pdf}
   \caption{
   Left: AIME-2024 mean@16 along an unclipped trajectory and TIS with caps
   3 and 5. Annotations report ESS at the onset of the
@@ -563,24 +550,15 @@ in the low-support regime, exactly as predicted by the gain criterion.
   \label{fig:ess-local-improvement}
 \end{figure}
 We now examine whether the same finite-sample mechanism is
-visible during large-model optimization. We consider three Qwen3-30B-A3B
-trajectories, consisting of an unclipped update and TIS with caps 3 and 5, and
-evaluate all trajectories on AIME-2024 using mean@16.
+visible during large-model optimization. We consider three Qwen3-30B-A3B trajectories, consisting of an unclipped update and TIS with caps 3 and 5, and evaluate all trajectories on AIME-2024 using mean@16.
 
-The left panel of Figure~\ref{fig:ess-local-improvement} places ESS within the
-training dynamics. All three importance-weighted updates improve substantially during the early stage of training, but their performance eventually begins to degrade. At the onset of the sustained decline, all three methods exhibit low ESS. The right panel tests the theoretical prediction more directly. At each evaluation checkpoint, we pair the current ESS with the change in AIME-2024
+The left panel of Figure~\ref{fig:ess-local-improvement} places ESS within the training dynamics. The right panel tests the theoretical prediction more directly. At each evaluation checkpoint, we pair the current ESS with the change in AIME-2024
 mean@16 over the following ten updates. The resulting pattern shows a clear change in update reliability as ESS decreases. Low ESS identifies a regime in which continued
-importance-weighted updates are substantially less likely to produce reliable improvement. %Thus, the delayed failure observed in the introduction occurs after a substantial deterioration in the importance-weight distribution, even though the precise ESS value at which degradation begins differs across trajectories. 
+importance-weighted updates are substantially less likely to produce reliable improvement. This behavior is the effect characterized in Section~\ref{sec:theory}, where decreasing ESS enlarges the gradient-error radius through the factor $\rho_k^{-1/2}$ and consequently weakens the corresponding policy-improvement certificate. %Thus, the delayed failure observed in the introduction occurs after a substantial deterioration in the importance-weight distribution, even though the precise ESS value at which degradation begins differs across trajectories. 
 
+%All three importance-weighted updates improve substantially during the early stage of training, but their performance eventually begins to degrade. At the onset of the sustained decline, all three methods exhibit low ESS. 
 
-This behavior is the effect characterized in
-Section~\ref{sec:theory}. Decreasing ESS enlarges the
-gradient-error radius through the factor $\rho_k^{-1/2}$ and consequently weakens the corresponding policy-improvement certificate. The large-model
-trajectories exhibit the same optimization consequence: as ESS deteriorates,
-subsequent improvement becomes less reliable. This observation motivates the
-optimization rule studied next: retain the importance-weighted update while
-its reliability remains high, and introduce clipping when ESS indicates that
-additional estimator control has become valuable.
+%The large-model trajectories exhibit the same optimization consequence: as ESS deteriorates, subsequent improvement becomes less reliable. This observation motivates the optimization rule studied next: retain the importance-weighted update while its reliability remains high, and introduce clipping when ESS indicates that additional estimator control has become valuable.
 
 \section{ESS-conditioned policy optimization}
 \label{sec:ess-conditioned-optimization}
@@ -598,9 +576,19 @@ additional estimator control has become valuable.
   \label{fig:llm-noclip-gate}
 \end{figure}
 
+\begin{wrapfigure}[13]{R}{0.36\textwidth}
+  \vspace{-0.7\baselineskip}
+  \centering
+  \includegraphics[width=0.9\linewidth]{figures_mains/result/q17b/overall.pdf}
+  \caption{ Qwen3-1.7B results over extended training. Dashed black: GRPO, Red: ESS-cond (red). The blue line represents ESS for ESS-cond.}
+  \label{fig:llm-rlhf-transfer}
+  \vspace{-0.6\baselineskip}
+\end{wrapfigure}
 In this section, we now extend our theoretical analysis to an optimization rule. Based on this observation, the reliability signal can be used in optimization to determine the \emph{clipping timing}. While ESS remains above a fixed threshold, we retain importance-weighted updates and activate clipping for conservative updates.
 
 %ask whether this reliability signal can be used to optimization. Rather than applying clipping throughout training, we retain the importance-weightedupdate while ESS remains above a fixed threshold and activate clipping once ESS falls below it.
+
+
 
 \subsection{Update rule and protocol}
 
@@ -624,12 +612,12 @@ Let $\widehat g_{\mathrm{IW}}$ denote the importance-weighted update such as IS 
     \widehat g_{\mathrm{IW}},
       & \widehat\rho \ge \tau,\\
     \widehat g_{\mathrm{clip}},
-      & \widehat\rho < \tau.
+      & \widehat\rho < \tau,
   \end{cases}
   \label{eq:llm-gate}
 \end{equation}
 %ESS therefore determines when clipping is introduced, while the clipping rule determines how the update is modified thereafter. 
-We use $\tau=0.1$ in the primary experiments.
+where we use $\tau=0.1$ in the experiments.
 
 In the main experiments, we investigate the configurations that demonstrated failure modes, and see whether our intervention rule yields reliable updates. We consider the following on Qwen3-30B-A3B base models: (1) TIS-3 updates with GRPO clipping \citep{shao2024deepseekmath}, (2) TIS-3 updates with Clip-Higher \citep{yu2025dapo}, (3) TIS-3 updates with DPPO \citep{qi2026dppo}, (4) unclipped updates with GRPO clipping \citep{shao2024deepseekmath}. Baseline models include GRPO, GRPO with no clips, Clip-Higher, DPPO, and TIS-3 updates. Our main experiments train models for up to 200 training steps on the mathematical-reasoning data of \citet{yu2025dapo} and evaluate AIME-2024 using mean@16.
 
@@ -649,7 +637,7 @@ Together, these panels show the empirical strength of the ESS-conditioned optimi
 
 \paragraph{Results on Different Scales.}
 We first change model scale while retaining the
-mathematical-reasoning objective. Figure~\ref{fig:llm-8b-transfer} extends the recipe comparison to dense Qwen3-8B. ESS-conditioned optimization demonstrates better sample efficiency than its clipped counterpart under both standard GRPO and Clip-Higher.
+mathematical-reasoning objective. Figure~\ref{fig:llm-8b-transfer} extends the recipe comparison to dense Qwen3-8B. ESS-conditioned optimization demonstrates better sample efficiency than its clipped counterpart under both standard GRPO, Clip-Higher and DPPO.
 
 \begin{figure}[htbp]
   \centering
@@ -663,16 +651,14 @@ mathematical-reasoning objective. Figure~\ref{fig:llm-8b-transfer} extends the r
   \label{fig:llm-8b-transfer}
 \end{figure}
 
-We then reduce the model to Qwen3-1.7B while retaining the mathematical-reasoning objective. Figure~\ref{fig:llm-17b-transfer} reports evaluation performance for the two matched learning-rate recipes and overlays ESS for
-TIS-3 + Clip. ESS remains above the conditioning threshold of $0.1$, so the optimizer never activates clipping and thus behaves like TIS-3. Performance remains stable and improves even during the extended 500-step training run. This theoretical explanation is consistent with observations in other work, where TIS shows reasonable training trajectories.
+We then reduce the model to Qwen3-1.7B while retaining the mathematical-reasoning objective. Figure~\ref{fig:llm-17b-transfer} reports evaluation performance for the two matched learning-rate recipes and overlays ESS. ESS remains above the conditioning threshold of $0.1$, so the optimizer never activates clipping and thus behaves like TIS-3. Performance remains stable and improves even during the extended 500-step training run. This theoretical explanation is consistent with observations in other work, where TIS shows reasonable training trajectories.
 
-\begin{wrapfigure}[26]{R}{0.45\textwidth}
+\begin{wrapfigure}[12]{R}{0.4\textwidth}
   \vspace{-0.7\baselineskip}
   \centering
-  \includegraphics[width=0.9\linewidth]{figures_mains/result/q17b/overall.pdf}
-  \includegraphics[width=0.9\linewidth]
+  \includegraphics[width=0.8\linewidth]
   {figures_mains/result/rlhf_4b/overall.pdf}
-  \caption{Top: Qwen3-1.7B results over extended training. AIME-2024 result is shown for GRPO (dashed) and TIS-3 + Clip (solid). The blue line represents ESS for TIS-3 + Clip. Bottom: RLHF on Qwen3-4B-Instruct-2507. End labels report the step-200 observations.}
+  \caption{RLHF on Qwen3-4B-Instruct-2507. End labels report the step-200 observations.}
   \label{fig:llm-rlhf-transfer}
   \vspace{-0.6\baselineskip}
 \end{wrapfigure}
